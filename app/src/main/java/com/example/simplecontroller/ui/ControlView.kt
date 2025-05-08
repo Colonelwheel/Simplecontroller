@@ -1,0 +1,206 @@
+package com.example.simplecontroller.ui
+
+import android.content.Context
+import android.graphics.*
+import android.view.*
+import android.widget.*
+import androidx.appcompat.app.AlertDialog
+import androidx.core.view.setPadding
+import com.example.simplecontroller.model.*
+import com.example.simplecontroller.net.NetworkClient
+import kotlin.math.*
+
+class ControlView(
+    context: Context,
+    private val model: Control
+) : FrameLayout(context) {
+
+    /* ───────── companion ──────── */
+    companion object {
+        var editMode: Boolean = false
+            set(v) { field = v; _all.forEach { it.updateGear() } }
+        private val _all = mutableSetOf<ControlView>()
+    }
+
+    /* ───────── visuals ────────── */
+    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val label = TextView(context).apply {
+        textSize = 12f; setTextColor(Color.WHITE)
+        setShadowLayer(4f,0f,0f,Color.BLACK); gravity = Gravity.CENTER
+    }
+    private val gear = ImageButton(context).apply {
+        setImageResource(android.R.drawable.ic_menu_manage)
+        background = null; alpha = .8f; setPadding(8)
+        setOnClickListener { showProps() }
+        layoutParams = LayoutParams(
+            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
+            Gravity.TOP or Gravity.END)
+    }
+
+    /* ───────── init ───────────── */
+    init {
+        layoutParams = MarginLayoutParams(model.w.toInt(), model.h.toInt()).apply {
+            leftMargin = model.x.toInt(); topMargin = model.y.toInt() }
+        setWillNotDraw(false); isClickable = true
+        addView(label); addView(gear)
+        _all += this
+        updateGear(); updateLabel()
+    }
+    override fun onDetachedFromWindow() { _all -= this; super.onDetachedFromWindow() }
+
+    /* ───────── drawing ────────── */
+    override fun onDraw(c: Canvas) {
+        super.onDraw(c)
+        when (model.type) {
+            ControlType.BUTTON -> {
+                paint.color = 0xFF2196F3.toInt()
+                c.drawCircle(width/2f, height/2f, min(width,height)/2f, paint)
+            }
+            ControlType.STICK -> {
+                paint.color = 0x552196F3; c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
+                paint.color = 0xFF2196F3.toInt()
+                c.drawCircle(width/2f, height/2f, min(width,height)/6f, paint)
+            }
+            ControlType.TOUCHPAD -> {
+                paint.color = 0x332196F3; c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
+            }
+        }
+    }
+
+    /* ───────── edit-drag / play-touch ───────── */
+    private var dX=0f; private var dY=0f
+    private var holdStart=0L; private var isHeld=false
+
+    override fun onTouchEvent(e: MotionEvent): Boolean =
+        if (editMode) editDrag(e) else { playTouch(e); true }
+
+    private fun editDrag(e: MotionEvent)=when(e.actionMasked){
+        MotionEvent.ACTION_DOWN->{ dX=e.rawX-lp().leftMargin; dY=e.rawY-lp().topMargin; true }
+        MotionEvent.ACTION_MOVE->{ val lp=lp()
+            lp.leftMargin=(e.rawX-dX).toInt(); lp.topMargin=(e.rawY-dY).toInt()
+            layoutParams=lp; model.x=lp.leftMargin.toFloat(); model.y=lp.topMargin.toFloat(); true}
+        else->false}
+
+    private fun playTouch(e: MotionEvent){
+        when(model.type){
+            ControlType.BUTTON -> when(e.action){
+                MotionEvent.ACTION_DOWN -> holdStart = System.currentTimeMillis()
+                MotionEvent.ACTION_UP   -> {
+                    val elapsed = System.currentTimeMillis() - holdStart
+                    if(model.holdToggle && elapsed>=model.holdDurationMs){
+                        isHeld = !isHeld; setPressed(isHeld)
+                    }
+                    model.payload.split(',',' ')
+                        .filter{it.isNotBlank()}.forEach{ NetworkClient.send(it.trim()) }
+                }
+            }
+            ControlType.STICK, ControlType.TOUCHPAD -> if(
+                e.actionMasked==MotionEvent.ACTION_MOVE||e.actionMasked==MotionEvent.ACTION_UP){
+                val cx=width/2f; val cy=height/2f
+                val nx=((e.x-cx)/(width/2f)).coerceIn(-1f,1f)*model.sensitivity
+                val ny=((e.y-cy)/(height/2f)).coerceIn(-1f,1f)*model.sensitivity
+                val (sx,sy)=if(model.autoCenter && e.actionMasked==MotionEvent.ACTION_UP) 0f to 0f else nx to ny
+                NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+            }
+        }
+    }
+
+    /* ───────── property helpers ─────── */
+    private fun updateGear(){ gear.visibility=if(editMode) View.VISIBLE else View.GONE }
+    private fun updateLabel(){ label.text=model.name
+        label.visibility=if(model.name.isNotEmpty()) View.VISIBLE else View.GONE }
+    private fun lp()=layoutParams as MarginLayoutParams
+
+    /* ───────── property sheet ───────── */
+    fun showProps(){
+        val dlg = LinearLayout(context).apply{
+            orientation=LinearLayout.VERTICAL; setPadding(32,24,32,8) }
+        fun gap(h:Int=8)=Space(context).apply{ minimumHeight=h }
+
+        val etName=EditText(context).apply{ hint="Label"; setText(model.name) }
+        dlg.addView(etName); dlg.addView(gap())
+
+        /* width & height sliders */
+        val wText=TextView(context)
+        val wSeek=SeekBar(context).apply{
+            max=600; progress=model.w.roundToInt().coerceIn(40,600)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ wText.text="Width: $p px"}
+                override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
+        }
+        val hText=TextView(context)
+        val hSeek=SeekBar(context).apply{
+            max=600; progress=model.h.roundToInt().coerceIn(40,600)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ hText.text="Height: $p px"}
+                override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
+        }
+        wText.text="Width: ${wSeek.progress} px"; hText.text="Height: ${hSeek.progress} px"
+        dlg.addView(wText); dlg.addView(wSeek); dlg.addView(hText); dlg.addView(hSeek); dlg.addView(gap())
+
+        /* sensitivity */
+        var sensSeek:SeekBar?=null
+        if(model.type!=ControlType.BUTTON){
+            val sText=TextView(context)
+            sensSeek=SeekBar(context).apply{
+                max=500; progress=(model.sensitivity*100).roundToInt()
+                setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
+                    override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ sText.text="Sensitivity: ${p/100f}" }
+                    override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
+            }
+            sText.text="Sensitivity: ${sensSeek.progress/100f}"
+            dlg.addView(sText); dlg.addView(sensSeek); dlg.addView(gap())
+        }
+
+        /* hold toggle */
+        val chkHold=CheckBox(context).apply{
+            text="Hold toggles"; isChecked=model.holdToggle
+            visibility=if(model.type==ControlType.BUTTON) View.VISIBLE else View.GONE }
+        val etMs=EditText(context).apply{
+            hint="ms"; inputType=android.text.InputType.TYPE_CLASS_NUMBER
+            setText(model.holdDurationMs.toString()); visibility=chkHold.visibility }
+        dlg.addView(chkHold); dlg.addView(etMs); dlg.addView(gap())
+
+        /* auto-center */
+        val chkAuto=CheckBox(context).apply{
+            text="Auto-center"; isChecked=model.autoCenter
+            visibility=if(model.type!=ControlType.BUTTON) View.VISIBLE else View.GONE }
+        dlg.addView(chkAuto); dlg.addView(gap())
+
+        /* payload ----------------------------------------------------------- */
+        val etPayload = AutoCompleteTextView(context).apply {
+            hint = "payload (comma-sep)"
+            setText(model.payload)
+            inputType = android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
+            /* simple suggestion list – extend/edit as you wish */
+            val suggestions = arrayOf(
+                "A_PRESSED","B_PRESSED","X_PRESSED","Y_PRESSED",
+                "START","SELECT","UP","DOWN","LEFT","RIGHT"
+            )
+            setAdapter(
+                ArrayAdapter(
+                    context,
+                    android.R.layout.simple_dropdown_item_1line,
+                    suggestions
+                )
+            )
+        }
+        dlg.addView(etPayload)
+
+
+        AlertDialog.Builder(context).setTitle("Properties").setView(dlg)
+            .setPositiveButton("OK"){_,_->
+                model.name=etName.text.toString()
+                model.w=wSeek.progress.toFloat().coerceAtLeast(40f)
+                model.h=hSeek.progress.toFloat().coerceAtLeast(40f)
+                model.payload=etPayload.text.toString().trim()
+                model.holdToggle=chkHold.isChecked
+                model.holdDurationMs=etMs.text.toString().toLongOrNull()?:400L
+                model.autoCenter=chkAuto.isChecked
+                sensSeek?.let{ model.sensitivity=it.progress/100f }
+
+                val lp=lp(); lp.width=model.w.toInt(); lp.height=model.h.toInt()
+                layoutParams=lp; updateLabel(); invalidate()
+            }.setNegativeButton("Cancel",null).show()
+    }
+}

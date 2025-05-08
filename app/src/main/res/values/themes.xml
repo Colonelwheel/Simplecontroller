@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- App‑wide theme referenced by the manifest -->
+    <style name="Theme.SimpleController" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize colors if you want -->
+        <!-- <item name="colorPrimary">@color/...</item> -->
+    </style>
+
+</resources>
