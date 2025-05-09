@@ -43,8 +43,14 @@ class MainActivity : AppCompatActivity() {
   1. **Grid / snap-to-grid option**
      – Preference in Edit-mode toolbar; e.g., 8-dp or 16-dp grid.
 
-  2. **Opacity slider per control**
-     – So translucent pads don’t hide the game.
+  2a. Additional features
+      - A button/zone that when held, continuously sends a button AND let's me move the mouse/right stick simultaneously
+
+  2b. Additional features
+       - I want to be able to add a toggle to each button that when toggled on, I can slide my finger to the button to activate it without having to take my finger off the screen/button/touchpad I'm already touching prior
+
+  2c. Additional features
+       - a button to re-center the sticks manually
 
   3. **Import / export layout to file**
      – Share JSON via Android Sharesheet.
