@@ -14,6 +14,65 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 class MainActivity : AppCompatActivity() {
 
+
+    /*  ────────────────────────────────────────────────────────────────
+    SimpleController – Road-map & status checklist
+    (Drop this comment anywhere in MainActivity for quick reference)
+    ────────────────────────────────────────────────────────────────
+
+✔ DONE
+  • Edit-mode toggle, gear icons on each control.
+  • Drag-to-move controls; snap-to-center switch for sticks/pads.
+  • FAB ➕ to add Button / Stick / TouchPad.
+  • Per-control Property Sheet:
+      – Label, width & height sliders
+      – Sensitivity (for sticks / pads)
+      – Hold-toggle with ms threshold (buttons)
+      – Auto-center (sticks / pads)
+      – Payload text with auto-complete suggestions
+  • Hold-toggle visual feedback (button stays lit while held).
+  • Multiple payloads per control (comma / space separated).
+  • Dynamic analog reporting for sticks / touchpads with sensitivity & auto-center.
+  • Layout save / load (persistent JSON); default layout bundled.
+  • Width & height independent (was single “size” slider before).
+  • Quick-duplicate (Ctrl/Cmd-D) & Delete (Delete key) in Edit-mode
+    – duplicateControlFrom(view) and deleteControl(view) helpers.
+  • Payload AutoCompleteTextView with starter suggestion list.
+
+▢ TODO / NEXT UP
+  1. **Grid / snap-to-grid option**
+     – Preference in Edit-mode toolbar; e.g., 8-dp or 16-dp grid.
+
+  2. **Opacity slider per control**
+     – So translucent pads don’t hide the game.
+
+  3. **Import / export layout to file**
+     – Share JSON via Android Sharesheet.
+
+  4. **Profiles per game**
+     – Quick dropdown next to “Load”; remembers last-used profile.
+
+  5. **Haptic feedback**
+     – Optional vibration on button press.
+
+  6. **Visual dead-zone for sticks**
+     – Grey inner circle that ignores tiny movements.
+
+  7. **Undo / Redo while editing**
+     – Simple in-memory stack; Ctrl-Z / Ctrl-Y shortcuts.
+
+  8. **Online documentation link**
+     – “Help” button in overflow menu opens GitHub README.
+
+  9. **Theming / color picker**
+     – Allow per-control color or global light/dark themes.
+
+ 10. **Accessibility pass**
+     – Content descriptions, larger default touch targets, TalkBack labels.
+
+  (Feel free to reorder or prune; this is just the running list!)
+    ─────────────────────────────────────────────────────────── */
+
     /* ---------- persisted “current layout” name ---------- */
     private val prefs     by lazy { getSharedPreferences("layout", MODE_PRIVATE) }
     private var layoutName: String
@@ -194,6 +253,18 @@ class MainActivity : AppCompatActivity() {
 
     /* tiny convenience ------------------------------------------------ */
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    /* called from ControlView ➕ */
+    fun createControlFrom(src: Control) {
+        controls += src
+        canvas.addView(ControlView(this, src).apply { tag = "control" })
+    }
+
+    /* called from ControlView 🗑️ */
+    fun removeControl(c: Control) {
+        controls.remove(c)
+    }
+
 
     /* ---------- initial hard-coded layout (unchanged) ---------------- */
     private fun defaultLayout() = listOf(

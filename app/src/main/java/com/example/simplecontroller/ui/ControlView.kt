@@ -18,33 +18,61 @@ class ControlView(
     /* ───────── companion ──────── */
     companion object {
         var editMode: Boolean = false
-            set(v) { field = v; _all.forEach { it.updateGear() } }
+            set(v) { field = v; _all.forEach { it.updateOverlay() } }
         private val _all = mutableSetOf<ControlView>()
     }
 
     /* ───────── visuals ────────── */
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
     private val label = TextView(context).apply {
-        textSize = 12f; setTextColor(Color.WHITE)
-        setShadowLayer(4f,0f,0f,Color.BLACK); gravity = Gravity.CENTER
+        textSize = 12f
+        setTextColor(Color.WHITE)
+        setShadowLayer(4f, 0f, 0f, Color.BLACK)
+        gravity = Gravity.CENTER
     }
-    private val gear = ImageButton(context).apply {
-        setImageResource(android.R.drawable.ic_menu_manage)
-        background = null; alpha = .8f; setPadding(8)
-        setOnClickListener { showProps() }
-        layoutParams = LayoutParams(
-            LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT,
-            Gravity.TOP or Gravity.END)
-    }
+
+    private fun makeIcon(resId:Int, g:Int, onClick:()->Unit) =
+        ImageButton(context).apply {
+            setImageResource(resId)
+            background = null
+            alpha = .8f
+            setPadding(8)
+            layoutParams = LayoutParams(
+                LayoutParams.WRAP_CONTENT,
+                LayoutParams.WRAP_CONTENT,
+                g
+            )
+            setOnClickListener { onClick() }
+        }
+
+    private val gear = makeIcon(
+        android.R.drawable.ic_menu_manage,
+        Gravity.TOP or Gravity.END
+    ) { showProps() }
+
+    private val dup = makeIcon(
+        android.R.drawable.ic_menu_add,
+        Gravity.TOP or Gravity.START
+    ) { if (editMode) duplicateSelf() }
+
+    private val del = makeIcon(
+        android.R.drawable.ic_menu_delete,
+        Gravity.TOP or Gravity.CENTER_HORIZONTAL
+    ) { if (editMode) confirmDelete() }
 
     /* ───────── init ───────────── */
     init {
         layoutParams = MarginLayoutParams(model.w.toInt(), model.h.toInt()).apply {
-            leftMargin = model.x.toInt(); topMargin = model.y.toInt() }
+            leftMargin = model.x.toInt()
+            topMargin  = model.y.toInt()
+        }
         setWillNotDraw(false); isClickable = true
-        addView(label); addView(gear)
+
+        addView(label); addView(gear); addView(dup); addView(del)
+
         _all += this
-        updateGear(); updateLabel()
+        updateOverlay(); updateLabel()
     }
     override fun onDetachedFromWindow() { _all -= this; super.onDetachedFromWindow() }
 
@@ -88,7 +116,7 @@ class ControlView(
                 MotionEvent.ACTION_UP   -> {
                     val elapsed = System.currentTimeMillis() - holdStart
                     if(model.holdToggle && elapsed>=model.holdDurationMs){
-                        isHeld = !isHeld; setPressed(isHeld)
+                        isHeld = !isHeld; isPressed = isHeld
                     }
                     model.payload.split(',',' ')
                         .filter{it.isNotBlank()}.forEach{ NetworkClient.send(it.trim()) }
@@ -105,13 +133,41 @@ class ControlView(
         }
     }
 
-    /* ───────── property helpers ─────── */
-    private fun updateGear(){ gear.visibility=if(editMode) View.VISIBLE else View.GONE }
-    private fun updateLabel(){ label.text=model.name
-        label.visibility=if(model.name.isNotEmpty()) View.VISIBLE else View.GONE }
+    /* ───────── quick-actions ───── */
+    private fun duplicateSelf() {
+        val copy = model.copy(
+            id = "${model.id}_copy_${System.currentTimeMillis()}",
+            x  = model.x + 40f,
+            y  = model.y + 40f
+        )
+        (context as? com.example.simplecontroller.MainActivity)
+            ?.createControlFrom(copy)       // ← tiny helper in MainActivity
+    }
+
+    private fun confirmDelete() {
+        AlertDialog.Builder(context)
+            .setMessage("Delete this control?")
+            .setPositiveButton("Delete") {_,_->
+                (parent as? FrameLayout)?.removeView(this)
+                (context as? com.example.simplecontroller.MainActivity)
+                    ?.removeControl(model)  // ← tiny helper in MainActivity
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /* ───────── overlay / label ─── */
+    private fun updateOverlay(){
+        val vis = if(editMode) View.VISIBLE else View.GONE
+        gear.visibility = vis; dup.visibility = vis; del.visibility = vis
+    }
+    private fun updateLabel(){
+        label.text=model.name
+        label.visibility=if(model.name.isNotEmpty()) View.VISIBLE else View.GONE
+    }
     private fun lp()=layoutParams as MarginLayoutParams
 
-    /* ───────── property sheet ───────── */
+    /* ───────── property sheet (unchanged) ───────── */
     fun showProps(){
         val dlg = LinearLayout(context).apply{
             orientation=LinearLayout.VERTICAL; setPadding(32,24,32,8) }
@@ -172,7 +228,6 @@ class ControlView(
             hint = "payload (comma-sep)"
             setText(model.payload)
             inputType = android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
-            /* simple suggestion list – extend/edit as you wish */
             val suggestions = arrayOf(
                 "A_PRESSED","B_PRESSED","X_PRESSED","Y_PRESSED",
                 "START","SELECT","UP","DOWN","LEFT","RIGHT"
@@ -187,7 +242,6 @@ class ControlView(
         }
         dlg.addView(etPayload)
 
-
         AlertDialog.Builder(context).setTitle("Properties").setView(dlg)
             .setPositiveButton("OK"){_,_->
                 model.name=etName.text.toString()
@@ -201,6 +255,8 @@ class ControlView(
 
                 val lp=lp(); lp.width=model.w.toInt(); lp.height=model.h.toInt()
                 layoutParams=lp; updateLabel(); invalidate()
-            }.setNegativeButton("Cancel",null).show()
+            }
+            .setNegativeButton("Cancel",null)
+            .show()
     }
 }
