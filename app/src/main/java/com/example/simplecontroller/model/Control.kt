@@ -3,7 +3,7 @@ package com.example.simplecontroller.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ControlType { BUTTON, STICK, TOUCHPAD }
+enum class ControlType { BUTTON, STICK, TOUCHPAD }   // ← keep the names you already use
 
 @Serializable
 data class Control(
@@ -23,7 +23,15 @@ data class Control(
     /* button-specific */
     var holdToggle: Boolean = false,       // “latch” behaviour
     var holdDurationMs: Long = 500,        // long-press threshold
-    var isHeld: Boolean     = false        // current latched state
+    var isHeld: Boolean     = false,       // current latched state
+
+    /* 2a – mouse-pad one-finger drag */
+    /**
+     * When **true** this *TOUCHPAD* control automatically sends
+     * a Left-Down on finger-down and Left-Up on finger-lift,
+     * enabling a one-finger click-drag.
+     */
+    var holdLeftWhileTouch: Boolean = false
 )
 
 /* helper when we auto-create new controls */
