@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
      – Preference in Edit-mode toolbar; e.g., 8-dp or 16-dp grid.
 
   2a. Additional features
-      - A button/zone that when held, continuously sends a button AND let's me move the mouse/right stick simultaneously
+      - A button/zone that when held, continuously sends a button AND let's me move the mouse/right stick simultaneously. So essentially just add a toggle to the current mouse button that would activate a one finger click drag
 
   2b. Additional features
        - I want to be able to add a toggle to each button that when toggled on, I can slide my finger to the button to activate it without having to take my finger off the screen/button/touchpad I'm already touching prior
