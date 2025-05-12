@@ -95,6 +95,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnSave:    View
     private lateinit var btnLoad:    View
     private lateinit var switchSnap: View
+    private lateinit var switchHold : View   // NEW
+    private lateinit var switchTurbo: View   // NEW
+    private lateinit var switchSwipe: View   // NEW
     private lateinit var fabAdd:     View       // NEW ( ➕ )
 
     /* ---------- main canvas ---------- */
@@ -124,6 +127,28 @@ class MainActivity : AppCompatActivity() {
             }
         }
         addViewToCanvas(switchSnap, Gravity.TOP or Gravity.START, 16, 16)
+
+        /* --- Hold switch ------------------------------------------------- */
+        switchHold = Switch(this).apply {
+            text = "Hold"; alpha = 0.7f; isChecked = false
+            setOnCheckedChangeListener { _, on -> ControlView.globalHold = on }
+        }
+        addViewToCanvas(switchHold, Gravity.TOP or Gravity.START, 16, 64)
+
+        /* --- Turbo switch ------------------------------------------------ */
+        switchTurbo = Switch(this).apply {
+            text = "Turbo"; alpha = 0.7f; isChecked = false
+            setOnCheckedChangeListener { _, on -> ControlView.globalTurbo = on }
+        }
+        addViewToCanvas(switchTurbo, Gravity.TOP or Gravity.START, 16, 112)
+
+        /* --- Swipe switch ------------------------------------------------ */
+        switchSwipe = Switch(this).apply {
+            text = "Swipe"; alpha = 0.7f; isChecked = false
+            setOnCheckedChangeListener { _, on -> ControlView.globalSwipe = on }
+        }
+        addViewToCanvas(switchSwipe, Gravity.TOP or Gravity.START, 16, 160)
+
 
         /* --- Save / Load ------------------------------------------------- */
         btnSave = addCornerButton("Save", Gravity.BOTTOM or Gravity.START) { saveDialog() }
@@ -177,10 +202,14 @@ class MainActivity : AppCompatActivity() {
     /* -------- show / hide widgets depending on Edit-mode ------------- */
     private fun updateEditUi(edit: Boolean) {
         val vis = if (edit) View.VISIBLE else View.GONE
-        btnSave.visibility    = vis
-        btnLoad.visibility    = vis
-        switchSnap.visibility = vis
-        fabAdd.visibility     = vis
+        btnSave.visibility = vis
+        btnLoad.visibility = vis
+        fabAdd.visibility  = vis
+        /* global switches stay visible in both modes */
+        switchSnap.visibility  = View.VISIBLE
+        switchHold.visibility  = View.VISIBLE
+        switchTurbo.visibility = View.VISIBLE
+        switchSwipe.visibility = View.VISIBLE
     }
 
     // =============== “Add Control” flow ===============================

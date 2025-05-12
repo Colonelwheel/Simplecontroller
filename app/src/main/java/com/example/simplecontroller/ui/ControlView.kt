@@ -2,6 +2,8 @@ package com.example.simplecontroller.ui
 
 import android.content.Context
 import android.graphics.*
+import android.os.Handler
+import android.os.Looper
 import android.view.*
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
@@ -17,21 +19,29 @@ class ControlView(
 
     /* ───────── companion ──────── */
     companion object {
-        var editMode: Boolean = false
+        /* Edit-mode toggle */
+        var editMode = false
             set(v) { field = v; _all.forEach { it.updateOverlay() } }
+
+        /* ★ Global feature toggles (wired to MainActivity switches) ★ */
+        var snapEnabled  = true    // “Snap” → auto-centre sticks / pads
+        var globalHold   = false   // latch every button
+        var globalTurbo  = false   // rapid-fire every button
+        var globalSwipe  = false   // MainActivity intercepts swipe
+
+        /* expose live set for hit-testing */
+        internal val allViews: Set<ControlView> get() = _all
         private val _all = mutableSetOf<ControlView>()
     }
 
     /* ───────── visuals ────────── */
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
     private val label = TextView(context).apply {
         textSize = 12f
         setTextColor(Color.WHITE)
         setShadowLayer(4f, 0f, 0f, Color.BLACK)
         gravity = Gravity.CENTER
     }
-
     private fun makeIcon(resId: Int, g: Int, onClick: () -> Unit) =
         ImageButton(context).apply {
             setImageResource(resId)
@@ -45,17 +55,14 @@ class ControlView(
             )
             setOnClickListener { onClick() }
         }
-
     private val gear = makeIcon(
         android.R.drawable.ic_menu_manage,
         Gravity.TOP or Gravity.END
     ) { showProps() }
-
     private val dup = makeIcon(
         android.R.drawable.ic_menu_add,
         Gravity.TOP or Gravity.START
     ) { if (editMode) duplicateSelf() }
-
     private val del = makeIcon(
         android.R.drawable.ic_menu_delete,
         Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -64,13 +71,10 @@ class ControlView(
     /* ───────── init ───────────── */
     init {
         layoutParams = MarginLayoutParams(model.w.toInt(), model.h.toInt()).apply {
-            leftMargin = model.x.toInt()
-            topMargin = model.y.toInt()
+            leftMargin = model.x.toInt(); topMargin = model.y.toInt()
         }
         setWillNotDraw(false); isClickable = true
-
         addView(label); addView(gear); addView(dup); addView(del)
-
         _all += this
         updateOverlay(); updateLabel()
     }
@@ -85,20 +89,22 @@ class ControlView(
                 c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
             }
             ControlType.STICK -> {
-                paint.color = 0x552196F3; c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+                paint.color = 0x552196F3; c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
                 paint.color = 0xFF2196F3.toInt()
-                c.drawCircle(width / 2f, height / 2f, min(width, height) / 6f, paint)
+                c.drawCircle(width/2f, height/2f, min(width,height)/6f, paint)
             }
             ControlType.TOUCHPAD -> {
-                paint.color = 0x332196F3; c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+                paint.color = 0x332196F3; c.drawRect(0f,0f,width.toFloat(),height.toFloat(),paint)
             }
         }
     }
 
     /* ───────── edit-drag / play-touch ───────── */
     private var dX = 0f; private var dY = 0f
-    private var holdStart = 0L; private var isHeld = false
-    private var leftHeld = false                     // ← NEW (for 1-finger drag)
+    private var isLatched = false          // for Hold / globalHold
+    private var leftHeld  = false          // for one-finger drag
+    private var repeater  : Runnable? = null
+    private val uiHandler = Handler(Looper.getMainLooper())
 
     override fun onTouchEvent(e: MotionEvent): Boolean =
         if (editMode) editDrag(e) else { playTouch(e); true }
@@ -117,54 +123,40 @@ class ControlView(
     /* ---------- play mode: interact ---------- */
     private fun playTouch(e: MotionEvent) {
         when (model.type) {
+
             /* ----- BUTTON ----- */
-            ControlType.BUTTON -> when (e.action) {
-                MotionEvent.ACTION_DOWN -> holdStart = System.currentTimeMillis()
-                MotionEvent.ACTION_UP -> {
-                    val elapsed = System.currentTimeMillis() - holdStart
-                    if (model.holdToggle && elapsed >= model.holdDurationMs) {
-                        isHeld = !isHeld; isPressed = isHeld
+            ControlType.BUTTON -> when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    if (globalTurbo) startRepeat() else firePayload()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    stopRepeat()
+                    if (globalHold || model.holdToggle) {
+                        isLatched = !isLatched; isPressed = isLatched
                     }
-                    model.payload.split(',', ' ')
-                        .filter { it.isNotBlank() }.forEach { NetworkClient.send(it.trim()) }
                 }
             }
 
-            /* ----- STICK (unchanged) ----- */
-            ControlType.STICK -> if (
-                e.actionMasked == MotionEvent.ACTION_MOVE ||
-                e.actionMasked == MotionEvent.ACTION_UP
-            ) {
-                val cx = width / 2f; val cy = height / 2f
-                val nx = ((e.x - cx) / (width / 2f)).coerceIn(-1f, 1f) * model.sensitivity
-                val ny = ((e.y - cy) / (height / 2f)).coerceIn(-1f, 1f) * model.sensitivity
-                val (sx, sy) = if (model.autoCenter && e.actionMasked == MotionEvent.ACTION_UP) 0f to 0f else nx to ny
-                NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
-            }
+            /* ----- STICK ----- */
+            ControlType.STICK -> handleStickOrPad(e)
 
-            /* ----- TOUCHPAD (new 1-finger drag logic) ----- */
+            /* ----- TOUCHPAD (with one-finger drag) ----- */
             ControlType.TOUCHPAD -> {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         if (model.holdLeftWhileTouch) {
-                            NetworkClient.send("MOUSE_LEFT_DOWN")   // ← adjust to your protocol
+                            NetworkClient.send("MOUSE_LEFT_DOWN")   // adjust to protocol
                             leftHeld = true
                         }
                     }
-
-                    MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
-                        val cx = width / 2f; val cy = height / 2f
-                        val nx = ((e.x - cx) / (width / 2f)).coerceIn(-1f, 1f) * model.sensitivity
-                        val ny = ((e.y - cy) / (height / 2f)).coerceIn(-1f, 1f) * model.sensitivity
-                        val (sx, sy) =
-                            if (model.autoCenter && e.actionMasked == MotionEvent.ACTION_UP) 0f to 0f else nx to ny
-                        NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
-
-                        if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
-                            if (leftHeld) {
-                                NetworkClient.send("MOUSE_LEFT_UP")   // ← adjust to your protocol
-                                leftHeld = false
-                            }
+                    MotionEvent.ACTION_MOVE,
+                    MotionEvent.ACTION_UP,
+                    MotionEvent.ACTION_CANCEL -> {
+                        handleStickOrPad(e)
+                        if ((e.actionMasked == MotionEvent.ACTION_UP ||
+                                    e.actionMasked == MotionEvent.ACTION_CANCEL) && leftHeld) {
+                            NetworkClient.send("MOUSE_LEFT_UP")
+                            leftHeld = false
                         }
                     }
                 }
@@ -172,24 +164,55 @@ class ControlView(
         }
     }
 
+    /* ---------- helpers ---------- */
+    private fun firePayload() =
+        model.payload.split(',', ' ')
+            .filter { it.isNotBlank() }
+            .forEach { NetworkClient.send(it.trim()) }
+
+    private fun startRepeat() {
+        firePayload()                       // fire immediately
+        repeater = object : Runnable {
+            override fun run() {
+                firePayload()
+                uiHandler.postDelayed(this, 16L)   // ≈60 Hz
+            }
+        }
+        uiHandler.postDelayed(repeater!!, 16L)
+    }
+    private fun stopRepeat() { repeater?.let { uiHandler.removeCallbacks(it) }; repeater = null }
+
+    private fun handleStickOrPad(e: MotionEvent) {
+        if (e.actionMasked !in listOf(
+                MotionEvent.ACTION_MOVE,
+                MotionEvent.ACTION_UP,
+                MotionEvent.ACTION_CANCEL)) return
+
+        val cx = width/2f; val cy = height/2f
+        val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f,1f) * model.sensitivity
+        val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f,1f) * model.sensitivity
+        val (sx, sy) =
+            if (snapEnabled && e.actionMasked != MotionEvent.ACTION_MOVE) 0f to 0f else nx to ny
+        NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+    }
+
     /* ───────── quick-actions ───── */
     private fun duplicateSelf() {
         val copy = model.copy(
             id = "${model.id}_copy_${System.currentTimeMillis()}",
-            x = model.x + 40f,
-            y = model.y + 40f
+            x  = model.x + 40f,
+            y  = model.y + 40f
         )
         (context as? com.example.simplecontroller.MainActivity)
-            ?.createControlFrom(copy)       // ← helper in MainActivity
+            ?.createControlFrom(copy)
     }
-
     private fun confirmDelete() {
         AlertDialog.Builder(context)
             .setMessage("Delete this control?")
             .setPositiveButton("Delete") { _, _ ->
                 (parent as? FrameLayout)?.removeView(this)
                 (context as? com.example.simplecontroller.MainActivity)
-                    ?.removeControl(model)  // ← helper in MainActivity
+                    ?.removeControl(model)
             }
             .setNegativeButton("Cancel", null)
             .show()
@@ -206,12 +229,12 @@ class ControlView(
     }
     private fun lp() = layoutParams as MarginLayoutParams
 
-    /* ───────── property sheet ───────── */
+    /* ───────── property sheet (unchanged except drag option) ───────── */
     fun showProps() {
         val dlg = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(32, 24, 32, 8)
+            orientation = LinearLayout.VERTICAL; setPadding(32,24,32,8)
         }
-        fun gap(h: Int = 8) = Space(context).apply { minimumHeight = h }
+        fun gap(h:Int=8) = Space(context).apply { minimumHeight = h }
 
         val etName = EditText(context).apply { hint = "Label"; setText(model.name) }
         dlg.addView(etName); dlg.addView(gap())
@@ -219,38 +242,32 @@ class ControlView(
         /* width & height sliders */
         val wText = TextView(context)
         val wSeek = SeekBar(context).apply {
-            max = 600; progress = model.w.roundToInt().coerceIn(40, 600)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { wText.text = "Width: $p px" }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
+            max = 600; progress = model.w.roundToInt().coerceIn(40,600)
+            setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ wText.text = "Width: $p px" }
+                override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
         }
         val hText = TextView(context)
         val hSeek = SeekBar(context).apply {
-            max = 600; progress = model.h.roundToInt().coerceIn(40, 600)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { hText.text = "Height: $p px" }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
+            max = 600; progress = model.h.roundToInt().coerceIn(40,600)
+            setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ hText.text = "Height: $p px" }
+                override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
         }
         wText.text = "Width: ${wSeek.progress} px"; hText.text = "Height: ${hSeek.progress} px"
         dlg.addView(wText); dlg.addView(wSeek); dlg.addView(hText); dlg.addView(hSeek); dlg.addView(gap())
 
         /* sensitivity */
-        var sensSeek: SeekBar? = null
+        var sensSeek:SeekBar? = null
         if (model.type != ControlType.BUTTON) {
             val sText = TextView(context)
             sensSeek = SeekBar(context).apply {
                 max = 500; progress = (model.sensitivity * 100).roundToInt()
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { sText.text = "Sensitivity: ${p / 100f}" }
-                    override fun onStartTrackingTouch(s: SeekBar?) {}
-                    override fun onStopTrackingTouch(s: SeekBar?) {}
-                })
+                setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){ sText.text = "Sensitivity: ${p/100f}" }
+                    override fun onStartTrackingTouch(s:SeekBar?){}; override fun onStopTrackingTouch(s:SeekBar?){} })
             }
-            sText.text = "Sensitivity: ${sensSeek.progress / 100f}"
+            sText.text = "Sensitivity: ${sensSeek.progress/100f}"
             dlg.addView(sText); dlg.addView(sensSeek); dlg.addView(gap())
         }
 
@@ -272,7 +289,7 @@ class ControlView(
         }
         dlg.addView(chkAuto); dlg.addView(gap())
 
-        /* 2a – one-finger drag checkbox (TOUCHPAD only) */
+        /* one-finger drag option (TOUCHPAD only) */
         val chkDrag = CheckBox(context).apply {
             text = "Hold left while finger is down"
             isChecked = model.holdLeftWhileTouch
@@ -286,8 +303,8 @@ class ControlView(
             setText(model.payload)
             inputType = android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
             val suggestions = arrayOf(
-                "A_PRESSED", "B_PRESSED", "X_PRESSED", "Y_PRESSED",
-                "START", "SELECT", "UP", "DOWN", "LEFT", "RIGHT"
+                "A_PRESSED","B_PRESSED","X_PRESSED","Y_PRESSED",
+                "START","SELECT","UP","DOWN","LEFT","RIGHT"
             )
             setAdapter(
                 ArrayAdapter(
@@ -308,8 +325,8 @@ class ControlView(
                 model.holdToggle = chkHold.isChecked
                 model.holdDurationMs = etMs.text.toString().toLongOrNull() ?: 400L
                 model.autoCenter = chkAuto.isChecked
-                model.holdLeftWhileTouch = chkDrag.isChecked  // ← save new option
-                sensSeek?.let { model.sensitivity = it.progress / 100f }
+                model.holdLeftWhileTouch = chkDrag.isChecked
+                sensSeek?.let { model.sensitivity = it.progress/100f }
 
                 val lp = lp(); lp.width = model.w.toInt(); lp.height = model.h.toInt()
                 layoutParams = lp; updateLabel(); invalidate()
