@@ -52,13 +52,53 @@ class ControlView(
                         val y = e.rawY - loc[1]
                         x >= 0 && x < it.width && y >= 0 && y < it.height
                     }
+
+                    // If we touched a view initially, let it handle the event
+                    if (lastTouchedView != null) {
+                        val loc = IntArray(2)
+                        lastTouchedView!!.getLocationOnScreen(loc)
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+
+                        val downEvent = MotionEvent.obtain(
+                            e.downTime, e.eventTime, MotionEvent.ACTION_DOWN,
+                            x, y, e.pressure, e.size, e.metaState, e.xPrecision,
+                            e.yPrecision, e.deviceId, e.edgeFlags
+                        )
+
+                        lastTouchedView!!.playTouch(downEvent)
+                        downEvent.recycle()
+                    }
+
                     return lastTouchedView != null
                 }
 
                 MotionEvent.ACTION_MOVE -> {
                     if (activeTouch == null) return false
 
-                    // Find all controls under current touch point
+                    // Special handling for the touchpad - forward all move events to it
+                    if (lastTouchedView?.model?.type == ControlType.TOUCHPAD) {
+                        val loc = IntArray(2)
+                        lastTouchedView!!.getLocationOnScreen(loc)
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+
+                        // Only forward the event if the point is within the touchpad
+                        if (x >= 0 && x < lastTouchedView!!.width &&
+                            y >= 0 && y < lastTouchedView!!.height) {
+                            val moveEvent = MotionEvent.obtain(
+                                e.downTime, e.eventTime, MotionEvent.ACTION_MOVE,
+                                x, y, e.pressure, e.size, e.metaState, e.xPrecision,
+                                e.yPrecision, e.deviceId, e.edgeFlags
+                            )
+
+                            lastTouchedView!!.playTouch(moveEvent)
+                            moveEvent.recycle()
+                            return true
+                        }
+                    }
+
+                    // Find all controls under current touch point for swiping
                     for (view in _all) {
                         if (view == lastTouchedView) continue // Skip the initially touched view
                         if (view.model.type == ControlType.BUTTON && !view.model.swipeActivate) continue // Skip buttons with swipe activation disabled
@@ -98,15 +138,41 @@ class ControlView(
                             return true
                         }
                     }
+
+                    // If we're still over the initial touchpad, keep forwarding events
+                    if (lastTouchedView?.model?.type == ControlType.TOUCHPAD) {
+                        val loc = IntArray(2)
+                        lastTouchedView!!.getLocationOnScreen(loc)
+
+                        // Even if outside the bounds, convert to relative coordinates for continuous tracking
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+
+                        val moveEvent = MotionEvent.obtain(
+                            e.downTime, e.eventTime, MotionEvent.ACTION_MOVE,
+                            x, y, e.pressure, e.size, e.metaState, e.xPrecision,
+                            e.yPrecision, e.deviceId, e.edgeFlags
+                        )
+
+                        lastTouchedView!!.playTouch(moveEvent)
+                        moveEvent.recycle()
+                        return true
+                    }
+
                     return lastTouchedView != null
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     // Make sure to send UP event to last touched view to clean up any state
                     lastTouchedView?.let { view ->
+                        val loc = IntArray(2)
+                        view.getLocationOnScreen(loc)
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+
                         val upEvent = MotionEvent.obtain(
                             e.downTime, e.eventTime, MotionEvent.ACTION_UP,
-                            0f, 0f, e.pressure, e.size, e.metaState, e.xPrecision,
+                            x, y, e.pressure, e.size, e.metaState, e.xPrecision,
                             e.yPrecision, e.deviceId, e.edgeFlags
                         )
                         view.playTouch(upEvent)
@@ -321,8 +387,13 @@ class ControlView(
         val cx = width/2f; val cy = height/2f
         val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f,1f) * model.sensitivity
         val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f,1f) * model.sensitivity
-        val (sx, sy) =
-            if (snapEnabled && e.actionMasked != MotionEvent.ACTION_MOVE) 0f to 0f else nx to ny
+
+        // Only snap if snapEnabled is true AND the control's autoCenter is true AND it's an UP/CANCEL event
+        val shouldSnap = snapEnabled && model.autoCenter &&
+                (e.actionMasked == MotionEvent.ACTION_UP ||
+                        e.actionMasked == MotionEvent.ACTION_CANCEL)
+
+        val (sx, sy) = if (shouldSnap) 0f to 0f else nx to ny
         NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
     }
 
