@@ -61,6 +61,7 @@ class ControlView(
                     // Find all controls under current touch point
                     for (view in _all) {
                         if (view == lastTouchedView) continue // Skip the initially touched view
+                        if (view.model.type == ControlType.BUTTON && !view.model.swipeActivate) continue // Skip buttons with swipe activation disabled
 
                         val loc = IntArray(2)
                         view.getLocationOnScreen(loc)
@@ -150,7 +151,8 @@ class ControlView(
         super.onDraw(c)
         when (model.type) {
             ControlType.BUTTON -> {
-                paint.color = 0xFF2196F3.toInt()
+                // Use a brighter color if the button is latched (held)
+                paint.color = if (isLatched) 0xFF4CAF50.toInt() else 0xFF2196F3.toInt()
                 c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
             }
             ControlType.STICK -> {
@@ -224,7 +226,9 @@ class ControlView(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
                     if (globalHold || model.holdToggle) {
-                        isLatched = !isLatched; isPressed = isLatched
+                        isLatched = !isLatched
+                        isPressed = isLatched
+                        invalidate() // Redraw to show the latched state with the new color
                     }
                 }
             }

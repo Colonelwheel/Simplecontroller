@@ -23,7 +23,6 @@ data class Control(
     /* button-specific */
     var holdToggle: Boolean = false,       // "latch" behaviour
     var holdDurationMs: Long = 500,        // long-press threshold
-    var isHeld: Boolean     = false,       // current latched state
 
     /* 2a – mouse-pad one-finger drag */
     /**
