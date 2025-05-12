@@ -69,6 +69,19 @@ class ControlView(
                         val y = e.rawY - loc[1]
 
                         if (x >= 0 && x < view.width && y >= 0 && y < view.height) {
+                            // If we're moving to a new view, make sure the last one gets an UP event
+                            lastTouchedView?.let { prevView ->
+                                if (prevView != view) {
+                                    val upEvent = MotionEvent.obtain(
+                                        e.downTime, e.eventTime, MotionEvent.ACTION_UP,
+                                        0f, 0f, e.pressure, e.size, e.metaState, e.xPrecision,
+                                        e.yPrecision, e.deviceId, e.edgeFlags
+                                    )
+                                    prevView.playTouch(upEvent)
+                                    upEvent.recycle()
+                                }
+                            }
+
                             // Create a synthetic DOWN event for this control
                             val downEvent = MotionEvent.obtain(
                                 e.downTime, e.eventTime, MotionEvent.ACTION_DOWN,
@@ -89,6 +102,17 @@ class ControlView(
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    // Make sure to send UP event to last touched view to clean up any state
+                    lastTouchedView?.let { view ->
+                        val upEvent = MotionEvent.obtain(
+                            e.downTime, e.eventTime, MotionEvent.ACTION_UP,
+                            0f, 0f, e.pressure, e.size, e.metaState, e.xPrecision,
+                            e.yPrecision, e.deviceId, e.edgeFlags
+                        )
+                        view.playTouch(upEvent)
+                        upEvent.recycle()
+                    }
+
                     activeTouch?.recycle()
                     activeTouch = null
                     lastTouchedView = null
@@ -144,7 +168,12 @@ class ControlView(
         _all += this
         updateOverlay(); updateLabel()
     }
-    override fun onDetachedFromWindow() { _all -= this; super.onDetachedFromWindow() }
+    // Make sure repeater stops when the control view is removed
+    override fun onDetachedFromWindow() {
+        stopRepeat()
+        _all -= this
+        super.onDetachedFromWindow()
+    }
 
     /* ───────── drawing ────────── */
     override fun onDraw(c: Canvas) {
