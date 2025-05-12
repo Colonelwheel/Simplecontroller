@@ -234,9 +234,9 @@ class ControlView(
         _all += this
         updateOverlay(); updateLabel()
     }
-    // Make sure repeater stops when the control view is removed
     override fun onDetachedFromWindow() {
         stopRepeat()
+        stopContinuousSending()
         _all -= this
         super.onDetachedFromWindow()
     }
@@ -261,12 +261,17 @@ class ControlView(
         }
     }
 
-    /* ───────── edit-drag / play-touch ───────── */
+    /* ───────── member variables ────────── */
     private var dX = 0f; private var dY = 0f
     private var isLatched = false          // for Hold / globalHold
     private var leftHeld  = false          // for one-finger drag
     private var repeater  : Runnable? = null
     private val uiHandler = Handler(Looper.getMainLooper())
+
+    // For continuous stick position sending
+    private var lastStickX = 0f
+    private var lastStickY = 0f
+    private var continuousSender: Runnable? = null
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (editMode) {
@@ -309,8 +314,7 @@ class ControlView(
         }
     }
 
-    /* ---------- play mode: interact ---------- */
-    fun playTouch(e: MotionEvent) {
+    private fun playTouch(e: MotionEvent) {
         when (model.type) {
 
             /* ----- BUTTON ----- */
@@ -329,12 +333,21 @@ class ControlView(
             }
 
             /* ----- STICK ----- */
-            ControlType.STICK -> handleStickOrPad(e)
+            ControlType.STICK -> {
+                // Stop continuous sending when touching the stick again
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    stopContinuousSending()
+                }
+                handleStickOrPad(e)
+            }
 
             /* ----- TOUCHPAD (with one-finger drag) ----- */
             ControlType.TOUCHPAD -> {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        // Stop continuous sending when touching the pad again
+                        stopContinuousSending()
+
                         if (model.holdLeftWhileTouch) {
                             NetworkClient.send("MOUSE_LEFT_DOWN")   // adjust to protocol
                             leftHeld = true
@@ -394,7 +407,49 @@ class ControlView(
                         e.actionMasked == MotionEvent.ACTION_CANCEL)
 
         val (sx, sy) = if (shouldSnap) 0f to 0f else nx to ny
+
+        // Store last position for continuous sending if needed
+        lastStickX = sx
+        lastStickY = sy
+
         NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+
+        // If this is an UP or CANCEL event and we shouldn't snap,
+        // start continuous sending of the last position
+        if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
+            !shouldSnap &&
+            model.type != ControlType.BUTTON &&
+            !model.autoCenter) {
+
+            // If stick or pad position is near center, don't bother with continuous sending
+            if (abs(sx) < 0.1f && abs(sy) < 0.1f) {
+                stopContinuousSending()
+                return
+            }
+
+            startContinuousSending()
+        }
+    }
+
+    private fun startContinuousSending() {
+        // Stop any existing continuous sender
+        stopContinuousSending()
+
+        // Create a new continuous sender
+        continuousSender = object : Runnable {
+            override fun run() {
+                NetworkClient.send("${model.payload}:${"%.2f".format(lastStickX)},${"%.2f".format(lastStickY)}")
+                uiHandler.postDelayed(this, 100L) // Send every 100ms
+            }
+        }
+
+        // Start continuous sending
+        uiHandler.postDelayed(continuousSender!!, 100L)
+    }
+
+    private fun stopContinuousSending() {
+        continuousSender?.let { uiHandler.removeCallbacks(it) }
+        continuousSender = null
     }
 
     /* ───────── quick-actions ───── */
