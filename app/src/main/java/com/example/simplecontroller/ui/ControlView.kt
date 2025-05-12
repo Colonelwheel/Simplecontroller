@@ -415,13 +415,13 @@ class ControlView(
         NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
 
         // If this is an UP or CANCEL event and we shouldn't snap,
-        // start continuous sending of the last position
+        // start continuous sending of the last position ONLY FOR STICKS
         if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
             !shouldSnap &&
-            model.type != ControlType.BUTTON &&
+            model.type == ControlType.STICK &&  // Only for sticks, not touchpads
             !model.autoCenter) {
 
-            // If stick or pad position is near center, don't bother with continuous sending
+            // If stick position is near center, don't bother with continuous sending
             if (abs(sx) < 0.1f && abs(sy) < 0.1f) {
                 stopContinuousSending()
                 return
