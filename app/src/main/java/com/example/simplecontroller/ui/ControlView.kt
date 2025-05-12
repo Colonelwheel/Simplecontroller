@@ -24,7 +24,7 @@ class ControlView(
             set(v) { field = v; _all.forEach { it.updateOverlay() } }
 
         /* ★ Global feature toggles (wired to MainActivity switches) ★ */
-        var snapEnabled  = true    // “Snap” → auto-centre sticks / pads
+        var snapEnabled  = true    // "Snap" → auto-centre sticks / pads
         var globalHold   = false   // latch every button
         var globalTurbo  = false   // rapid-fire every button
         var globalSwipe  = false   // MainActivity intercepts swipe
@@ -32,6 +32,71 @@ class ControlView(
         /* expose live set for hit-testing */
         internal val allViews: Set<ControlView> get() = _all
         private val _all = mutableSetOf<ControlView>()
+
+        // Track the currently touched control for swipe handling
+        private var activeTouch: MotionEvent? = null
+        private var lastTouchedView: ControlView? = null
+
+        // Process touch events for swipe mode
+        fun processTouchEvent(e: MotionEvent): Boolean {
+            if (!globalSwipe || editMode) return false
+
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    activeTouch = MotionEvent.obtain(e)
+                    // Find which control was initially touched (if any)
+                    lastTouchedView = _all.firstOrNull {
+                        val loc = IntArray(2)
+                        it.getLocationOnScreen(loc)
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+                        x >= 0 && x < it.width && y >= 0 && y < it.height
+                    }
+                    return lastTouchedView != null
+                }
+
+                MotionEvent.ACTION_MOVE -> {
+                    if (activeTouch == null) return false
+
+                    // Find all controls under current touch point
+                    for (view in _all) {
+                        if (view == lastTouchedView) continue // Skip the initially touched view
+
+                        val loc = IntArray(2)
+                        view.getLocationOnScreen(loc)
+                        val x = e.rawX - loc[0]
+                        val y = e.rawY - loc[1]
+
+                        if (x >= 0 && x < view.width && y >= 0 && y < view.height) {
+                            // Create a synthetic DOWN event for this control
+                            val downEvent = MotionEvent.obtain(
+                                e.downTime, e.eventTime, MotionEvent.ACTION_DOWN,
+                                x, y, e.pressure, e.size, e.metaState, e.xPrecision,
+                                e.yPrecision, e.deviceId, e.edgeFlags
+                            )
+
+                            // Forward the event to the control
+                            view.playTouch(downEvent)
+                            downEvent.recycle()
+
+                            // Update the last touched view
+                            lastTouchedView = view
+                            return true
+                        }
+                    }
+                    return lastTouchedView != null
+                }
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    activeTouch?.recycle()
+                    activeTouch = null
+                    lastTouchedView = null
+                    return false
+                }
+            }
+
+            return false
+        }
     }
 
     /* ───────── visuals ────────── */
@@ -106,22 +171,49 @@ class ControlView(
     private var repeater  : Runnable? = null
     private val uiHandler = Handler(Looper.getMainLooper())
 
-    override fun onTouchEvent(e: MotionEvent): Boolean =
-        if (editMode) editDrag(e) else { playTouch(e); true }
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        if (editMode) {
+            return editDrag(e)
+        } else {
+            // If global swipe is active, let the companion handler manage this
+            if (globalSwipe) {
+                // Still handle direct touches on this view
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    playTouch(e)
+                    return true
+                }
+                // But delegate swipe handling to companion
+                return false
+            } else {
+                playTouch(e)
+                return true
+            }
+        }
+    }
 
     /* ---------- edit mode: reposition controls ---------- */
-    private fun editDrag(e: MotionEvent) = when (e.actionMasked) {
-        MotionEvent.ACTION_DOWN -> { dX = e.rawX - lp().leftMargin; dY = e.rawY - lp().topMargin; true }
-        MotionEvent.ACTION_MOVE -> {
-            val lp = lp()
-            lp.leftMargin = (e.rawX - dX).toInt(); lp.topMargin = (e.rawY - dY).toInt()
-            layoutParams = lp; model.x = lp.leftMargin.toFloat(); model.y = lp.topMargin.toFloat(); true
+    private fun editDrag(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dX = e.rawX - lp().leftMargin
+                dY = e.rawY - lp().topMargin
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val lp = lp()
+                lp.leftMargin = (e.rawX - dX).toInt()
+                lp.topMargin = (e.rawY - dY).toInt()
+                layoutParams = lp
+                model.x = lp.leftMargin.toFloat()
+                model.y = lp.topMargin.toFloat()
+                return true
+            }
+            else -> return false
         }
-        else -> false
     }
 
     /* ---------- play mode: interact ---------- */
-    private fun playTouch(e: MotionEvent) {
+    fun playTouch(e: MotionEvent) {
         when (model.type) {
 
             /* ----- BUTTON ----- */
@@ -165,10 +257,11 @@ class ControlView(
     }
 
     /* ---------- helpers ---------- */
-    private fun firePayload() =
+    private fun firePayload() {
         model.payload.split(',', ' ')
             .filter { it.isNotBlank() }
             .forEach { NetworkClient.send(it.trim()) }
+    }
 
     private fun startRepeat() {
         firePayload()                       // fire immediately
@@ -180,7 +273,11 @@ class ControlView(
         }
         uiHandler.postDelayed(repeater!!, 16L)
     }
-    private fun stopRepeat() { repeater?.let { uiHandler.removeCallbacks(it) }; repeater = null }
+
+    private fun stopRepeat() {
+        repeater?.let { uiHandler.removeCallbacks(it) }
+        repeater = null
+    }
 
     private fun handleStickOrPad(e: MotionEvent) {
         if (e.actionMasked !in listOf(
@@ -297,6 +394,14 @@ class ControlView(
         }
         dlg.addView(chkDrag); dlg.addView(gap())
 
+        /* swipe activation option (for buttons) */
+        val chkSwipe = CheckBox(context).apply {
+            text = "Enable swipe activation"
+            isChecked = model.swipeActivate
+            visibility = if (model.type == ControlType.BUTTON) View.VISIBLE else View.GONE
+        }
+        dlg.addView(chkSwipe); dlg.addView(gap())
+
         /* payload */
         val etPayload = AutoCompleteTextView(context).apply {
             hint = "payload (comma-sep)"
@@ -326,6 +431,7 @@ class ControlView(
                 model.holdDurationMs = etMs.text.toString().toLongOrNull() ?: 400L
                 model.autoCenter = chkAuto.isChecked
                 model.holdLeftWhileTouch = chkDrag.isChecked
+                model.swipeActivate = chkSwipe.isChecked
                 sensSeek?.let { model.sensitivity = it.progress/100f }
 
                 val lp = lp(); lp.width = model.w.toInt(); lp.height = model.h.toInt()

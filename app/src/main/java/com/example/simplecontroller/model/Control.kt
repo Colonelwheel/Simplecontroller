@@ -21,7 +21,7 @@ data class Control(
     var autoCenter: Boolean = true,        // sticks / touch-pads
 
     /* button-specific */
-    var holdToggle: Boolean = false,       // “latch” behaviour
+    var holdToggle: Boolean = false,       // "latch" behaviour
     var holdDurationMs: Long = 500,        // long-press threshold
     var isHeld: Boolean     = false,       // current latched state
 
@@ -31,7 +31,14 @@ data class Control(
      * a Left-Down on finger-down and Left-Up on finger-lift,
      * enabling a one-finger click-drag.
      */
-    var holdLeftWhileTouch: Boolean = false
+    var holdLeftWhileTouch: Boolean = false,
+
+    /* 2b - per-control swipe activation */
+    /**
+     * When **true** this control can be activated by swiping onto it
+     * from another control, without lifting the finger.
+     */
+    var swipeActivate: Boolean = true
 )
 
 /* helper when we auto-create new controls */

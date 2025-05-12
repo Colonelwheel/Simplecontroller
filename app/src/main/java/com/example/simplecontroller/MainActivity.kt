@@ -34,10 +34,12 @@ class MainActivity : AppCompatActivity() {
   • Multiple payloads per control (comma / space separated).
   • Dynamic analog reporting for sticks / touchpads with sensitivity & auto-center.
   • Layout save / load (persistent JSON); default layout bundled.
-  • Width & height independent (was single “size” slider before).
+  • Width & height independent (was single "size" slider before).
   • Quick-duplicate (Ctrl/Cmd-D) & Delete (Delete key) in Edit-mode
     – duplicateControlFrom(view) and deleteControl(view) helpers.
   • Payload AutoCompleteTextView with starter suggestion list.
+  • Ability to slide finger to buttons with Swipe toggle.
+  • Per-button swipe activation toggle.
 
 ▢ TODO / NEXT UP
   1. **Grid / snap-to-grid option**
@@ -46,9 +48,6 @@ class MainActivity : AppCompatActivity() {
   2a. Additional features
       - A button/zone that when held, continuously sends a button AND let's me move the mouse/right stick simultaneously. So essentially just add a toggle to the current mouse button that would activate a one finger click drag
 
-  2b. Additional features
-       - I want to be able to add a toggle to each button that when toggled on, I can slide my finger to the button to activate it without having to take my finger off the screen/button/touchpad I'm already touching prior
-
   2c. Additional features
        - a button to re-center the sticks manually
 
@@ -56,7 +55,7 @@ class MainActivity : AppCompatActivity() {
      – Share JSON via Android Sharesheet.
 
   4. **Profiles per game**
-     – Quick dropdown next to “Load”; remembers last-used profile.
+     – Quick dropdown next to "Load"; remembers last-used profile.
 
   5. **Haptic feedback**
      – Optional vibration on button press.
@@ -68,7 +67,7 @@ class MainActivity : AppCompatActivity() {
      – Simple in-memory stack; Ctrl-Z / Ctrl-Y shortcuts.
 
   8. **Online documentation link**
-     – “Help” button in overflow menu opens GitHub README.
+     – "Help" button in overflow menu opens GitHub README.
 
   9. **Theming / color picker**
      – Allow per-control color or global light/dark themes.
@@ -79,7 +78,7 @@ class MainActivity : AppCompatActivity() {
   (Feel free to reorder or prune; this is just the running list!)
     ─────────────────────────────────────────────────────────── */
 
-    /* ---------- persisted “current layout” name ---------- */
+    /* ---------- persisted "current layout" name ---------- */
     private val prefs     by lazy { getSharedPreferences("layout", MODE_PRIVATE) }
     private var layoutName: String
         get() = prefs.getString("current", "default") ?: "default"
@@ -173,6 +172,19 @@ class MainActivity : AppCompatActivity() {
         NetworkClient.close()
     }
 
+    // Override dispatchTouchEvent to handle swipe mode
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // When swipe mode is active and we're not in edit mode, let the companion handle it
+        if (ControlView.globalSwipe && !ControlView.editMode) {
+            // If the companion processes it, we're done
+            if (ControlView.processTouchEvent(ev)) {
+                return true
+            }
+        }
+        // Otherwise, use normal dispatch
+        return super.dispatchTouchEvent(ev)
+    }
+
     // =============== helpers ===========================================
     private fun spawnControlViews() =
         controls.forEach { canvas.addView(ControlView(this, it).apply { tag = "control" }) }
@@ -212,7 +224,7 @@ class MainActivity : AppCompatActivity() {
         switchSwipe.visibility = View.VISIBLE
     }
 
-    // =============== “Add Control” flow ===============================
+    // =============== "Add Control" flow ===============================
     private fun showAddPicker() {
         val types = arrayOf("Button", "Stick", "TouchPad")
         AlertDialog.Builder(this)
