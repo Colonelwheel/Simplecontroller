@@ -62,7 +62,40 @@ data class Control(
     var upSuperBoostCommand: String = "W,SHIFT,SPACE",
     var downSuperBoostCommand: String = "S,CTRL,SPACE",
     var leftSuperBoostCommand: String = "A,SHIFT,SPACE",
-    var rightSuperBoostCommand: String = "D,SHIFT,SPACE"
+    var rightSuperBoostCommand: String = "D,SHIFT,SPACE",
+
+    /* Analog threshold mode (for non-directional sticks) */
+    /**
+     * When **true**, the stick will send additional commands when
+     * pushed beyond the threshold value, regardless of direction.
+     */
+    var thresholdEnabled: Boolean = false,
+
+    /**
+     * Threshold value (0.0-1.0) at which point threshold actions are triggered.
+     */
+    var threshold: Float = 0.5f,
+
+    /**
+     * Comma-separated commands to send when the stick exceeds the threshold.
+     */
+    var thresholdPayload: String = "",
+
+    /**
+     * When **true**, the stick will send additional commands when
+     * pushed beyond the super threshold value, regardless of direction.
+     */
+    var superThresholdEnabled: Boolean = false,
+
+    /**
+     * Super threshold value (0.0-1.0) at which point super threshold actions are triggered.
+     */
+    var superThreshold: Float = 0.8f,
+
+    /**
+     * Comma-separated commands to send when the stick exceeds the super threshold.
+     */
+    var superThresholdPayload: String = ""
 )
 
 /* helper when we auto-create new controls */

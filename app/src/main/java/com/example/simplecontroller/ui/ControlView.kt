@@ -871,6 +871,9 @@ class ControlView(
         }
         dlg.addView(directionalContainer)
 
+        var thresholdSeek: SeekBar? = null
+        var superThresholdSeek: SeekBar? = null
+
         /* update visibility when directional mode is toggled */
         chkDirectional.setOnCheckedChangeListener { _, isChecked ->
             directionalContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
@@ -959,10 +962,10 @@ class ControlView(
                             val value = text.toString().toFloat()
                             val validValue = value.coerceIn(0.1f, 1.0f)
                             val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
-                            thresholdSeek.progress = progress
+                            thresholdSeek?.progress = progress
                         } catch (e: NumberFormatException) {
                             // Reset to current slider value if invalid input
-                            setText("%.2f".format(0.1f + (thresholdSeek.progress / 100f)))
+                            setText("%.2f".format(0.1f + (thresholdSeek?.progress ?: 0) / 100f))
                         }
                     }
                 }
@@ -1005,7 +1008,7 @@ class ControlView(
             thresholdRow.addView(thresholdEdit)
 
             // Set initial text
-            thresholdText.text = "%.2f".format(0.1f + (thresholdSeek.progress / 100f))
+            thresholdText.text = "%.2f".format(0.1f + (thresholdSeek?.progress ?: 0) / 100f)
 
             // Add the row to the container
             directionalContainer.addView(thresholdRow)
@@ -1045,7 +1048,7 @@ class ControlView(
                             val value = text.toString().toFloat()
                             val validValue = value.coerceIn(0.1f, 1.0f)
                             val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
-                            superThresholdSeek.progress = progress
+                            superThresholdSeek?.progress = progress
 
                             // Make sure regular threshold is lower
                             val regularValue = 0.1f + (thresholdSeek.progress / 100f)
@@ -1054,7 +1057,7 @@ class ControlView(
                             }
                         } catch (e: NumberFormatException) {
                             // Reset to current slider value if invalid input
-                            setText("%.2f".format(0.1f + (superThresholdSeek.progress / 100f)))
+                            setText("%.2f".format(0.1f + (superThresholdSeek?.progress ?: 0) / 100f))
                         }
                     }
                 }
