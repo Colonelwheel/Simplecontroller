@@ -57,7 +57,12 @@ data class Control(
     var upBoostCommand: String = "W,SHIFT",
     var downBoostCommand: String = "S,CTRL",
     var leftBoostCommand: String = "A,SHIFT",
-    var rightBoostCommand: String = "D,SHIFT"
+    var rightBoostCommand: String = "D,SHIFT",
+    var superBoostThreshold: Float = 0.75f,
+    var upSuperBoostCommand: String = "W,SHIFT,SPACE",
+    var downSuperBoostCommand: String = "S,CTRL,SPACE",
+    var leftSuperBoostCommand: String = "A,SHIFT,SPACE",
+    var rightSuperBoostCommand: String = "D,SHIFT,SPACE"
 )
 
 /* helper when we auto-create new controls */

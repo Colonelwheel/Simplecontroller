@@ -41,6 +41,10 @@ class ControlView(
     private var sendingDownBoost = false
     private var sendingLeftBoost = false
     private var sendingRightBoost = false
+    private var sendingUpSuperBoost = false
+    private var sendingDownSuperBoost = false
+    private var sendingLeftSuperBoost = false
+    private var sendingSuperRightBoost = false
 
     /* ───────── companion ──────── */
     companion object {
@@ -549,7 +553,9 @@ class ControlView(
 
         // Send commands based on direction and intensity
         if (y < -0.1f) { // Up direction
-            if (absY > model.boostThreshold) {
+            if (absY > model.superBoostThreshold) {
+                sendCommand(model.upSuperBoostCommand) { sentUp = true }
+            } else if (absY > model.boostThreshold) {
                 sendCommand(model.upBoostCommand) { sentUp = true }
             } else {
                 sendCommand(model.upCommand) { sentUp = true }
@@ -557,7 +563,9 @@ class ControlView(
         }
 
         if (y > 0.1f) { // Down direction
-            if (absY > model.boostThreshold) {
+            if (absY > model.superBoostThreshold) {
+                sendCommand(model.downSuperBoostCommand) { sentDown = true }
+            } else if (absY > model.boostThreshold) {
                 sendCommand(model.downBoostCommand) { sentDown = true }
             } else {
                 sendCommand(model.downCommand) { sentDown = true }
@@ -565,7 +573,9 @@ class ControlView(
         }
 
         if (x < -0.1f) { // Left direction
-            if (absX > model.boostThreshold) {
+            if (absX > model.superBoostThreshold) {
+                sendCommand(model.leftSuperBoostCommand) { sentLeft = true }
+            } else if (absX > model.boostThreshold) {
                 sendCommand(model.leftBoostCommand) { sentLeft = true }
             } else {
                 sendCommand(model.leftCommand) { sentLeft = true }
@@ -573,7 +583,9 @@ class ControlView(
         }
 
         if (x > 0.1f) { // Right direction
-            if (absX > model.boostThreshold) {
+            if (absX > model.superBoostThreshold) {
+                sendCommand(model.rightSuperBoostCommand) { sentRight = true }
+            } else if (absX > model.boostThreshold) {
                 sendCommand(model.rightBoostCommand) { sentRight = true }
             } else {
                 sendCommand(model.rightCommand) { sentRight = true }
@@ -619,6 +631,10 @@ class ControlView(
         sendingDownBoost = false
         sendingLeftBoost = false
         sendingRightBoost = false
+        sendingUpSuperBoost = false
+        sendingDownSuperBoost = false
+        sendingLeftSuperBoost = false
+        sendingSuperRightBoost = false
     }
 
     private fun startDirectionalSending(up: Boolean, down: Boolean, left: Boolean, right: Boolean) {
@@ -634,38 +650,54 @@ class ControlView(
         // Determine if we're using boost commands
         val absX = abs(lastStickX)
         val absY = abs(lastStickY)
-        sendingUpBoost = up && absY > model.boostThreshold
-        sendingDownBoost = down && absY > model.boostThreshold
-        sendingLeftBoost = left && absX > model.boostThreshold
-        sendingRightBoost = right && absX > model.boostThreshold
+
+        // Normal boost level
+        sendingUpBoost = up && absY > model.boostThreshold && absY <= model.superBoostThreshold
+        sendingDownBoost = down && absY > model.boostThreshold && absY <= model.superBoostThreshold
+        sendingLeftBoost = left && absX > model.boostThreshold && absX <= model.superBoostThreshold
+        sendingRightBoost = right && absX > model.boostThreshold && absX <= model.superBoostThreshold
+
+        // Super boost level
+        sendingUpSuperBoost = up && absY > model.superBoostThreshold
+        sendingDownSuperBoost = down && absY > model.superBoostThreshold
+        sendingLeftSuperBoost = left && absX > model.superBoostThreshold
+        sendingSuperRightBoost = right && absX > model.superBoostThreshold
 
         if (!model.autoCenter && (up || down || left || right)) {
             // Create a continuous sender for directional commands
             continuousDirectional = object : Runnable {
                 override fun run() {
                     if (sendingUp) {
-                        val command = if (sendingUpBoost) model.upBoostCommand else model.upCommand
+                        val command = if (sendingUpSuperBoost) model.upSuperBoostCommand
+                        else if (sendingUpBoost) model.upBoostCommand
+                        else model.upCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
                             .forEach { NetworkClient.send(it.trim()) }
                     }
 
                     if (sendingDown) {
-                        val command = if (sendingDownBoost) model.downBoostCommand else model.downCommand
+                        val command = if (sendingDownSuperBoost) model.downSuperBoostCommand
+                        else if (sendingDownBoost) model.downBoostCommand
+                        else model.downCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
                             .forEach { NetworkClient.send(it.trim()) }
                     }
 
                     if (sendingLeft) {
-                        val command = if (sendingLeftBoost) model.leftBoostCommand else model.leftCommand
+                        val command = if (sendingLeftSuperBoost) model.leftSuperBoostCommand
+                        else if (sendingLeftBoost) model.leftBoostCommand
+                        else model.leftCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
                             .forEach { NetworkClient.send(it.trim()) }
                     }
 
                     if (sendingRight) {
-                        val command = if (sendingRightBoost) model.rightBoostCommand else model.rightCommand
+                        val command = if (sendingSuperRightBoost) model.rightSuperBoostCommand
+                        else if (sendingRightBoost) model.rightBoostCommand
+                        else model.rightCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
                             .forEach { NetworkClient.send(it.trim()) }
@@ -894,7 +926,7 @@ class ControlView(
             directionalContainer.addView(gap(16))
 
             // Boost threshold
-            directionalContainer.addView(TextView(context).apply { text = "Boost threshold:" })
+            directionalContainer.addView(TextView(context).apply { text = "Regular Boost threshold:" })
             val thresholdText = TextView(context)
             val thresholdSeek = SeekBar(context).apply {
                 max = 90  // 0.1 to 1.0 in steps of 0.01
@@ -914,9 +946,35 @@ class ControlView(
             directionalContainer.addView(thresholdSeek)
             directionalContainer.addView(gap(16))
 
+            // Super Boost threshold
+            directionalContainer.addView(TextView(context).apply { text = "Super Boost threshold:" })
+            val superThresholdText = TextView(context)
+            val superThresholdSeek = SeekBar(context).apply {
+                max = 90  // 0.1 to 1.0 in steps of 0.01
+                progress = ((model.superBoostThreshold - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                tag = "super_boost_threshold"
+                setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){
+                        val value = 0.1f + (p / 100f)
+                        superThresholdText.text = "%.2f".format(value)
+
+                        // Ensure super boost threshold is always higher than regular boost
+                        if (value <= 0.1f + (thresholdSeek.progress / 100f)) {
+                            thresholdSeek.progress = ((value - 0.15f) * 100).toInt().coerceIn(0, 90)
+                        }
+                    }
+                    override fun onStartTrackingTouch(s:SeekBar?){}
+                    override fun onStopTrackingTouch(s:SeekBar?){}
+                })
+            }
+            superThresholdText.text = "%.2f".format(0.1f + (superThresholdSeek.progress / 100f))
+            directionalContainer.addView(superThresholdText)
+            directionalContainer.addView(superThresholdSeek)
+            directionalContainer.addView(gap(16))
+
             // Boost commands section
             directionalContainer.addView(TextView(context).apply {
-                text = "Boost Commands (when pushed beyond threshold)"
+                text = "Regular Boost Commands"
                 setPadding(0, 8, 0, 8)
                 setTypeface(null, android.graphics.Typeface.BOLD)
             })
@@ -959,6 +1017,53 @@ class ControlView(
                 tag = "right_boost"
             }
             directionalContainer.addView(etRightBoost)
+            directionalContainer.addView(gap(16))
+
+            // Super Boost commands section
+            directionalContainer.addView(TextView(context).apply {
+                text = "Super Boost Commands"
+                setPadding(0, 8, 0, 8)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+
+            // Up super boost command
+            directionalContainer.addView(TextView(context).apply { text = "Up super boost command:" })
+            val etUpSuperBoost = EditText(context).apply {
+                hint = "W,SHIFT,SPACE"
+                setText(model.upSuperBoostCommand)
+                tag = "up_super_boost"
+            }
+            directionalContainer.addView(etUpSuperBoost)
+            directionalContainer.addView(gap())
+
+            // Down super boost command
+            directionalContainer.addView(TextView(context).apply { text = "Down super boost command:" })
+            val etDownSuperBoost = EditText(context).apply {
+                hint = "S,CTRL,SPACE"
+                setText(model.downSuperBoostCommand)
+                tag = "down_super_boost"
+            }
+            directionalContainer.addView(etDownSuperBoost)
+            directionalContainer.addView(gap())
+
+            // Left super boost command
+            directionalContainer.addView(TextView(context).apply { text = "Left super boost command:" })
+            val etLeftSuperBoost = EditText(context).apply {
+                hint = "A,SHIFT,SPACE"
+                setText(model.leftSuperBoostCommand)
+                tag = "left_super_boost"
+            }
+            directionalContainer.addView(etLeftSuperBoost)
+            directionalContainer.addView(gap())
+
+            // Right super boost command
+            directionalContainer.addView(TextView(context).apply { text = "Right super boost command:" })
+            val etRightSuperBoost = EditText(context).apply {
+                hint = "D,SHIFT,SPACE"
+                setText(model.rightSuperBoostCommand)
+                tag = "right_super_boost"
+            }
+            directionalContainer.addView(etRightSuperBoost)
             directionalContainer.addView(gap())
         }
 
@@ -1016,6 +1121,9 @@ class ControlView(
                         directionalContainer.findViewWithTag<SeekBar>("boost_threshold")?.let {
                             model.boostThreshold = 0.1f + (it.progress / 100f)
                         }
+                        directionalContainer.findViewWithTag<SeekBar>("super_boost_threshold")?.let {
+                            model.superBoostThreshold = 0.1f + (it.progress / 100f)
+                        }
                         directionalContainer.findViewWithTag<EditText>("up_boost")?.let {
                             model.upBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT"
                         }
@@ -1027,6 +1135,18 @@ class ControlView(
                         }
                         directionalContainer.findViewWithTag<EditText>("right_boost")?.let {
                             model.rightBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("up_super_boost")?.let {
+                            model.upSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT,SPACE"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("down_super_boost")?.let {
+                            model.downSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S,CTRL,SPACE"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("left_super_boost")?.let {
+                            model.leftSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A,SHIFT,SPACE"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("right_super_boost")?.let {
+                            model.rightSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT,SPACE"
                         }
                     }
                 }
