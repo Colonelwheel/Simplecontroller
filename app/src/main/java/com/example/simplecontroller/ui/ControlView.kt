@@ -8,6 +8,7 @@ import android.view.*
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
+import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.model.*
 import com.example.simplecontroller.net.NetworkClient
 import kotlin.math.*
@@ -17,17 +18,83 @@ class ControlView(
     private val model: Control
 ) : FrameLayout(context) {
 
+    /* ───────── member variables ────────── */
+    private var dX = 0f
+    private var dY = 0f
+    private var isLatched = false          // for Hold / globalHold
+    private var leftHeld  = false          // for one-finger drag
+    private var repeater  : Runnable? = null
+    private val uiHandler = Handler(Looper.getMainLooper())
+
+    // For continuous stick position sending
+    private var lastStickX = 0f
+    private var lastStickY = 0f
+    private var continuousSender: Runnable? = null
+
+    // Track which directional commands are being continuously sent
+    private var continuousDirectional: Runnable? = null
+    private var sendingUp = false
+    private var sendingDown = false
+    private var sendingLeft = false
+    private var sendingRight = false
+    private var sendingUpBoost = false
+    private var sendingDownBoost = false
+    private var sendingLeftBoost = false
+    private var sendingRightBoost = false
+
     /* ───────── companion ──────── */
     companion object {
         /* Edit-mode toggle */
         var editMode = false
-            set(v) { field = v; _all.forEach { it.updateOverlay() } }
+            set(v) {
+                field = v
+                if (v) {
+                    // Stop continuous sending for all controls when entering edit mode
+                    _all.forEach {
+                        it.updateOverlay()
+                        it.stopContinuousSending()
+                        it.stopDirectionalCommands()
+                    }
+                } else {
+                    _all.forEach { it.updateOverlay() }
+                }
+            }
 
         /* ★ Global feature toggles (wired to MainActivity switches) ★ */
         var snapEnabled  = true    // "Snap" → auto-centre sticks / pads
+            set(value) {
+                field = value
+                if (value) {
+                    // When enabling snap, stop any continuous sending
+                    _all.forEach {
+                        it.stopContinuousSending()
+                        it.stopDirectionalCommands()
+                    }
+                }
+            }
+
         var globalHold   = false   // latch every button
+
         var globalTurbo  = false   // rapid-fire every button
+            set(value) {
+                if (field && !value) {
+                    // When turning turbo off, make sure all repeaters are stopped
+                    _all.forEach { it.stopRepeat() }
+                }
+                field = value
+            }
+
         var globalSwipe  = false   // MainActivity intercepts swipe
+            set(value) {
+                if (field && !value) {
+                    // When turning swipe off, make sure any active controls are cleaned up
+                    lastTouchedView?.stopRepeat()
+                    lastTouchedView = null
+                    activeTouch?.recycle()
+                    activeTouch = null
+                }
+                field = value
+            }
 
         /* expose live set for hit-testing */
         internal val allViews: Set<ControlView> get() = _all
@@ -234,9 +301,12 @@ class ControlView(
         _all += this
         updateOverlay(); updateLabel()
     }
+
+    // Make sure repeater stops when the control view is removed
     override fun onDetachedFromWindow() {
         stopRepeat()
         stopContinuousSending()
+        stopDirectionalCommands()
         _all -= this
         super.onDetachedFromWindow()
     }
@@ -260,18 +330,6 @@ class ControlView(
             }
         }
     }
-
-    /* ───────── member variables ────────── */
-    private var dX = 0f; private var dY = 0f
-    private var isLatched = false          // for Hold / globalHold
-    private var leftHeld  = false          // for one-finger drag
-    private var repeater  : Runnable? = null
-    private val uiHandler = Handler(Looper.getMainLooper())
-
-    // For continuous stick position sending
-    private var lastStickX = 0f
-    private var lastStickY = 0f
-    private var continuousSender: Runnable? = null
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (editMode) {
@@ -314,7 +372,8 @@ class ControlView(
         }
     }
 
-    private fun playTouch(e: MotionEvent) {
+    /* ---------- play mode: interact ---------- */
+    fun playTouch(e: MotionEvent) {
         when (model.type) {
 
             /* ----- BUTTON ----- */
@@ -337,6 +396,7 @@ class ControlView(
                 // Stop continuous sending when touching the stick again
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                     stopContinuousSending()
+                    stopDirectionalCommands()
                 }
                 handleStickOrPad(e)
             }
@@ -412,13 +472,20 @@ class ControlView(
         lastStickX = sx
         lastStickY = sy
 
-        NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+        // Handle directional mode for sticks
+        if (model.type == ControlType.STICK && model.directionalMode) {
+            handleDirectionalStick(sx, sy, e.actionMasked)
+        } else {
+            // Regular analog stick/pad mode
+            NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+        }
 
         // If this is an UP or CANCEL event and we shouldn't snap,
-        // start continuous sending of the last position ONLY FOR STICKS
+        // start continuous sending of the last position ONLY FOR STICKS in ANALOG mode
         if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
             !shouldSnap &&
             model.type == ControlType.STICK &&  // Only for sticks, not touchpads
+            !model.directionalMode &&  // Only for analog sticks, not directional ones
             !model.autoCenter) {
 
             // If stick position is near center, don't bother with continuous sending
@@ -428,6 +495,75 @@ class ControlView(
             }
 
             startContinuousSending()
+        }
+    }
+
+    // Handle directional stick inputs, sending button commands instead of analog values
+    private fun handleDirectionalStick(x: Float, y: Float, action: Int) {
+        // Track whether we've sent commands for each direction this frame
+        var sentUp = false
+        var sentDown = false
+        var sentLeft = false
+        var sentRight = false
+
+        // Determine the main direction(s) to send
+        val absX = abs(x)
+        val absY = abs(y)
+
+        // Check if we're close enough to center to not send any commands
+        if (absX < 0.1f && absY < 0.1f) {
+            // Near center - stop all continuous commands if this is a MOVE event
+            if (action == MotionEvent.ACTION_MOVE) {
+                stopDirectionalCommands()
+            }
+            return
+        }
+
+        // Helper function to send a command and update tracking
+        fun sendCommand(command: String, update: () -> Unit) {
+            command.split(',', ' ')
+                .filter { it.isNotBlank() }
+                .forEach { NetworkClient.send(it.trim()) }
+            update()
+        }
+
+        // Send commands based on direction and intensity
+        if (y < -0.1f) { // Up direction
+            if (absY > model.boostThreshold) {
+                sendCommand(model.upBoostCommand) { sentUp = true }
+            } else {
+                sendCommand(model.upCommand) { sentUp = true }
+            }
+        }
+
+        if (y > 0.1f) { // Down direction
+            if (absY > model.boostThreshold) {
+                sendCommand(model.downBoostCommand) { sentDown = true }
+            } else {
+                sendCommand(model.downCommand) { sentDown = true }
+            }
+        }
+
+        if (x < -0.1f) { // Left direction
+            if (absX > model.boostThreshold) {
+                sendCommand(model.leftBoostCommand) { sentLeft = true }
+            } else {
+                sendCommand(model.leftCommand) { sentLeft = true }
+            }
+        }
+
+        if (x > 0.1f) { // Right direction
+            if (absX > model.boostThreshold) {
+                sendCommand(model.rightBoostCommand) { sentRight = true }
+            } else {
+                sendCommand(model.rightCommand) { sentRight = true }
+            }
+        }
+
+        // Store the directions we sent commands for so we can start continuous sending
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            // On release, start continuous sending for the last direction
+            startDirectionalSending(sentUp, sentDown, sentLeft, sentRight)
         }
     }
 
@@ -452,6 +588,78 @@ class ControlView(
         continuousSender = null
     }
 
+    private fun stopDirectionalCommands() {
+        continuousDirectional?.let { uiHandler.removeCallbacks(it) }
+        continuousDirectional = null
+        sendingUp = false
+        sendingDown = false
+        sendingLeft = false
+        sendingRight = false
+        sendingUpBoost = false
+        sendingDownBoost = false
+        sendingLeftBoost = false
+        sendingRightBoost = false
+    }
+
+    private fun startDirectionalSending(up: Boolean, down: Boolean, left: Boolean, right: Boolean) {
+        // Stop any existing continuous sender
+        stopDirectionalCommands()
+
+        // Store the directions we're sending
+        sendingUp = up
+        sendingDown = down
+        sendingLeft = left
+        sendingRight = right
+
+        // Determine if we're using boost commands
+        val absX = abs(lastStickX)
+        val absY = abs(lastStickY)
+        sendingUpBoost = up && absY > model.boostThreshold
+        sendingDownBoost = down && absY > model.boostThreshold
+        sendingLeftBoost = left && absX > model.boostThreshold
+        sendingRightBoost = right && absX > model.boostThreshold
+
+        if (!model.autoCenter && (up || down || left || right)) {
+            // Create a continuous sender for directional commands
+            continuousDirectional = object : Runnable {
+                override fun run() {
+                    if (sendingUp) {
+                        val command = if (sendingUpBoost) model.upBoostCommand else model.upCommand
+                        command.split(',', ' ')
+                            .filter { it.isNotBlank() }
+                            .forEach { NetworkClient.send(it.trim()) }
+                    }
+
+                    if (sendingDown) {
+                        val command = if (sendingDownBoost) model.downBoostCommand else model.downCommand
+                        command.split(',', ' ')
+                            .filter { it.isNotBlank() }
+                            .forEach { NetworkClient.send(it.trim()) }
+                    }
+
+                    if (sendingLeft) {
+                        val command = if (sendingLeftBoost) model.leftBoostCommand else model.leftCommand
+                        command.split(',', ' ')
+                            .filter { it.isNotBlank() }
+                            .forEach { NetworkClient.send(it.trim()) }
+                    }
+
+                    if (sendingRight) {
+                        val command = if (sendingRightBoost) model.rightBoostCommand else model.rightCommand
+                        command.split(',', ' ')
+                            .filter { it.isNotBlank() }
+                            .forEach { NetworkClient.send(it.trim()) }
+                    }
+
+                    uiHandler.postDelayed(this, 100L) // Send every 100ms
+                }
+            }
+
+            // Start continuous sending
+            uiHandler.postDelayed(continuousDirectional!!, 100L)
+        }
+    }
+
     /* ───────── quick-actions ───── */
     private fun duplicateSelf() {
         val copy = model.copy(
@@ -459,7 +667,7 @@ class ControlView(
             x  = model.x + 40f,
             y  = model.y + 40f
         )
-        (context as? com.example.simplecontroller.MainActivity)
+        (context as? MainActivity)
             ?.createControlFrom(copy)
     }
     private fun confirmDelete() {
@@ -467,7 +675,7 @@ class ControlView(
             .setMessage("Delete this control?")
             .setPositiveButton("Delete") { _, _ ->
                 (parent as? FrameLayout)?.removeView(this)
-                (context as? com.example.simplecontroller.MainActivity)
+                (context as? MainActivity)
                     ?.removeControl(model)
             }
             .setNegativeButton("Cancel", null)
@@ -561,6 +769,144 @@ class ControlView(
         }
         dlg.addView(chkSwipe); dlg.addView(gap())
 
+        /* directional mode (STICKS only) */
+        val chkDirectional = CheckBox(context).apply {
+            text = "Directional mode (WASD style)"
+            isChecked = model.directionalMode
+            visibility = if (model.type == ControlType.STICK) View.VISIBLE else View.GONE
+        }
+        dlg.addView(chkDirectional)
+
+        /* directional settings container */
+        val directionalContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (model.type == ControlType.STICK && model.directionalMode) View.VISIBLE else View.GONE
+        }
+        dlg.addView(directionalContainer)
+
+        /* update visibility when directional mode is toggled */
+        chkDirectional.setOnCheckedChangeListener { _, isChecked ->
+            directionalContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
+        }
+
+        /* Directional commands section */
+        if (model.type == ControlType.STICK) {
+            // Title
+            directionalContainer.addView(TextView(context).apply {
+                text = "Directional Commands"
+                setPadding(0, 16, 0, 8)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+
+            // Up command
+            directionalContainer.addView(TextView(context).apply { text = "Up command:" })
+            val etUp = EditText(context).apply {
+                hint = "W"
+                setText(model.upCommand)
+                tag = "up_command"
+            }
+            directionalContainer.addView(etUp)
+            directionalContainer.addView(gap())
+
+            // Down command
+            directionalContainer.addView(TextView(context).apply { text = "Down command:" })
+            val etDown = EditText(context).apply {
+                hint = "S"
+                setText(model.downCommand)
+                tag = "down_command"
+            }
+            directionalContainer.addView(etDown)
+            directionalContainer.addView(gap())
+
+            // Left command
+            directionalContainer.addView(TextView(context).apply { text = "Left command:" })
+            val etLeft = EditText(context).apply {
+                hint = "A"
+                setText(model.leftCommand)
+                tag = "left_command"
+            }
+            directionalContainer.addView(etLeft)
+            directionalContainer.addView(gap())
+
+            // Right command
+            directionalContainer.addView(TextView(context).apply { text = "Right command:" })
+            val etRight = EditText(context).apply {
+                hint = "D"
+                setText(model.rightCommand)
+                tag = "right_command"
+            }
+            directionalContainer.addView(etRight)
+            directionalContainer.addView(gap(16))
+
+            // Boost threshold
+            directionalContainer.addView(TextView(context).apply { text = "Boost threshold:" })
+            val thresholdText = TextView(context)
+            val thresholdSeek = SeekBar(context).apply {
+                max = 90  // 0.1 to 1.0 in steps of 0.01
+                progress = ((model.boostThreshold - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                tag = "boost_threshold"
+                setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){
+                        val value = 0.1f + (p / 100f)
+                        thresholdText.text = "%.2f".format(value)
+                    }
+                    override fun onStartTrackingTouch(s:SeekBar?){}
+                    override fun onStopTrackingTouch(s:SeekBar?){}
+                })
+            }
+            thresholdText.text = "%.2f".format(0.1f + (thresholdSeek.progress / 100f))
+            directionalContainer.addView(thresholdText)
+            directionalContainer.addView(thresholdSeek)
+            directionalContainer.addView(gap(16))
+
+            // Boost commands section
+            directionalContainer.addView(TextView(context).apply {
+                text = "Boost Commands (when pushed beyond threshold)"
+                setPadding(0, 8, 0, 8)
+                setTypeface(null, android.graphics.Typeface.BOLD)
+            })
+
+            // Up boost command
+            directionalContainer.addView(TextView(context).apply { text = "Up boost command:" })
+            val etUpBoost = EditText(context).apply {
+                hint = "W,SHIFT"
+                setText(model.upBoostCommand)
+                tag = "up_boost"
+            }
+            directionalContainer.addView(etUpBoost)
+            directionalContainer.addView(gap())
+
+            // Down boost command
+            directionalContainer.addView(TextView(context).apply { text = "Down boost command:" })
+            val etDownBoost = EditText(context).apply {
+                hint = "S,CTRL"
+                setText(model.downBoostCommand)
+                tag = "down_boost"
+            }
+            directionalContainer.addView(etDownBoost)
+            directionalContainer.addView(gap())
+
+            // Left boost command
+            directionalContainer.addView(TextView(context).apply { text = "Left boost command:" })
+            val etLeftBoost = EditText(context).apply {
+                hint = "A,SHIFT"
+                setText(model.leftBoostCommand)
+                tag = "left_boost"
+            }
+            directionalContainer.addView(etLeftBoost)
+            directionalContainer.addView(gap())
+
+            // Right boost command
+            directionalContainer.addView(TextView(context).apply { text = "Right boost command:" })
+            val etRightBoost = EditText(context).apply {
+                hint = "D,SHIFT"
+                setText(model.rightBoostCommand)
+                tag = "right_boost"
+            }
+            directionalContainer.addView(etRightBoost)
+            directionalContainer.addView(gap())
+        }
+
         /* payload */
         val etPayload = AutoCompleteTextView(context).apply {
             hint = "payload (comma-sep)"
@@ -593,8 +939,47 @@ class ControlView(
                 model.swipeActivate = chkSwipe.isChecked
                 sensSeek?.let { model.sensitivity = it.progress/100f }
 
+                // Save directional mode settings if applicable
+                if (model.type == ControlType.STICK) {
+                    model.directionalMode = chkDirectional.isChecked
+
+                    if (model.directionalMode) {
+                        directionalContainer.findViewWithTag<EditText>("up_command")?.let {
+                            model.upCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("down_command")?.let {
+                            model.downCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("left_command")?.let {
+                            model.leftCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("right_command")?.let {
+                            model.rightCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D"
+                        }
+                        directionalContainer.findViewWithTag<SeekBar>("boost_threshold")?.let {
+                            model.boostThreshold = 0.1f + (it.progress / 100f)
+                        }
+                        directionalContainer.findViewWithTag<EditText>("up_boost")?.let {
+                            model.upBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("down_boost")?.let {
+                            model.downBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S,CTRL"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("left_boost")?.let {
+                            model.leftBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A,SHIFT"
+                        }
+                        directionalContainer.findViewWithTag<EditText>("right_boost")?.let {
+                            model.rightBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT"
+                        }
+                    }
+                }
+
                 val lp = lp(); lp.width = model.w.toInt(); lp.height = model.h.toInt()
                 layoutParams = lp; updateLabel(); invalidate()
+
+                // Stop any running senders when settings change
+                stopContinuousSending()
+                stopDirectionalCommands()
             }
             .setNegativeButton("Cancel", null)
             .show()

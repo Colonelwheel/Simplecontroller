@@ -37,7 +37,19 @@ data class Control(
      * When **true** this control can be activated by swiping onto it
      * from another control, without lifting the finger.
      */
-    var swipeActivate: Boolean = true
+    var swipeActivate: Boolean = true,
+
+    /* Directional mode for sticks */
+    var directionalMode: Boolean = false,
+    var upCommand: String = "W",
+    var downCommand: String = "S",
+    var leftCommand: String = "A",
+    var rightCommand: String = "D",
+    var boostThreshold: Float = 0.5f,
+    var upBoostCommand: String = "W,SHIFT",
+    var downBoostCommand: String = "S,CTRL",
+    var leftBoostCommand: String = "A,SHIFT",
+    var rightBoostCommand: String = "D,SHIFT"
 )
 
 /* helper when we auto-create new controls */
