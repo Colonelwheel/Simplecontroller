@@ -22,7 +22,7 @@ class ControlView(
     private var dX = 0f
     private var dY = 0f
     private var isLatched = false          // for Hold / globalHold
-    private var leftHeld  = false          // for one-finger drag
+    private var leftHeld  = false          // for one-finger drag or toggle
     private var repeater  : Runnable? = null
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -302,8 +302,14 @@ class ControlView(
         updateOverlay(); updateLabel()
     }
 
-    // Make sure repeater stops when the control view is removed
+    // Make sure we clean up when the view is removed
     override fun onDetachedFromWindow() {
+        // If we have a locked left mouse button, release it
+        if (model.type == ControlType.TOUCHPAD && leftHeld) {
+            NetworkClient.send("MOUSE_LEFT_UP")
+            leftHeld = false
+        }
+
         stopRepeat()
         stopContinuousSending()
         stopDirectionalCommands()
@@ -408,8 +414,19 @@ class ControlView(
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
 
-                        if (model.holdLeftWhileTouch) {
-                            NetworkClient.send("MOUSE_LEFT_DOWN")   // adjust to protocol
+                        if (model.toggleLeftClick) {
+                            // Toggle mode - flip the leftHeld state
+                            leftHeld = !leftHeld
+
+                            // Send the appropriate mouse command based on new state
+                            if (leftHeld) {
+                                NetworkClient.send("MOUSE_LEFT_DOWN")
+                            } else {
+                                NetworkClient.send("MOUSE_LEFT_UP")
+                            }
+                        } else if (model.holdLeftWhileTouch) {
+                            // Standard hold mode
+                            NetworkClient.send("MOUSE_LEFT_DOWN")
                             leftHeld = true
                         }
                     }
@@ -417,8 +434,11 @@ class ControlView(
                     MotionEvent.ACTION_UP,
                     MotionEvent.ACTION_CANCEL -> {
                         handleStickOrPad(e)
-                        if ((e.actionMasked == MotionEvent.ACTION_UP ||
-                                    e.actionMasked == MotionEvent.ACTION_CANCEL) && leftHeld) {
+
+                        // Only release mouse button on up/cancel if using standard hold mode
+                        if (!model.toggleLeftClick &&
+                            (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
+                            leftHeld && model.holdLeftWhileTouch) {
                             NetworkClient.send("MOUSE_LEFT_UP")
                             leftHeld = false
                         }
@@ -775,6 +795,27 @@ class ControlView(
         }
         dlg.addView(chkDrag); dlg.addView(gap())
 
+        /* toggle click mode (TOUCHPAD only) */
+        val chkToggleClick = CheckBox(context).apply {
+            text = "Toggle left click mode (click-lock)"
+            isChecked = model.toggleLeftClick
+            visibility = if (model.type == ControlType.TOUCHPAD) View.VISIBLE else View.GONE
+        }
+        dlg.addView(chkToggleClick); dlg.addView(gap())
+
+        /* Make two touchpad options mutually exclusive */
+        chkDrag.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && chkToggleClick.isChecked) {
+                chkToggleClick.isChecked = false
+            }
+        }
+
+        chkToggleClick.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && chkDrag.isChecked) {
+                chkDrag.isChecked = false
+            }
+        }
+
         /* swipe activation option (for buttons) */
         val chkSwipe = CheckBox(context).apply {
             text = "Enable swipe activation"
@@ -951,6 +992,7 @@ class ControlView(
                 model.holdDurationMs = etMs.text.toString().toLongOrNull() ?: 400L
                 model.autoCenter = chkAuto.isChecked
                 model.holdLeftWhileTouch = chkDrag.isChecked
+                model.toggleLeftClick = chkToggleClick.isChecked
                 model.swipeActivate = chkSwipe.isChecked
                 sensSeek?.let { model.sensitivity = it.progress/100f }
 

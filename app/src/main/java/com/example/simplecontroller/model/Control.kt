@@ -32,6 +32,14 @@ data class Control(
      */
     var holdLeftWhileTouch: Boolean = false,
 
+    /* Touchpad click lock mode */
+    /**
+     * When **true**, this *TOUCHPAD* toggles the mouse left button state
+     * each time it's touched, rather than holding only while touching.
+     * This allows for clicking and then moving without holding.
+     */
+    var toggleLeftClick: Boolean = false,
+
     /* 2b - per-control swipe activation */
     /**
      * When **true** this control can be activated by swiping onto it
