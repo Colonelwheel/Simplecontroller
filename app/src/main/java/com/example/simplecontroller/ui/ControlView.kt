@@ -927,8 +927,64 @@ class ControlView(
 
             // Boost threshold
             directionalContainer.addView(TextView(context).apply { text = "Regular Boost threshold:" })
-            val thresholdText = TextView(context)
+
+            // Add horizontal layout for slider and direct input
+            val thresholdRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            // Create direct edit field first (so it can be referenced later)
+            val thresholdEdit = EditText(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    width = 100
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setText("%.2f".format(model.boostThreshold))
+                tag = "boost_threshold_edit"
+
+                // Update slider when text changes
+                setOnFocusChangeListener { _, hasFocus ->
+                    if (!hasFocus) {
+                        try {
+                            val value = text.toString().toFloat()
+                            val validValue = value.coerceIn(0.1f, 1.0f)
+                            val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                            thresholdSeek.progress = progress
+                        } catch (e: NumberFormatException) {
+                            // Reset to current slider value if invalid input
+                            setText("%.2f".format(0.1f + (thresholdSeek.progress / 100f)))
+                        }
+                    }
+                }
+            }
+
+            // Create slider
+            val thresholdText = TextView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    marginEnd = 8
+                }
+            }
+
             val thresholdSeek = SeekBar(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,  // 0 width with weight means "take remaining space"
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { weight = 1f }
+
                 max = 90  // 0.1 to 1.0 in steps of 0.01
                 progress = ((model.boostThreshold - 0.1f) * 100).roundToInt().coerceIn(0, 90)
                 tag = "boost_threshold"
@@ -936,20 +992,91 @@ class ControlView(
                     override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){
                         val value = 0.1f + (p / 100f)
                         thresholdText.text = "%.2f".format(value)
+                        thresholdEdit.setText("%.2f".format(value))
                     }
                     override fun onStartTrackingTouch(s:SeekBar?){}
                     override fun onStopTrackingTouch(s:SeekBar?){}
                 })
             }
+
+            // Add the text, slider, and edit field to the row
+            thresholdRow.addView(thresholdText)
+            thresholdRow.addView(thresholdSeek)
+            thresholdRow.addView(thresholdEdit)
+
+            // Set initial text
             thresholdText.text = "%.2f".format(0.1f + (thresholdSeek.progress / 100f))
-            directionalContainer.addView(thresholdText)
-            directionalContainer.addView(thresholdSeek)
+
+            // Add the row to the container
+            directionalContainer.addView(thresholdRow)
             directionalContainer.addView(gap(16))
 
             // Super Boost threshold
             directionalContainer.addView(TextView(context).apply { text = "Super Boost threshold:" })
-            val superThresholdText = TextView(context)
+
+            // Add horizontal layout for slider and direct input
+            val superThresholdRow = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            // Create direct edit field first (so it can be referenced later)
+            val superThresholdEdit = EditText(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    width = 100
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
+                setText("%.2f".format(model.superBoostThreshold))
+                tag = "super_boost_threshold_edit"
+
+                // Update slider when text changes
+                setOnFocusChangeListener { _, hasFocus ->
+                    if (!hasFocus) {
+                        try {
+                            val value = text.toString().toFloat()
+                            val validValue = value.coerceIn(0.1f, 1.0f)
+                            val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                            superThresholdSeek.progress = progress
+
+                            // Make sure regular threshold is lower
+                            val regularValue = 0.1f + (thresholdSeek.progress / 100f)
+                            if (validValue <= regularValue) {
+                                thresholdSeek.progress = ((validValue - 0.15f) * 100).toInt().coerceIn(0, 90)
+                            }
+                        } catch (e: NumberFormatException) {
+                            // Reset to current slider value if invalid input
+                            setText("%.2f".format(0.1f + (superThresholdSeek.progress / 100f)))
+                        }
+                    }
+                }
+            }
+
+            // Create slider and text
+            val superThresholdText = TextView(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    marginEnd = 8
+                }
+            }
+
             val superThresholdSeek = SeekBar(context).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    0,  // 0 width with weight means "take remaining space"
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { weight = 1f }
+
                 max = 90  // 0.1 to 1.0 in steps of 0.01
                 progress = ((model.superBoostThreshold - 0.1f) * 100).roundToInt().coerceIn(0, 90)
                 tag = "super_boost_threshold"
@@ -957,6 +1084,7 @@ class ControlView(
                     override fun onProgressChanged(s:SeekBar?,p:Int,f:Boolean){
                         val value = 0.1f + (p / 100f)
                         superThresholdText.text = "%.2f".format(value)
+                        superThresholdEdit.setText("%.2f".format(value))
 
                         // Ensure super boost threshold is always higher than regular boost
                         if (value <= 0.1f + (thresholdSeek.progress / 100f)) {
@@ -967,9 +1095,17 @@ class ControlView(
                     override fun onStopTrackingTouch(s:SeekBar?){}
                 })
             }
+
+            // Add the text, slider, and edit field to the row
+            superThresholdRow.addView(superThresholdText)
+            superThresholdRow.addView(superThresholdSeek)
+            superThresholdRow.addView(superThresholdEdit)
+
+            // Set initial text
             superThresholdText.text = "%.2f".format(0.1f + (superThresholdSeek.progress / 100f))
-            directionalContainer.addView(superThresholdText)
-            directionalContainer.addView(superThresholdSeek)
+
+            // Add the row to the container
+            directionalContainer.addView(superThresholdRow)
             directionalContainer.addView(gap(16))
 
             // Boost commands section
@@ -1120,9 +1256,24 @@ class ControlView(
                         }
                         directionalContainer.findViewWithTag<SeekBar>("boost_threshold")?.let {
                             model.boostThreshold = 0.1f + (it.progress / 100f)
+                        } ?: directionalContainer.findViewWithTag<EditText>("boost_threshold_edit")?.let {
+                            try {
+                                model.boostThreshold = it.text.toString().toFloat().coerceIn(0.1f, 1.0f)
+                            } catch (e: NumberFormatException) {
+                                // Use default if parse fails
+                                model.boostThreshold = 0.5f
+                            }
                         }
+
                         directionalContainer.findViewWithTag<SeekBar>("super_boost_threshold")?.let {
                             model.superBoostThreshold = 0.1f + (it.progress / 100f)
+                        } ?: directionalContainer.findViewWithTag<EditText>("super_boost_threshold_edit")?.let {
+                            try {
+                                model.superBoostThreshold = it.text.toString().toFloat().coerceIn(0.1f, 1.0f)
+                            } catch (e: NumberFormatException) {
+                                // Use default if parse fails
+                                model.superBoostThreshold = 0.75f
+                            }
                         }
                         directionalContainer.findViewWithTag<EditText>("up_boost")?.let {
                             model.upBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT"
