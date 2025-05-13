@@ -695,9 +695,23 @@ class ControlView(
 
     /* ───────── property sheet (unchanged except drag option) ───────── */
     fun showProps() {
+        // Create a ScrollView to make long property sheets scrollable
+        val scrollView = ScrollView(context).apply {
+            // Set max height to 70% of screen height to ensure dialog isn't too tall
+            val metrics = context.resources.displayMetrics
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (metrics.heightPixels * 0.7).toInt()
+            )
+        }
+
         val dlg = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL; setPadding(32,24,32,8)
         }
+
+        // Add the LinearLayout to the ScrollView
+        scrollView.addView(dlg)
+
         fun gap(h:Int=8) = Space(context).apply { minimumHeight = h }
 
         val etName = EditText(context).apply { hint = "Label"; setText(model.name) }
@@ -926,7 +940,8 @@ class ControlView(
         }
         dlg.addView(etPayload)
 
-        AlertDialog.Builder(context).setTitle("Properties").setView(dlg)
+        // Use the ScrollView as the dialog content
+        AlertDialog.Builder(context).setTitle("Properties").setView(scrollView)
             .setPositiveButton("OK") { _, _ ->
                 model.name = etName.text.toString()
                 model.w = wSeek.progress.toFloat().coerceAtLeast(40f)
