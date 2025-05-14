@@ -15,11 +15,11 @@ import kotlin.math.roundToInt
 
 /**
  * Builds property sheet dialogs for controls.
- * 
+ *
  * This class encapsulates the dialog creation and property management for all control types.
  * It creates different UI elements based on the control type (Button, Stick, Touchpad) and
  * handles saving the updated properties back to the control model.
- * 
+ *
  * Features:
  * - Builds scrollable dialog with appropriate fields for each control type
  * - Manages control sizing, sensitivity and payload
@@ -56,38 +56,40 @@ class PropertySheetBuilder(
         scrollView.addView(dlg)
 
         // Helper for creating space between components
-        fun gap(h: Int = 8) = Space(context).apply { minimumHeight = h }
+        val createGap = { h: Int ->
+            Space(context).apply { minimumHeight = h }
+        }
 
         // ---- Common properties for all control types ----
-        
+
         // Name/label field
-        val etName = EditText(context).apply { 
+        val etName = EditText(context).apply {
             hint = "Label"
-            setText(model.name) 
+            setText(model.name)
         }
         dlg.addView(etName)
-        dlg.addView(gap())
+        dlg.addView(createGap(8))
 
         // Width & height sliders
-        addSizeControls(dlg, gap)
-        
+        addSizeControls(dlg, createGap)
+
         // Sensitivity slider (for sticks and touchpads)
-        val sensSeek = addSensitivityControl(dlg, gap)
+        val sensSeek = addSensitivityControl(dlg, createGap)
 
         // Hold toggle checkbox (for buttons)
-        val chkHold = addHoldToggleControl(dlg, gap)
-        
+        val chkHold = addHoldToggleControl(dlg, createGap)
+
         // Auto-center checkbox (for sticks and touchpads)
-        val chkAuto = addAutoCenterControl(dlg, gap)
+        val chkAuto = addAutoCenterControl(dlg, createGap)
 
         // Touchpad-specific controls
-        val chkDrag = addTouchpadControls(dlg, gap)
+        val chkDrag = addTouchpadControls(dlg, createGap)
 
         // Button-specific controls for swipe activation
-        val chkSwipe = addSwipeActivationControl(dlg, gap)
+        val chkSwipe = addSwipeActivationControl(dlg, createGap)
 
         // Directional mode checkbox and container (for sticks)
-        val directionalData = addDirectionalModeControls(dlg, gap)
+        val directionalData = addDirectionalModeControls(dlg, createGap)
 
         // Payload field with autocomplete
         val etPayload = addPayloadControl(dlg)
@@ -100,20 +102,20 @@ class PropertySheetBuilder(
                 model.w = directionalData.wSeek.progress.toFloat().coerceAtLeast(40f)
                 model.h = directionalData.hSeek.progress.toFloat().coerceAtLeast(40f)
                 model.payload = etPayload.text.toString().trim()
-                
+
                 // Button-specific properties
                 if (model.type == ControlType.BUTTON) {
                     model.holdToggle = chkHold.isChecked
                     model.holdDurationMs = directionalData.etMs.text.toString().toLongOrNull() ?: 400L
                     model.swipeActivate = chkSwipe.isChecked
                 }
-                
+
                 // Stick/Touchpad properties
                 if (model.type != ControlType.BUTTON) {
                     model.autoCenter = chkAuto.isChecked
                     sensSeek?.let { model.sensitivity = it.progress / 100f }
                 }
-                
+
                 // Touchpad-specific properties
                 if (model.type == ControlType.TOUCHPAD) {
                     model.holdLeftWhileTouch = chkDrag.isChecked
@@ -145,38 +147,38 @@ class PropertySheetBuilder(
             max = 600
             progress = model.w.roundToInt().coerceIn(40, 600)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { 
-                    wText.text = "Width: $p px" 
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    wText.text = "Width: $p px"
                 }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
-        
+
         val hText = TextView(context)
         val hSeek = SeekBar(context).apply {
             max = 600
             progress = model.h.roundToInt().coerceIn(40, 600)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { 
-                    hText.text = "Height: $p px" 
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    hText.text = "Height: $p px"
                 }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
-        
+
         // Set initial text values
         wText.text = "Width: ${wSeek.progress} px"
         hText.text = "Height: ${hSeek.progress} px"
-        
+
         // Add to container
         dlg.addView(wText)
         dlg.addView(wSeek)
         dlg.addView(hText)
         dlg.addView(hSeek)
-        dlg.addView(gapCreator())
-        
+        dlg.addView(gapCreator(8))
+
         return Pair(wSeek, hSeek)
     }
 
@@ -186,26 +188,26 @@ class PropertySheetBuilder(
     private fun addSensitivityControl(dlg: LinearLayout, gapCreator: (Int) -> Space): SeekBar? {
         // Only add sensitivity for non-button controls
         if (model.type == ControlType.BUTTON) return null
-        
+
         val sText = TextView(context)
         val sensSeek = SeekBar(context).apply {
             max = 500
             progress = (model.sensitivity * 100).roundToInt()
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) { 
-                    sText.text = "Sensitivity: ${p / 100f}" 
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    sText.text = "Sensitivity: ${p / 100f}"
                 }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
-        
+
         sText.text = "Sensitivity: ${sensSeek.progress / 100f}"
-        
+
         dlg.addView(sText)
         dlg.addView(sensSeek)
-        dlg.addView(gapCreator())
-        
+        dlg.addView(gapCreator(8))
+
         return sensSeek
     }
 
@@ -218,18 +220,18 @@ class PropertySheetBuilder(
             isChecked = model.holdToggle
             visibility = if (model.type == ControlType.BUTTON) View.VISIBLE else View.GONE
         }
-        
+
         val etMs = EditText(context).apply {
             hint = "ms"
             inputType = InputType.TYPE_CLASS_NUMBER
             setText(model.holdDurationMs.toString())
             visibility = chkHold.visibility
         }
-        
+
         dlg.addView(chkHold)
         dlg.addView(etMs)
-        dlg.addView(gapCreator())
-        
+        dlg.addView(gapCreator(8))
+
         return chkHold
     }
 
@@ -242,10 +244,10 @@ class PropertySheetBuilder(
             isChecked = model.autoCenter
             visibility = if (model.type != ControlType.BUTTON) View.VISIBLE else View.GONE
         }
-        
+
         dlg.addView(chkAuto)
-        dlg.addView(gapCreator())
-        
+        dlg.addView(gapCreator(8))
+
         return chkAuto
     }
 
@@ -255,8 +257,8 @@ class PropertySheetBuilder(
     private fun addTouchpadControls(dlg: LinearLayout, gapCreator: (Int) -> Space): CheckBox {
         // Only show for touchpad controls
         val isTouchpad = model.type == ControlType.TOUCHPAD
-        val visibility = if (isTouchpad) View.VISIBLE else View.GONE
-        
+        var visibility = if (isTouchpad) View.VISIBLE else View.GONE
+
         // Hold left mouse button while touching
         val chkDrag = CheckBox(context).apply {
             text = "Hold left while finger is down"
@@ -264,7 +266,7 @@ class PropertySheetBuilder(
             visibility = visibility
         }
         dlg.addView(chkDrag)
-        dlg.addView(gapCreator())
+        dlg.addView(gapCreator(8))
 
         // Toggle left click mode
         val chkToggleClick = CheckBox(context).apply {
@@ -273,7 +275,7 @@ class PropertySheetBuilder(
             visibility = visibility
         }
         dlg.addView(chkToggleClick)
-        dlg.addView(gapCreator())
+        dlg.addView(gapCreator(8))
 
         // Make options mutually exclusive
         if (isTouchpad) {
@@ -289,7 +291,7 @@ class PropertySheetBuilder(
                 }
             }
         }
-        
+
         return chkDrag
     }
 
@@ -302,10 +304,10 @@ class PropertySheetBuilder(
             isChecked = model.swipeActivate
             visibility = if (model.type == ControlType.BUTTON) View.VISIBLE else View.GONE
         }
-        
+
         dlg.addView(chkSwipe)
-        dlg.addView(gapCreator())
-        
+        dlg.addView(gapCreator(8))
+
         return chkSwipe
     }
 
@@ -320,25 +322,25 @@ class PropertySheetBuilder(
         val etMs: EditText,
         val chkToggleClick: CheckBox
     )
-    
+
     private fun addDirectionalModeControls(dlg: LinearLayout, gapCreator: (Int) -> Space): DirectionalControlData {
-        // Width and height seekbars (initialized earlier)
-        val sizeControls = dlg.findViewWithTag<SeekBar>("width_seek") ?: SeekBar(context)
-        val heightSeek = dlg.findViewWithTag<SeekBar>("height_seek") ?: SeekBar(context)
-        
-        // Hold duration input (for button hold toggle)
-        val etMs = dlg.findViewWithTag<EditText>("hold_duration") ?: EditText(context).apply {
+        // Find existing controls or create new ones - using vars instead of vals
+        var sizeControls = dlg.findViewWithTag<SeekBar>("width_seek") ?: SeekBar(context)
+        var heightSeek = dlg.findViewWithTag<SeekBar>("height_seek") ?: SeekBar(context)
+
+        // Hold duration input (for button hold toggle) - using var instead of val
+        var etMs = dlg.findViewWithTag<EditText>("hold_duration") ?: EditText(context).apply {
             setText(model.holdDurationMs.toString())
         }
-        
+
         // Toggle click checkbox (for touchpad toggle mode)
         val chkToggleClick = dlg.findViewWithTag<CheckBox>("toggle_click") ?: CheckBox(context).apply {
             isChecked = model.toggleLeftClick
         }
-        
+
         // Only add directional mode for sticks
         val isStick = model.type == ControlType.STICK
-        
+
         // Directional mode checkbox
         val chkDirectional = CheckBox(context).apply {
             text = "Directional mode (WASD style)"
@@ -366,7 +368,7 @@ class PropertySheetBuilder(
             // Add directional commands fields
             addDirectionalCommandsUI(directionalContainer, gapCreator)
         }
-        
+
         return DirectionalControlData(
             chkDirectional,
             directionalContainer,
@@ -385,7 +387,7 @@ class PropertySheetBuilder(
             hint = "payload (comma-sep)"
             setText(model.payload)
             inputType = InputType.TYPE_TEXT_FLAG_CAP_WORDS
-            
+
             // Set up autocomplete suggestions
             val suggestions = arrayOf(
                 "A_PRESSED", "B_PRESSED", "X_PRESSED", "Y_PRESSED",
@@ -399,7 +401,7 @@ class PropertySheetBuilder(
                 )
             )
         }
-        
+
         dlg.addView(etPayload)
         return etPayload
     }
@@ -428,18 +430,18 @@ class PropertySheetBuilder(
 
         // Boost threshold slider and input
         addThresholdControl(
-            directionalContainer, 
-            "Regular Boost threshold:", 
+            directionalContainer,
+            "Regular Boost threshold:",
             model.boostThreshold,
             "boost_threshold",
             null,
             gapCreator
         )
-        
+
         // Super boost threshold slider and input
         addThresholdControl(
-            directionalContainer, 
-            "Super Boost threshold:", 
+            directionalContainer,
+            "Super Boost threshold:",
             model.superBoostThreshold,
             "super_boost_threshold",
             "boost_threshold", // Reference to regular threshold for ensuring super > regular
@@ -471,10 +473,10 @@ class PropertySheetBuilder(
         addDirectionalCommandField(directionalContainer, "Left super boost command:", model.leftSuperBoostCommand, "A,SHIFT,SPACE", "left_super_boost", gapCreator)
         addDirectionalCommandField(directionalContainer, "Right super boost command:", model.rightSuperBoostCommand, "D,SHIFT,SPACE", "right_super_boost", gapCreator)
     }
-    
+
     /**
      * Create a threshold control with slider and direct input
-     * 
+     *
      * @param container The container to add controls to
      * @param labelText The label for this threshold
      * @param currentValue The current threshold value
@@ -597,7 +599,7 @@ class PropertySheetBuilder(
         container.addView(thresholdRow)
         container.addView(gapCreator(16))
     }
-    
+
     /**
      * Helper function to add a directional command field
      */
@@ -616,9 +618,9 @@ class PropertySheetBuilder(
             tag = tagValue
         }
         container.addView(editText)
-        container.addView(gapCreator())
+        container.addView(gapCreator(8))
     }
-    
+
     /**
      * Update directional mode settings from UI components
      * Reads values from all the UI components and updates the control model
@@ -637,7 +639,7 @@ class PropertySheetBuilder(
         directionalContainer.findViewWithTag<EditText>("right_command")?.let {
             model.rightCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D"
         }
-        
+
         // Thresholds
         directionalContainer.findViewWithTag<SeekBar>("boost_threshold")?.let {
             model.boostThreshold = 0.1f + (it.progress / 100f)
@@ -660,7 +662,7 @@ class PropertySheetBuilder(
                 model.superBoostThreshold = 0.75f
             }
         }
-        
+
         // Boost commands
         directionalContainer.findViewWithTag<EditText>("up_boost")?.let {
             model.upBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT"
@@ -674,7 +676,7 @@ class PropertySheetBuilder(
         directionalContainer.findViewWithTag<EditText>("right_boost")?.let {
             model.rightBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT"
         }
-        
+
         // Super boost commands
         directionalContainer.findViewWithTag<EditText>("up_super_boost")?.let {
             model.upSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT,SPACE"

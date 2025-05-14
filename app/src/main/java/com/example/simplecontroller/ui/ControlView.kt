@@ -316,3 +316,24 @@ class ControlView(
     fun updateOverlay() {
         uiHelper.updateOverlay()
     }
+
+    /**
+     * Show properties dialog for this control
+     * This method is needed by LayoutManager
+     */
+    fun showProps() {
+        PropertySheetBuilder(context, model) {
+            // After properties are updated:
+            val lp = layoutParams as ViewGroup.MarginLayoutParams
+            lp.width = model.w.toInt()
+            lp.height = model.h.toInt()
+            layoutParams = lp
+            uiHelper.updateLabel()
+            invalidate()
+
+            // Stop any running senders when settings change
+            stopContinuousSending()
+            stopDirectionalCommands()
+        }.showPropertySheet()
+    }
+}

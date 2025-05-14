@@ -14,7 +14,7 @@ import com.example.simplecontroller.ui.ControlView
 
 /**
  * Manages control layouts including saving, loading, and creation.
- * 
+ *
  * This class encapsulates all layout-related functionality that was previously
  * in MainActivity, including:
  * - Saving/loading layouts to/from storage
@@ -34,17 +34,17 @@ class LayoutManager(
         fun onLayoutSaved(layoutName: String)
         fun clearControlViews()
     }
-    
+
     // Callback handler
     private var callback: LayoutCallback? = null
-    
+
     /**
      * Set the callback for layout operations
      */
     fun setCallback(callback: LayoutCallback) {
         this.callback = callback
     }
-    
+
     /**
      * Create control views for all controls in the list
      */
@@ -53,7 +53,7 @@ class LayoutManager(
             canvas.addView(controlCreator(control).apply { tag = "control" })
         }
     }
-    
+
     /**
      * Create a new control of the specified type
      */
@@ -67,11 +67,18 @@ class LayoutManager(
         val x0 = ((cw - w) / 2f).coerceAtLeast(80f)
         val y0 = ((ch - w) / 2f).coerceAtLeast(80f)
 
+        // Create control model with default payload
+        val payload = when(type) {
+            ControlType.BUTTON -> "BUTTON_PRESSED"
+            ControlType.STICK -> "STICK"
+            ControlType.TOUCHPAD -> "TOUCHPAD"
+        }
+
         // Create control model
         val c = Control(
             id = id, type = type,
             x = x0, y = y0, w = w, h = w,
-            payload = type.defaultPayload()
+            payload = payload
         )
         controls.add(c)
 
@@ -82,7 +89,7 @@ class LayoutManager(
         // Show properties dialog
         view.post { view.showProps() }
     }
-    
+
     /**
      * Show the save layout dialog
      */
@@ -102,17 +109,17 @@ class LayoutManager(
             .setNegativeButton("Cancel", null)
             .show()
     }
-    
+
     /**
      * Show the load layout dialog
      */
     fun showLoadDialog() {
         val names = listLayouts(context)
-        if (names.isEmpty()) { 
+        if (names.isEmpty()) {
             toast("No saved layouts")
-            return 
+            return
         }
-        
+
         AlertDialog.Builder(context)
             .setTitle("Load layout")
             .setItems(names.toTypedArray()) { _, i ->
@@ -121,11 +128,11 @@ class LayoutManager(
                     // Clear existing controls and views
                     callback?.clearControlViews()
                     controls.clear()
-                    
+
                     // Add loaded controls
                     controls.addAll(loadedControls)
                     spawnControlViews()
-                    
+
                     // Notify callback
                     callback?.onLayoutLoaded(sel)
                     toast("Loaded \"$sel\"")
@@ -133,7 +140,7 @@ class LayoutManager(
             }
             .show()
     }
-    
+
     /**
      * Create a default layout if none exists
      */
@@ -149,7 +156,7 @@ class LayoutManager(
             payload = "STICK_L"
         )
     )
-    
+
     /**
      * Add a new control from an existing model
      * Used when duplicating controls
@@ -158,14 +165,14 @@ class LayoutManager(
         controls.add(src)
         canvas.addView(controlCreator(src).apply { tag = "control" })
     }
-    
+
     /**
      * Remove a control
      */
     fun removeControl(c: Control) {
         controls.remove(c)
     }
-    
+
     /**
      * Show a toast message
      */
