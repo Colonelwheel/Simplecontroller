@@ -6,6 +6,12 @@ import android.view.View
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.Switch
+import android.text.InputType
+import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.ImageButton
+import android.widget.LinearLayout
+import androidx.core.content.ContextCompat
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 /**
@@ -135,5 +141,75 @@ class UIComponentBuilder(
     fun updateViewsVisibility(views: List<View>, visible: Boolean) {
         val visibility = if (visible) View.VISIBLE else View.GONE
         views.forEach { it.visibility = visibility }
+    }
+
+    /**
+     * Add an editable text field with apply button
+     *
+     * @param initialValue Initial value to display
+     * @param hint Hint text to show
+     * @param gravity Position gravity
+     * @param marginH Horizontal margin
+     * @param marginV Vertical margin
+     * @param width Width in pixels
+     * @param onApply Callback when value is applied
+     * @return Pair of the EditText and the Button
+     */
+    fun addEditWithApplyButton(
+        initialValue: String,
+        hint: String,
+        gravity: Int,
+        marginH: Int,
+        marginV: Int,
+        width: Int = 100,
+        onApply: (String) -> Unit
+    ): Pair<EditText, ImageButton> {
+        // Create container layout
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                gravity
+            ).apply {
+                setMargins(marginH, marginV, marginH, marginV)
+            }
+        }
+
+        // Create EditText
+        val editText = EditText(context).apply {
+            setText(initialValue)
+            this.hint = hint
+            inputType = InputType.TYPE_CLASS_NUMBER
+            layoutParams = LinearLayout.LayoutParams(
+                width,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            background = ContextCompat.getDrawable(context, android.R.drawable.edit_text)
+            setPadding(8, 0, 8, 0)
+        }
+
+        // Create apply button
+        val applyButton = ImageButton(context).apply {
+            setImageResource(android.R.drawable.ic_menu_save)
+            background = null
+            alpha = 0.8f
+            setPadding(4, 4, 4, 4)
+            setOnClickListener {
+                val value = editText.text.toString()
+                if (value.isNotEmpty()) {
+                    onApply(value)
+                }
+            }
+        }
+
+        // Add views to container
+        container.addView(editText)
+        container.addView(applyButton)
+
+        // Add container to canvas
+        canvas.addView(container)
+
+        return Pair(editText, applyButton)
     }
 }

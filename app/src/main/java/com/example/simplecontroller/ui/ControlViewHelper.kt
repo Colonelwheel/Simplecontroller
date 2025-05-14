@@ -161,7 +161,7 @@ class ControlViewHelper(
             .filter { it.isNotBlank() }
             .forEach { NetworkClient.send(it.trim()) }
     }
-    
+
     /**
      * Start repeating the payload (for turbo mode)
      */
@@ -170,10 +170,10 @@ class ControlViewHelper(
         repeater = object : Runnable {
             override fun run() {
                 firePayload()
-                uiHandler.postDelayed(this, 16L) // ≈60 Hz
+                uiHandler.postDelayed(this, GlobalSettings.turboSpeed) // Use the configurable speed
             }
         }
-        uiHandler.postDelayed(repeater!!, 16L)
+        uiHandler.postDelayed(repeater!!, GlobalSettings.turboSpeed)
     }
     
     /**
@@ -221,6 +221,11 @@ object GlobalSettings {
             }
             field = value
         }
+
+    // Speed of turbo/rapid-fire in milliseconds
+    var turboSpeed = 16L // Default 16ms (≈60 Hz)
+
+
     
     // Whether swipe mode is active
     var globalSwipe = false
