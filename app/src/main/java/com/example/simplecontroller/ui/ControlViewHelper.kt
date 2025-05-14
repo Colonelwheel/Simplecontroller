@@ -310,4 +310,26 @@ object SwipeManager {
     fun cleanupActiveTouch() {
         swipeHandler.setSwipeEnabled(false)
     }
+    
+    /**
+     * Re-center all stick controls
+     * This is triggered by the Re-center button
+     */
+    fun recenterAllSticks() {
+        allViews.forEach { view ->
+            if (view.model.type == ControlType.STICK) {
+                // Stop any continuous sending or directional commands
+                view.stopContinuousSending()
+                view.stopDirectionalCommands()
+                
+                // Send zero values to center the stick
+                if (view.model.directionalMode) {
+                    // For directional sticks, we just stop any active commands
+                } else {
+                    // For analog sticks, send center position (0,0)
+                    NetworkClient.send("${view.model.payload}:0.00,0.00")
+                }
+            }
+        }
+    }
 }

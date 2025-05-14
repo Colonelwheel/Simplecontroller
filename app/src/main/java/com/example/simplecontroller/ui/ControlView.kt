@@ -106,6 +106,11 @@ class ControlView(
                 paint.color = if (isLatched) 0xFF4CAF50.toInt() else 0xFF2196F3.toInt()
                 c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
             }
+            ControlType.RECENTER -> {
+                // Re-center button uses a distinctive orange color
+                paint.color = if (isLatched) 0xFFFF9800.toInt() else 0xFFFFC107.toInt() // Orange color
+                c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
+            }
             ControlType.STICK -> {
                 paint.color = 0x552196F3
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
@@ -176,6 +181,25 @@ class ControlView(
                         isPressed = isLatched
                         invalidate() // Redraw to show the latched state with the new color
                     }
+                }
+            }
+
+            /* ----- RE-CENTER BUTTON ----- */
+            ControlType.RECENTER -> when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Visual feedback
+                    isLatched = true
+                    isPressed = true
+                    invalidate()
+                    
+                    // Trigger re-centering of all sticks
+                    SwipeManager.recenterAllSticks()
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    // Visual feedback
+                    isLatched = false
+                    isPressed = false
+                    invalidate()
                 }
             }
 

@@ -3,7 +3,7 @@ package com.example.simplecontroller.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ControlType { BUTTON, STICK, TOUCHPAD }   // ← keep the names you already use
+enum class ControlType { BUTTON, STICK, TOUCHPAD, RECENTER }   // ← keep the names you already use
 
 @Serializable
 data class Control(
@@ -103,4 +103,5 @@ fun ControlType.defaultPayload(): String = when (this) {
     ControlType.BUTTON   -> "BUTTON_PRESSED"
     ControlType.STICK    -> "STICK"
     ControlType.TOUCHPAD -> "TOUCHPAD"
+    ControlType.RECENTER -> "RECENTER"
 }
