@@ -19,375 +19,311 @@ import kotlin.math.roundToInt
  * This class encapsulates the dialog creation and property management for all control types.
  * It creates different UI elements based on the control type (Button, Stick, Touchpad) and
  * handles saving the updated properties back to the control model.
- *
- * Features:
- * - Builds scrollable dialog with appropriate fields for each control type
- * - Manages control sizing, sensitivity and payload
- * - Handles specialized settings like hold toggle, auto-center, etc.
- * - Creates complex directional control settings for sticks
  */
 class PropertySheetBuilder(
     private val context: Context,
     private val model: Control,
     private val onPropertiesUpdated: () -> Unit
 ) {
+    // UI components that need to be accessible across methods
+    private data class UIComponents(
+        val nameField: EditText,
+        val widthSeek: SeekBar,
+        val heightSeek: SeekBar,
+        val sensitivitySeek: SeekBar?,
+        val holdToggle: CheckBox,
+        val autoCenter: CheckBox,
+        val holdDurationField: EditText,
+        val swipeActivate: CheckBox,
+        val holdLeftWhileTouch: CheckBox,
+        val toggleLeftClick: CheckBox,
+        val directionalMode: CheckBox,
+        val directionalContainer: LinearLayout,
+        val payloadField: AutoCompleteTextView
+    )
+    
     /**
-     * Show the property sheet dialog with all appropriate UI elements for this control type.
-     * This creates a scrollable dialog containing all editable properties for the control.
+     * Shows the property sheet dialog with all appropriate UI elements for this control type.
      */
     fun showPropertySheet() {
-        // Create a ScrollView to make long property sheets scrollable
-        val scrollView = ScrollView(context).apply {
-            // Set max height to 70% of screen height to ensure dialog isn't too tall
-            val metrics = context.resources.displayMetrics
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                (metrics.heightPixels * 0.7).toInt()
-            )
-        }
-
-        // Main dialog container
-        val dlg = LinearLayout(context).apply {
+        // Create scrollable dialog container
+        val scrollView = createScrollView()
+        val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 24, 32, 8)
         }
-
-        // Add the LinearLayout to the ScrollView
-        scrollView.addView(dlg)
-
-        // Helper for creating space between components
-        val createGap = { h: Int ->
-            Space(context).apply { minimumHeight = h }
-        }
-
-        // ---- Common properties for all control types ----
-
-        // Name/label field
-        val etName = EditText(context).apply {
-            hint = "Label"
-            setText(model.name)
-        }
-        dlg.addView(etName)
-        dlg.addView(createGap(8))
-
-        // Width & height sliders
-        addSizeControls(dlg, createGap)
-
-        // Sensitivity slider (for sticks and touchpads)
-        val sensSeek = addSensitivityControl(dlg, createGap)
-
-        // Hold toggle checkbox (for buttons)
-        val chkHold = addHoldToggleControl(dlg, createGap)
-
-        // Auto-center checkbox (for sticks and touchpads)
-        val chkAuto = addAutoCenterControl(dlg, createGap)
-
-        // Touchpad-specific controls
-        val chkDrag = addTouchpadControls(dlg, createGap)
-
-        // Button-specific controls for swipe activation
-        val chkSwipe = addSwipeActivationControl(dlg, createGap)
-
-        // Directional mode checkbox and container (for sticks)
-        val directionalData = addDirectionalModeControls(dlg, createGap)
-
-        // Payload field with autocomplete
-        val etPayload = addPayloadControl(dlg)
-
+        scrollView.addView(container)
+        
+        // Build all UI components
+        val components = buildUIComponents(container)
+        
         // Create and show the dialog
         AlertDialog.Builder(context).setTitle("Properties").setView(scrollView)
-            .setPositiveButton("OK") { _, _ ->
-                // Save all the common properties
-                model.name = etName.text.toString()
-                model.w = directionalData.wSeek.progress.toFloat().coerceAtLeast(40f)
-                model.h = directionalData.hSeek.progress.toFloat().coerceAtLeast(40f)
-                model.payload = etPayload.text.toString().trim()
-
-                // Button-specific properties
-                if (model.type == ControlType.BUTTON) {
-                    model.holdToggle = chkHold.isChecked
-                    model.holdDurationMs = directionalData.etMs.text.toString().toLongOrNull() ?: 400L
-                    model.swipeActivate = chkSwipe.isChecked
-                }
-
-                // Stick/Touchpad properties
-                if (model.type != ControlType.BUTTON) {
-                    model.autoCenter = chkAuto.isChecked
-                    sensSeek?.let { model.sensitivity = it.progress / 100f }
-                }
-
-                // Touchpad-specific properties
-                if (model.type == ControlType.TOUCHPAD) {
-                    model.holdLeftWhileTouch = chkDrag.isChecked
-                    model.toggleLeftClick = directionalData.chkToggleClick.isChecked
-                }
-
-                // Stick-specific directional mode properties
-                if (model.type == ControlType.STICK) {
-                    model.directionalMode = directionalData.chkDirectional.isChecked
-
-                    if (model.directionalMode) {
-                        updateDirectionalModeSettings(directionalData.directionalContainer)
-                    }
-                }
-
-                // Notify that properties have been updated
-                onPropertiesUpdated()
-            }
+            .setPositiveButton("OK") { _, _ -> saveProperties(components) }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
     /**
-     * Add width and height sliders to the property sheet
+     * Creates a ScrollView for the dialog content
      */
-    private fun addSizeControls(dlg: LinearLayout, gapCreator: (Int) -> Space): Pair<SeekBar, SeekBar> {
-        val wText = TextView(context)
-        val wSeek = SeekBar(context).apply {
-            max = 600
-            progress = model.w.roundToInt().coerceIn(40, 600)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
-                    wText.text = "Width: $p px"
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
-        }
-
-        val hText = TextView(context)
-        val hSeek = SeekBar(context).apply {
-            max = 600
-            progress = model.h.roundToInt().coerceIn(40, 600)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
-                    hText.text = "Height: $p px"
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
-        }
-
-        // Set initial text values
-        wText.text = "Width: ${wSeek.progress} px"
-        hText.text = "Height: ${hSeek.progress} px"
-
-        // Add to container
-        dlg.addView(wText)
-        dlg.addView(wSeek)
-        dlg.addView(hText)
-        dlg.addView(hSeek)
-        dlg.addView(gapCreator(8))
-
-        return Pair(wSeek, hSeek)
+    private fun createScrollView() = ScrollView(context).apply {
+        val metrics = context.resources.displayMetrics
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            (metrics.heightPixels * 0.7).toInt()
+        )
     }
-
+    
     /**
-     * Add sensitivity slider for stick/touchpad controls
+     * Helper for creating space between components
      */
-    private fun addSensitivityControl(dlg: LinearLayout, gapCreator: (Int) -> Space): SeekBar? {
-        // Only add sensitivity for non-button controls
-        if (model.type == ControlType.BUTTON) return null
-
-        val sText = TextView(context)
-        val sensSeek = SeekBar(context).apply {
-            max = 500
-            progress = (model.sensitivity * 100).roundToInt()
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
-                    sText.text = "Sensitivity: ${p / 100f}"
-                }
-                override fun onStartTrackingTouch(s: SeekBar?) {}
-                override fun onStopTrackingTouch(s: SeekBar?) {}
-            })
-        }
-
-        sText.text = "Sensitivity: ${sensSeek.progress / 100f}"
-
-        dlg.addView(sText)
-        dlg.addView(sensSeek)
-        dlg.addView(gapCreator(8))
-
-        return sensSeek
+    private fun createGap(height: Int = 8) = Space(context).apply { 
+        minimumHeight = height 
     }
-
+    
     /**
-     * Add hold toggle control for buttons
+     * Builds all UI components for the property sheet
      */
-    private fun addHoldToggleControl(dlg: LinearLayout, gapCreator: (Int) -> Space): CheckBox {
-        val chkHold = CheckBox(context).apply {
-            text = "Hold toggles"
-            isChecked = model.holdToggle
-            visibility = if (model.type == ControlType.BUTTON) View.VISIBLE else View.GONE
-        }
-
-        val etMs = EditText(context).apply {
-            hint = "ms"
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setText(model.holdDurationMs.toString())
-            visibility = chkHold.visibility
-        }
-
-        dlg.addView(chkHold)
-        dlg.addView(etMs)
-        dlg.addView(gapCreator(8))
-
-        return chkHold
-    }
-
-    /**
-     * Add auto-center control for sticks/touchpads
-     */
-    private fun addAutoCenterControl(dlg: LinearLayout, gapCreator: (Int) -> Space): CheckBox {
-        val chkAuto = CheckBox(context).apply {
-            text = "Auto-center"
-            isChecked = model.autoCenter
-            visibility = if (model.type != ControlType.BUTTON) View.VISIBLE else View.GONE
-        }
-
-        dlg.addView(chkAuto)
-        dlg.addView(gapCreator(8))
-
-        return chkAuto
-    }
-
-    /**
-     * Add touchpad-specific controls
-     */
-    private fun addTouchpadControls(dlg: LinearLayout, gapCreator: (Int) -> Space): CheckBox {
-        // Only show for touchpad controls
+    private fun buildUIComponents(container: LinearLayout): UIComponents {
+        // Basic properties
+        val nameField = addTextField(container, model.name, "Label")
+        
+        // Size controls
+        val (widthSeek, heightSeek) = addSizeControls(container)
+        
+        // Sensitivity (for stick/touchpad)
+        val sensitivitySeek = if (model.type != ControlType.BUTTON) {
+            addSeekBarWithLabel(
+                container, 
+                "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}",
+                500,
+                (model.sensitivity * 100).roundToInt(),
+                { "Sensitivity: ${it / 100f}" }
+            )
+        } else null
+        
+        // Button-specific controls
+        val holdToggle = addCheckBox(
+            container, 
+            "Hold toggles", 
+            model.holdToggle,
+            model.type == ControlType.BUTTON
+        )
+        
+        val holdDurationField = addTextField(
+            container,
+            model.holdDurationMs.toString(),
+            "ms",
+            InputType.TYPE_CLASS_NUMBER,
+            model.type == ControlType.BUTTON
+        )
+        
+        val swipeActivate = addCheckBox(
+            container,
+            "Enable swipe activation",
+            model.swipeActivate,
+            model.type == ControlType.BUTTON
+        )
+        
+        // Stick/Touchpad controls
+        val autoCenter = addCheckBox(
+            container,
+            "Auto-center",
+            model.autoCenter,
+            model.type != ControlType.BUTTON
+        )
+        
+        // Touchpad-specific controls
         val isTouchpad = model.type == ControlType.TOUCHPAD
-        var visibility = if (isTouchpad) View.VISIBLE else View.GONE
-
-        // Hold left mouse button while touching
-        val chkDrag = CheckBox(context).apply {
-            text = "Hold left while finger is down"
-            isChecked = model.holdLeftWhileTouch
-            visibility = visibility
-        }
-        dlg.addView(chkDrag)
-        dlg.addView(gapCreator(8))
-
-        // Toggle left click mode
-        val chkToggleClick = CheckBox(context).apply {
-            text = "Toggle left click mode (click-lock)"
-            isChecked = model.toggleLeftClick
-            visibility = visibility
-        }
-        dlg.addView(chkToggleClick)
-        dlg.addView(gapCreator(8))
-
-        // Make options mutually exclusive
+        val holdLeftWhileTouch = addCheckBox(
+            container,
+            "Hold left while finger is down",
+            model.holdLeftWhileTouch,
+            isTouchpad
+        )
+        
+        val toggleLeftClick = addCheckBox(
+            container,
+            "Toggle left click mode (click-lock)",
+            model.toggleLeftClick,
+            isTouchpad
+        )
+        
+        // Make options mutually exclusive for touchpad
         if (isTouchpad) {
-            chkDrag.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked && chkToggleClick.isChecked) {
-                    chkToggleClick.isChecked = false
-                }
-            }
-
-            chkToggleClick.setOnCheckedChangeListener { _, isChecked ->
-                if (isChecked && chkDrag.isChecked) {
-                    chkDrag.isChecked = false
-                }
-            }
+            setupMutuallyExclusiveOptions(holdLeftWhileTouch, toggleLeftClick)
         }
-
-        return chkDrag
-    }
-
-    /**
-     * Add swipe activation control for buttons
-     */
-    private fun addSwipeActivationControl(dlg: LinearLayout, gapCreator: (Int) -> Space): CheckBox {
-        val chkSwipe = CheckBox(context).apply {
-            text = "Enable swipe activation"
-            isChecked = model.swipeActivate
-            visibility = if (model.type == ControlType.BUTTON) View.VISIBLE else View.GONE
-        }
-
-        dlg.addView(chkSwipe)
-        dlg.addView(gapCreator(8))
-
-        return chkSwipe
-    }
-
-    /**
-     * Add directional mode controls for sticks
-     */
-    private data class DirectionalControlData(
-        val chkDirectional: CheckBox,
-        val directionalContainer: LinearLayout,
-        val wSeek: SeekBar,
-        val hSeek: SeekBar,
-        val etMs: EditText,
-        val chkToggleClick: CheckBox
-    )
-
-    private fun addDirectionalModeControls(dlg: LinearLayout, gapCreator: (Int) -> Space): DirectionalControlData {
-        // Find existing controls or create new ones - using vars instead of vals
-        var sizeControls = dlg.findViewWithTag<SeekBar>("width_seek") ?: SeekBar(context)
-        var heightSeek = dlg.findViewWithTag<SeekBar>("height_seek") ?: SeekBar(context)
-
-        // Hold duration input (for button hold toggle) - using var instead of val
-        var etMs = dlg.findViewWithTag<EditText>("hold_duration") ?: EditText(context).apply {
-            setText(model.holdDurationMs.toString())
-        }
-
-        // Toggle click checkbox (for touchpad toggle mode)
-        val chkToggleClick = dlg.findViewWithTag<CheckBox>("toggle_click") ?: CheckBox(context).apply {
-            isChecked = model.toggleLeftClick
-        }
-
-        // Only add directional mode for sticks
+        
+        // Directional mode (for sticks)
         val isStick = model.type == ControlType.STICK
-
-        // Directional mode checkbox
-        val chkDirectional = CheckBox(context).apply {
-            text = "Directional mode (WASD style)"
-            isChecked = model.directionalMode
-            visibility = if (isStick) View.VISIBLE else View.GONE
-            tag = "directional_mode"
-        }
-        dlg.addView(chkDirectional)
-
-        // Container for directional mode settings
+        val directionalMode = addCheckBox(
+            container,
+            "Directional mode (WASD style)",
+            model.directionalMode,
+            isStick
+        )
+        
+        // Container for directional settings
         val directionalContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (isStick && model.directionalMode) View.VISIBLE else View.GONE
             tag = "directional_container"
         }
-        dlg.addView(directionalContainer)
-
-        // Only add detailed controls if this is a stick
+        container.addView(directionalContainer)
+        
+        // Setup visibility toggle for directional container
         if (isStick) {
-            // Update visibility when directional mode is toggled
-            chkDirectional.setOnCheckedChangeListener { _, isChecked ->
+            directionalMode.setOnCheckedChangeListener { _, isChecked ->
                 directionalContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
             }
-
-            // Add directional commands fields
-            addDirectionalCommandsUI(directionalContainer, gapCreator)
+            
+            // Add directional command fields
+            addDirectionalCommandsUI(directionalContainer)
         }
-
-        return DirectionalControlData(
-            chkDirectional,
-            directionalContainer,
-            sizeControls,
-            heightSeek,
-            etMs,
-            chkToggleClick
+        
+        // Payload field
+        val payloadField = addPayloadControl(container)
+        
+        return UIComponents(
+            nameField, widthSeek, heightSeek, sensitivitySeek,
+            holdToggle, autoCenter, holdDurationField, swipeActivate,
+            holdLeftWhileTouch, toggleLeftClick, directionalMode,
+            directionalContainer, payloadField
         )
     }
-
+    
+    /**
+     * Add standard text field
+     */
+    private fun addTextField(
+        container: LinearLayout,
+        initialValue: String,
+        hint: String,
+        inputType: Int = InputType.TYPE_CLASS_TEXT,
+        visible: Boolean = true
+    ): EditText {
+        return EditText(context).apply {
+            setText(initialValue)
+            this.hint = hint
+            this.inputType = inputType
+            visibility = if (visible) View.VISIBLE else View.GONE
+            container.addView(this)
+            container.addView(createGap())
+        }
+    }
+    
+    /**
+     * Add standard checkbox
+     */
+    private fun addCheckBox(
+        container: LinearLayout,
+        text: String,
+        isChecked: Boolean,
+        visible: Boolean = true,
+        tag: String? = null
+    ): CheckBox {
+        return CheckBox(context).apply {
+            this.text = text
+            this.isChecked = isChecked
+            visibility = if (visible) View.VISIBLE else View.GONE
+            if (tag != null) this.tag = tag
+            container.addView(this)
+            container.addView(createGap())
+        }
+    }
+    
+    /**
+     * Setup mutually exclusive checkboxes
+     */
+    private fun setupMutuallyExclusiveOptions(option1: CheckBox, option2: CheckBox) {
+        option1.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && option2.isChecked) {
+                option2.isChecked = false
+            }
+        }
+        
+        option2.setOnCheckedChangeListener { _, isChecked ->
+            if (isChecked && option1.isChecked) {
+                option1.isChecked = false
+            }
+        }
+    }
+    
+    /**
+     * Add width and height sliders
+     */
+    private fun addSizeControls(container: LinearLayout): Pair<SeekBar, SeekBar> {
+        // Width control
+        val widthText = TextView(context)
+        val widthSeek = addSeekBarWithLabel(
+            container, 
+            "Width: ${model.w.roundToInt()} px",
+            600,
+            model.w.roundToInt().coerceIn(40, 600),
+            { "Width: $it px" },
+            widthText
+        )
+        
+        // Height control
+        val heightText = TextView(context)
+        val heightSeek = addSeekBarWithLabel(
+            container, 
+            "Height: ${model.h.roundToInt()} px",
+            600,
+            model.h.roundToInt().coerceIn(40, 600),
+            { "Height: $it px" },
+            heightText
+        )
+        
+        return Pair(widthSeek, heightSeek)
+    }
+    
+    /**
+     * Add a seekbar with a label that updates
+     */
+    private fun addSeekBarWithLabel(
+        container: LinearLayout,
+        initialLabelText: String,
+        maxValue: Int,
+        initialProgress: Int,
+        labelUpdater: (Int) -> String,
+        textView: TextView? = null
+    ): SeekBar {
+        // Create label if not provided
+        val label = textView ?: TextView(context).apply {
+            container.addView(this)
+        }
+        label.text = initialLabelText
+        
+        // Create seekbar
+        val seekBar = SeekBar(context).apply {
+            max = maxValue
+            progress = initialProgress
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
+                    label.text = labelUpdater(p)
+                }
+                override fun onStartTrackingTouch(s: SeekBar?) {}
+                override fun onStopTrackingTouch(s: SeekBar?) {}
+            })
+        }
+        
+        container.addView(seekBar)
+        container.addView(createGap())
+        
+        return seekBar
+    }
+    
     /**
      * Add payload control with autocomplete
      */
-    private fun addPayloadControl(dlg: LinearLayout): AutoCompleteTextView {
-        val etPayload = AutoCompleteTextView(context).apply {
+    private fun addPayloadControl(container: LinearLayout): AutoCompleteTextView {
+        return AutoCompleteTextView(context).apply {
             hint = "payload (comma-sep)"
             setText(model.payload)
             inputType = InputType.TYPE_TEXT_FLAG_CAP_WORDS
-
+            
             // Set up autocomplete suggestions
             val suggestions = arrayOf(
                 "A_PRESSED", "B_PRESSED", "X_PRESSED", "Y_PRESSED",
@@ -400,100 +336,98 @@ class PropertySheetBuilder(
                     suggestions
                 )
             )
+            
+            container.addView(this)
         }
-
-        dlg.addView(etPayload)
-        return etPayload
     }
-
+    
     /**
-     * Add directional commands UI elements to the container
-     * Creates fields for all the directional commands and thresholds
+     * Add directional controls UI with threshold sliders and command fields
      */
-    private fun addDirectionalCommandsUI(
-        directionalContainer: LinearLayout,
-        gapCreator: (Int) -> Space
-    ) {
-        // Title
-        directionalContainer.addView(TextView(context).apply {
-            text = "Directional Commands"
+    private fun addDirectionalCommandsUI(container: LinearLayout) {
+        addSectionTitle(container, "Directional Commands")
+        
+        // Basic direction commands
+        addLabeledTextField(container, "Up command:", model.upCommand, "W", "up_command")
+        addLabeledTextField(container, "Down command:", model.downCommand, "S", "down_command")
+        addLabeledTextField(container, "Left command:", model.leftCommand, "A", "left_command")
+        addLabeledTextField(container, "Right command:", model.rightCommand, "D", "right_command")
+        container.addView(createGap(16))
+        
+        // Thresholds
+        addThresholdControl(
+            container, 
+            "Regular Boost threshold:", 
+            model.boostThreshold, 
+            "boost_threshold"
+        )
+        
+        addThresholdControl(
+            container, 
+            "Super Boost threshold:", 
+            model.superBoostThreshold, 
+            "super_boost_threshold", 
+            "boost_threshold"
+        )
+        
+        // Regular boost commands
+        addSectionTitle(container, "Regular Boost Commands")
+        addLabeledTextField(container, "Up boost command:", model.upBoostCommand, "W,SHIFT", "up_boost")
+        addLabeledTextField(container, "Down boost command:", model.downBoostCommand, "S,CTRL", "down_boost")
+        addLabeledTextField(container, "Left boost command:", model.leftBoostCommand, "A,SHIFT", "left_boost")
+        addLabeledTextField(container, "Right boost command:", model.rightBoostCommand, "D,SHIFT", "right_boost")
+        container.addView(createGap(16))
+        
+        // Super boost commands
+        addSectionTitle(container, "Super Boost Commands")
+        addLabeledTextField(container, "Up super boost command:", model.upSuperBoostCommand, "W,SHIFT,SPACE", "up_super_boost")
+        addLabeledTextField(container, "Down super boost command:", model.downSuperBoostCommand, "S,CTRL,SPACE", "down_super_boost")
+        addLabeledTextField(container, "Left super boost command:", model.leftSuperBoostCommand, "A,SHIFT,SPACE", "left_super_boost")
+        addLabeledTextField(container, "Right super boost command:", model.rightSuperBoostCommand, "D,SHIFT,SPACE", "right_super_boost")
+    }
+    
+    /**
+     * Add a section title
+     */
+    private fun addSectionTitle(container: LinearLayout, title: String) {
+        container.addView(TextView(context).apply {
+            text = title
             setPadding(0, 16, 0, 8)
             setTypeface(null, Typeface.BOLD)
         })
-
-        // Basic direction commands
-        addDirectionalCommandField(directionalContainer, "Up command:", model.upCommand, "W", "up_command", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Down command:", model.downCommand, "S", "down_command", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Left command:", model.leftCommand, "A", "left_command", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Right command:", model.rightCommand, "D", "right_command", gapCreator)
-        directionalContainer.addView(gapCreator(16))
-
-        // Boost threshold slider and input
-        addThresholdControl(
-            directionalContainer,
-            "Regular Boost threshold:",
-            model.boostThreshold,
-            "boost_threshold",
-            null,
-            gapCreator
-        )
-
-        // Super boost threshold slider and input
-        addThresholdControl(
-            directionalContainer,
-            "Super Boost threshold:",
-            model.superBoostThreshold,
-            "super_boost_threshold",
-            "boost_threshold", // Reference to regular threshold for ensuring super > regular
-            gapCreator
-        )
-
-        // Regular boost commands
-        directionalContainer.addView(TextView(context).apply {
-            text = "Regular Boost Commands"
-            setPadding(0, 8, 0, 8)
-            setTypeface(null, Typeface.BOLD)
-        })
-
-        addDirectionalCommandField(directionalContainer, "Up boost command:", model.upBoostCommand, "W,SHIFT", "up_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Down boost command:", model.downBoostCommand, "S,CTRL", "down_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Left boost command:", model.leftBoostCommand, "A,SHIFT", "left_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Right boost command:", model.rightBoostCommand, "D,SHIFT", "right_boost", gapCreator)
-        directionalContainer.addView(gapCreator(16))
-
-        // Super boost commands
-        directionalContainer.addView(TextView(context).apply {
-            text = "Super Boost Commands"
-            setPadding(0, 8, 0, 8)
-            setTypeface(null, Typeface.BOLD)
-        })
-
-        addDirectionalCommandField(directionalContainer, "Up super boost command:", model.upSuperBoostCommand, "W,SHIFT,SPACE", "up_super_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Down super boost command:", model.downSuperBoostCommand, "S,CTRL,SPACE", "down_super_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Left super boost command:", model.leftSuperBoostCommand, "A,SHIFT,SPACE", "left_super_boost", gapCreator)
-        addDirectionalCommandField(directionalContainer, "Right super boost command:", model.rightSuperBoostCommand, "D,SHIFT,SPACE", "right_super_boost", gapCreator)
     }
-
+    
     /**
-     * Create a threshold control with slider and direct input
-     *
-     * @param container The container to add controls to
-     * @param labelText The label for this threshold
-     * @param currentValue The current threshold value
-     * @param tagPrefix Tag prefix to use for the controls
-     * @param referenceThresholdTag Optional tag of another threshold to keep in relation with
-     * @param gapCreator Function to create spacing between elements
+     * Add a labeled text field
+     */
+    private fun addLabeledTextField(
+        container: LinearLayout,
+        labelText: String,
+        value: String,
+        hint: String,
+        tag: String
+    ) {
+        container.addView(TextView(context).apply { text = labelText })
+        container.addView(EditText(context).apply {
+            setText(value)
+            this.hint = hint
+            this.tag = tag
+        })
+        container.addView(createGap())
+    }
+    
+    /**
+     * Add a threshold control with slider and direct input
      */
     private fun addThresholdControl(
         container: LinearLayout,
         labelText: String,
         currentValue: Float,
         tagPrefix: String,
-        referenceThresholdTag: String?,
-        gapCreator: (Int) -> Space
+        referenceThresholdTag: String? = null
     ) {
         container.addView(TextView(context).apply { text = labelText })
-
+        
         // Row to hold the slider and input
         val thresholdRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -502,7 +436,7 @@ class PropertySheetBuilder(
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         }
-
+        
         // Text showing current value
         val thresholdText = TextView(context).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -514,7 +448,7 @@ class PropertySheetBuilder(
             }
             tag = "${tagPrefix}_text"
         }
-
+        
         // Direct edit field
         val thresholdEdit = EditText(context).apply {
             layoutParams = LinearLayout.LayoutParams(
@@ -524,171 +458,194 @@ class PropertySheetBuilder(
                 width = 100
                 gravity = Gravity.CENTER_VERTICAL
             }
-
+            
             inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             setText("%.2f".format(currentValue))
             tag = "${tagPrefix}_edit"
         }
-
+        
         // Create the slider
         val thresholdSeek = SeekBar(context).apply {
             layoutParams = LinearLayout.LayoutParams(
                 0,  // 0 width with weight means "take remaining space"
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { weight = 1f }
-
+            
             max = 90  // 0.1 to 1.0 in steps of 0.01
             progress = ((currentValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
             tag = tagPrefix
-
+            
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: SeekBar?, p: Int, f: Boolean) {
                     val value = 0.1f + (p / 100f)
                     thresholdText.text = "%.2f".format(value)
                     thresholdEdit.setText("%.2f".format(value))
-
-                    // If this is the super threshold, ensure it's higher than regular
-                    if (tagPrefix == "super_boost_threshold" && referenceThresholdTag != null) {
-                        val regularThreshold = container.findViewWithTag<SeekBar>(referenceThresholdTag)
-                        if (regularThreshold != null && value <= 0.1f + (regularThreshold.progress / 100f)) {
-                            regularThreshold.progress = ((value - 0.15f) * 100).toInt().coerceIn(0, 90)
-                        }
-                    }
+                    
+                    // Handle relationship with reference threshold if needed
+                    handleThresholdRelationship(container, tagPrefix, referenceThresholdTag, value)
                 }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar?) {}
             })
         }
-
+        
         // Set initial text value
         thresholdText.text = "%.2f".format(0.1f + (thresholdSeek.progress / 100f))
-
+        
         // Add update handler for direct editing
-        thresholdEdit.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                try {
-                    val value = thresholdEdit.text.toString().toFloat()
-                    val validValue = value.coerceIn(0.1f, 1.0f)
-                    val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
-                    thresholdSeek.progress = progress
-
-                    // Handle relationships between thresholds if needed
-                    if (tagPrefix == "super_boost_threshold" && referenceThresholdTag != null) {
-                        val regularThreshold = container.findViewWithTag<SeekBar>(referenceThresholdTag)
-                        if (regularThreshold != null) {
-                            // Make sure regular threshold is lower
-                            val regularValue = 0.1f + (regularThreshold.progress / 100f)
-                            if (validValue <= regularValue) {
-                                regularThreshold.progress = ((validValue - 0.15f) * 100).toInt().coerceIn(0, 90)
-                            }
-                        }
-                    }
-                } catch (e: NumberFormatException) {
-                    // Reset to current slider value if invalid input
-                    thresholdEdit.setText("%.2f".format(0.1f + (thresholdSeek.progress) / 100f))
-                }
-            }
-        }
-
+        setupThresholdDirectEdit(thresholdEdit, thresholdSeek, container, tagPrefix, referenceThresholdTag)
+        
         // Add all components to the row
         thresholdRow.addView(thresholdText)
         thresholdRow.addView(thresholdSeek)
         thresholdRow.addView(thresholdEdit)
-
+        
         // Add the row to the container
         container.addView(thresholdRow)
-        container.addView(gapCreator(16))
+        container.addView(createGap(16))
     }
-
+    
     /**
-     * Helper function to add a directional command field
+     * Handle relationship between threshold controls
      */
-    private fun addDirectionalCommandField(
+    private fun handleThresholdRelationship(
         container: LinearLayout,
-        labelText: String,
-        currentValue: String,
-        hintText: String,
-        tagValue: String,
-        gapCreator: (Int) -> Space
+        tagPrefix: String,
+        referenceThresholdTag: String?,
+        value: Float
     ) {
-        container.addView(TextView(context).apply { text = labelText })
-        val editText = EditText(context).apply {
-            hint = hintText
-            setText(currentValue)
-            tag = tagValue
+        if (tagPrefix == "super_boost_threshold" && referenceThresholdTag != null) {
+            val regularThreshold = container.findViewWithTag<SeekBar>(referenceThresholdTag)
+            if (regularThreshold != null && value <= 0.1f + (regularThreshold.progress / 100f)) {
+                regularThreshold.progress = ((value - 0.15f) * 100).toInt().coerceIn(0, 90)
+            }
         }
-        container.addView(editText)
-        container.addView(gapCreator(8))
     }
-
+    
+    /**
+     * Setup direct editing for threshold controls
+     */
+    private fun setupThresholdDirectEdit(
+        edit: EditText,
+        seekBar: SeekBar,
+        container: LinearLayout,
+        tagPrefix: String,
+        referenceThresholdTag: String?
+    ) {
+        edit.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                try {
+                    val value = edit.text.toString().toFloat()
+                    val validValue = value.coerceIn(0.1f, 1.0f)
+                    val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                    seekBar.progress = progress
+                    
+                    // Handle relationships between thresholds if needed
+                    handleThresholdRelationship(container, tagPrefix, referenceThresholdTag, validValue)
+                } catch (e: NumberFormatException) {
+                    // Reset to current slider value if invalid input
+                    edit.setText("%.2f".format(0.1f + (seekBar.progress) / 100f))
+                }
+            }
+        }
+    }
+    
+    /**
+     * Save all properties from UI components to the model
+     */
+    private fun saveProperties(components: UIComponents) {
+        // Save common properties
+        model.name = components.nameField.text.toString()
+        model.w = components.widthSeek.progress.toFloat().coerceAtLeast(40f)
+        model.h = components.heightSeek.progress.toFloat().coerceAtLeast(40f)
+        model.payload = components.payloadField.text.toString().trim()
+        
+        // Button-specific properties
+        if (model.type == ControlType.BUTTON) {
+            model.holdToggle = components.holdToggle.isChecked
+            model.holdDurationMs = components.holdDurationField.text.toString().toLongOrNull() ?: 400L
+            model.swipeActivate = components.swipeActivate.isChecked
+        }
+        
+        // Stick/Touchpad properties
+        if (model.type != ControlType.BUTTON) {
+            model.autoCenter = components.autoCenter.isChecked
+            components.sensitivitySeek?.let { model.sensitivity = it.progress / 100f }
+        }
+        
+        // Touchpad-specific properties
+        if (model.type == ControlType.TOUCHPAD) {
+            model.holdLeftWhileTouch = components.holdLeftWhileTouch.isChecked
+            model.toggleLeftClick = components.toggleLeftClick.isChecked
+        }
+        
+        // Stick-specific directional mode properties
+        if (model.type == ControlType.STICK) {
+            model.directionalMode = components.directionalMode.isChecked
+            
+            if (model.directionalMode) {
+                updateDirectionalModeSettings(components.directionalContainer)
+            }
+        }
+        
+        // Notify that properties have been updated
+        onPropertiesUpdated()
+    }
+    
     /**
      * Update directional mode settings from UI components
-     * Reads values from all the UI components and updates the control model
      */
     private fun updateDirectionalModeSettings(directionalContainer: LinearLayout) {
         // Basic directional commands
-        directionalContainer.findViewWithTag<EditText>("up_command")?.let {
-            model.upCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W"
-        }
-        directionalContainer.findViewWithTag<EditText>("down_command")?.let {
-            model.downCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S"
-        }
-        directionalContainer.findViewWithTag<EditText>("left_command")?.let {
-            model.leftCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A"
-        }
-        directionalContainer.findViewWithTag<EditText>("right_command")?.let {
-            model.rightCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D"
-        }
-
+        readTextFieldIntoModel(directionalContainer, "up_command") { model.upCommand = it.takeIfNotBlank() ?: "W" }
+        readTextFieldIntoModel(directionalContainer, "down_command") { model.downCommand = it.takeIfNotBlank() ?: "S" }
+        readTextFieldIntoModel(directionalContainer, "left_command") { model.leftCommand = it.takeIfNotBlank() ?: "A" }
+        readTextFieldIntoModel(directionalContainer, "right_command") { model.rightCommand = it.takeIfNotBlank() ?: "D" }
+        
         // Thresholds
-        directionalContainer.findViewWithTag<SeekBar>("boost_threshold")?.let {
-            model.boostThreshold = 0.1f + (it.progress / 100f)
-        } ?: directionalContainer.findViewWithTag<EditText>("boost_threshold_edit")?.let {
-            try {
-                model.boostThreshold = it.text.toString().toFloat().coerceIn(0.1f, 1.0f)
-            } catch (e: NumberFormatException) {
-                // Use default if parse fails
-                model.boostThreshold = 0.5f
-            }
-        }
-
-        directionalContainer.findViewWithTag<SeekBar>("super_boost_threshold")?.let {
-            model.superBoostThreshold = 0.1f + (it.progress / 100f)
-        } ?: directionalContainer.findViewWithTag<EditText>("super_boost_threshold_edit")?.let {
-            try {
-                model.superBoostThreshold = it.text.toString().toFloat().coerceIn(0.1f, 1.0f)
-            } catch (e: NumberFormatException) {
-                // Use default if parse fails
-                model.superBoostThreshold = 0.75f
-            }
-        }
-
+        readThresholdValue(directionalContainer, "boost_threshold", "boost_threshold_edit") { model.boostThreshold = it }
+        readThresholdValue(directionalContainer, "super_boost_threshold", "super_boost_threshold_edit") { model.superBoostThreshold = it }
+        
         // Boost commands
-        directionalContainer.findViewWithTag<EditText>("up_boost")?.let {
-            model.upBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT"
-        }
-        directionalContainer.findViewWithTag<EditText>("down_boost")?.let {
-            model.downBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S,CTRL"
-        }
-        directionalContainer.findViewWithTag<EditText>("left_boost")?.let {
-            model.leftBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A,SHIFT"
-        }
-        directionalContainer.findViewWithTag<EditText>("right_boost")?.let {
-            model.rightBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT"
-        }
-
+        readTextFieldIntoModel(directionalContainer, "up_boost") { model.upBoostCommand = it.takeIfNotBlank() ?: "W,SHIFT" }
+        readTextFieldIntoModel(directionalContainer, "down_boost") { model.downBoostCommand = it.takeIfNotBlank() ?: "S,CTRL" }
+        readTextFieldIntoModel(directionalContainer, "left_boost") { model.leftBoostCommand = it.takeIfNotBlank() ?: "A,SHIFT" }
+        readTextFieldIntoModel(directionalContainer, "right_boost") { model.rightBoostCommand = it.takeIfNotBlank() ?: "D,SHIFT" }
+        
         // Super boost commands
-        directionalContainer.findViewWithTag<EditText>("up_super_boost")?.let {
-            model.upSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "W,SHIFT,SPACE"
-        }
-        directionalContainer.findViewWithTag<EditText>("down_super_boost")?.let {
-            model.downSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "S,CTRL,SPACE"
-        }
-        directionalContainer.findViewWithTag<EditText>("left_super_boost")?.let {
-            model.leftSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "A,SHIFT,SPACE"
-        }
-        directionalContainer.findViewWithTag<EditText>("right_super_boost")?.let {
-            model.rightSuperBoostCommand = it.text.toString().takeIf { it.isNotBlank() } ?: "D,SHIFT,SPACE"
+        readTextFieldIntoModel(directionalContainer, "up_super_boost") { model.upSuperBoostCommand = it.takeIfNotBlank() ?: "W,SHIFT,SPACE" }
+        readTextFieldIntoModel(directionalContainer, "down_super_boost") { model.downSuperBoostCommand = it.takeIfNotBlank() ?: "S,CTRL,SPACE" }
+        readTextFieldIntoModel(directionalContainer, "left_super_boost") { model.leftSuperBoostCommand = it.takeIfNotBlank() ?: "A,SHIFT,SPACE" }
+        readTextFieldIntoModel(directionalContainer, "right_super_boost") { model.rightSuperBoostCommand = it.takeIfNotBlank() ?: "D,SHIFT,SPACE" }
+    }
+    
+    /**
+     * Helper to read text field value into model
+     */
+    private fun readTextFieldIntoModel(container: LinearLayout, tag: String, setter: (String) -> Unit) {
+        container.findViewWithTag<EditText>(tag)?.let {
+            setter(it.text.toString())
         }
     }
+    
+    /**
+     * Helper to read threshold value from seekbar or edit field
+     */
+    private fun readThresholdValue(container: LinearLayout, seekBarTag: String, editTag: String, setter: (Float) -> Unit) {
+        container.findViewWithTag<SeekBar>(seekBarTag)?.let {
+            setter(0.1f + (it.progress / 100f))
+        } ?: container.findViewWithTag<EditText>(editTag)?.let {
+            try {
+                setter(it.text.toString().toFloat().coerceIn(0.1f, 1.0f))
+            } catch (e: NumberFormatException) {
+                // Use default if parse fails
+                setter(if (seekBarTag.contains("super")) 0.75f else 0.5f)
+            }
+        }
+    }
+    
+    /**
+     * Extension function to use string if not blank or return null
+     */
+    private fun String.takeIfNotBlank() = takeIf { it.isNotBlank() }
 }
