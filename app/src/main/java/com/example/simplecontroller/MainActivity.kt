@@ -1,85 +1,38 @@
 package com.example.simplecontroller
 
 import android.os.Bundle
-import android.view.*
-import android.widget.*
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
+import android.widget.Switch
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.children
-import com.example.simplecontroller.io.*
-import com.example.simplecontroller.model.*
+import com.example.simplecontroller.io.LayoutManager
+import com.example.simplecontroller.io.loadControls
+import com.example.simplecontroller.io.saveControls
+import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.ui.ControlView
+import com.example.simplecontroller.ui.GlobalSettings
+import com.example.simplecontroller.ui.SwipeManager
+import com.example.simplecontroller.ui.UIComponentBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
-class MainActivity : AppCompatActivity() {
-
-
-    /*  ────────────────────────────────────────────────────────────────
-    SimpleController – Road-map & status checklist
-    (Drop this comment anywhere in MainActivity for quick reference)
-    ────────────────────────────────────────────────────────────────
-
-✔ DONE
-  • Edit-mode toggle, gear icons on each control.
-  • Drag-to-move controls; snap-to-center switch for sticks/pads.
-  • FAB ➕ to add Button / Stick / TouchPad.
-  • Per-control Property Sheet:
-      – Label, width & height sliders
-      – Sensitivity (for sticks / pads)
-      – Hold-toggle with ms threshold (buttons)
-      – Auto-center (sticks / pads)
-      – Payload text with auto-complete suggestions
-  • Hold-toggle visual feedback (button stays lit while held).
-  • Multiple payloads per control (comma / space separated).
-  • Dynamic analog reporting for sticks / touchpads with sensitivity & auto-center.
-  • Layout save / load (persistent JSON); default layout bundled.
-  • Width & height independent (was single "size" slider before).
-  • Quick-duplicate (Ctrl/Cmd-D) & Delete (Delete key) in Edit-mode
-    – duplicateControlFrom(view) and deleteControl(view) helpers.
-  • Payload AutoCompleteTextView with starter suggestion list.
-  • Ability to slide finger to buttons with Swipe toggle.
-  • Per-button swipe activation toggle.
-
-▢ TODO / NEXT UP
-  1. **Grid / snap-to-grid option**
-     – Preference in Edit-mode toolbar; e.g., 8-dp or 16-dp grid.
-
-  2a. Additional features
-      - A button/zone that when held, continuously sends a button AND let's me move the mouse/right stick simultaneously. So essentially just add a toggle to the current mouse button that would activate a one finger click drag
-
-  2c. Additional features
-       - a button to re-center the sticks manually
-
-  3. **Import / export layout to file**
-     – Share JSON via Android Sharesheet.
-
-  4. **Profiles per game**
-     – Quick dropdown next to "Load"; remembers last-used profile.
-
-  5. **Haptic feedback**
-     – Optional vibration on button press.
-
-  6. **Visual dead-zone for sticks**
-     – Grey inner circle that ignores tiny movements.
-
-  7. **Undo / Redo while editing**
-     – Simple in-memory stack; Ctrl-Z / Ctrl-Y shortcuts.
-
-  8. **Online documentation link**
-     – "Help" button in overflow menu opens GitHub README.
-
-  9. **Theming / color picker**
-     – Allow per-control color or global light/dark themes.
-
- 10. **Accessibility pass**
-     – Content descriptions, larger default touch targets, TalkBack labels.
-
-  (Feel free to reorder or prune; this is just the running list!)
-    ─────────────────────────────────────────────────────────── */
+/**
+ * Refactored MainActivity that uses extracted components.
+ *
+ * This version delegates specialized functionality to helper classes for:
+ * - UI component creation and management
+ * - Layout loading and saving
+ * - Swipe gesture handling
+ */
+class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- persisted "current layout" name ---------- */
-    private val prefs     by lazy { getSharedPreferences("layout", MODE_PRIVATE) }
+    private val prefs by lazy { getSharedPreferences("layout", MODE_PRIVATE) }
     private var layoutName: String
         get() = prefs.getString("current", "default") ?: "default"
         set(v) = prefs.edit().putString("current", v).apply()
@@ -87,17 +40,23 @@ class MainActivity : AppCompatActivity() {
     /* ---------- underlying data model ---------- */
     private val controls: MutableList<Control> by lazy {
         loadControls(this, layoutName)?.toMutableList()
-            ?: defaultLayout().toMutableList()
+            ?: layoutManager.defaultLayout().toMutableList()
     }
 
+    /* ---------- helper classes ---------- */
+    private lateinit var uiBuilder: UIComponentBuilder
+    private lateinit var layoutManager: LayoutManager
+
     /* ---------- edit-only widgets we show/hide ---------- */
-    private lateinit var btnSave:    View
-    private lateinit var btnLoad:    View
-    private lateinit var switchSnap: View
-    private lateinit var switchHold : View   // NEW
-    private lateinit var switchTurbo: View   // NEW
-    private lateinit var switchSwipe: View   // NEW
-    private lateinit var fabAdd:     View       // NEW ( ➕ )
+    private lateinit var btnSave: View
+    private lateinit var btnLoad: View
+    private lateinit var fabAdd: View
+
+    /* ---------- global switches ---------- */
+    private lateinit var switchSnap: Switch
+    private lateinit var switchHold: Switch
+    private lateinit var switchTurbo: Switch
+    private lateinit var switchSwipe: Switch
 
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
@@ -108,63 +67,24 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         canvas = findViewById(R.id.canvas)
 
-        spawnControlViews()
-
-        /* --- Edit toggle ------------------------------------------------ */
-        addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
-            ControlView.editMode = !ControlView.editMode
-            (v as Button).text   = if (ControlView.editMode) "Done" else "Edit"
-            updateEditUi(ControlView.editMode)
+        // Initialize helpers
+        uiBuilder = UIComponentBuilder(this, canvas)
+        layoutManager = LayoutManager(this, canvas, controls) { control ->
+            ControlView(this, control)
         }
+        layoutManager.setCallback(this)
 
-        /* --- Snap switch ------------------------------------------------- */
-        switchSnap = Switch(this).apply {
-            text = "Snap"; alpha = 0.7f; isChecked = true
-            setOnCheckedChangeListener { _, on ->
-                controls.filter { it.type != ControlType.BUTTON }
-                    .forEach { it.autoCenter = on }
-            }
-        }
-        addViewToCanvas(switchSnap, Gravity.TOP or Gravity.START, 16, 16)
+        // Create UI
+        setupUI()
 
-        /* --- Hold switch ------------------------------------------------- */
-        switchHold = Switch(this).apply {
-            text = "Hold"; alpha = 0.7f; isChecked = false
-            setOnCheckedChangeListener { _, on -> ControlView.globalHold = on }
-        }
-        addViewToCanvas(switchHold, Gravity.TOP or Gravity.START, 16, 64)
-
-        /* --- Turbo switch ------------------------------------------------ */
-        switchTurbo = Switch(this).apply {
-            text = "Turbo"; alpha = 0.7f; isChecked = false
-            setOnCheckedChangeListener { _, on -> ControlView.globalTurbo = on }
-        }
-        addViewToCanvas(switchTurbo, Gravity.TOP or Gravity.START, 16, 112)
-
-        /* --- Swipe switch ------------------------------------------------ */
-        switchSwipe = Switch(this).apply {
-            text = "Swipe"; alpha = 0.7f; isChecked = false
-            setOnCheckedChangeListener { _, on -> ControlView.globalSwipe = on }
-        }
-        addViewToCanvas(switchSwipe, Gravity.TOP or Gravity.START, 16, 160)
-
-
-        /* --- Save / Load ------------------------------------------------- */
-        btnSave = addCornerButton("Save", Gravity.BOTTOM or Gravity.START) { saveDialog() }
-        btnLoad = addCornerButton("Load", Gravity.BOTTOM or Gravity.END)  { loadDialog() }
-
-        /* --- NEW ➕  Add-FAB -------------------------------------------- */
-        fabAdd = FloatingActionButton(this).apply {
-            setImageResource(android.R.drawable.ic_input_add)
-            alpha = 0.85f
-            setOnClickListener { showAddPicker() }
-        }
-        addViewToCanvas(fabAdd, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL, 0, 90)
-
-        updateEditUi(ControlView.editMode)   // hide edit widgets by default
+        // Load controls
+        layoutManager.spawnControlViews()
     }
 
-    override fun onStart() { super.onStart(); NetworkClient.start() }
+    override fun onStart() {
+        super.onStart()
+        NetworkClient.start()
+    }
 
     override fun onPause() {
         super.onPause()
@@ -174,10 +94,10 @@ class MainActivity : AppCompatActivity() {
 
     // Override dispatchTouchEvent to handle swipe mode
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // When swipe mode is active and we're not in edit mode, let the companion handle it
-        if (ControlView.globalSwipe && !ControlView.editMode) {
-            // If the companion processes it, we're done
-            if (ControlView.processTouchEvent(ev)) {
+        // When swipe mode is active and we're not in edit mode, handle with SwipeManager
+        if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
+            // If the manager processes it, we're done
+            if (SwipeManager.processTouchEvent(ev)) {
                 return true
             }
         }
@@ -185,46 +105,68 @@ class MainActivity : AppCompatActivity() {
         return super.dispatchTouchEvent(ev)
     }
 
-    // =============== helpers ===========================================
-    private fun spawnControlViews() =
-        controls.forEach { canvas.addView(ControlView(this, it).apply { tag = "control" }) }
-
-    private fun clearControlViews() =
-        canvas.children.filter { it.tag == "control" }.toList()
-            .forEach { canvas.removeView(it) }
-
-    /* corner helper ---------------------------------------------------- */
-    private fun addCornerButton(label: String, gravity: Int, onClick: (View) -> Unit) =
-        Button(this).apply {
-            text = label; alpha = 0.7f; setOnClickListener(onClick)
-            addViewToCanvas(this, gravity, 16, 16)
+    /**
+     * Set up all UI components
+     */
+    private fun setupUI() {
+        /* --- Edit toggle ------------------------------------------------ */
+        uiBuilder.addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
+            GlobalSettings.editMode = !GlobalSettings.editMode
+            (v as? android.widget.Button)?.text = if (GlobalSettings.editMode) "Done" else "Edit"
+            updateEditUi(GlobalSettings.editMode)
         }
 
-    /* generic add-to-canvas helper ------------------------------------ */
-    private fun addViewToCanvas(v: View, gravity: Int, marginH: Int, marginV: Int) {
-        canvas.addView(
-            v, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                gravity
-            ).apply { setMargins(marginH, marginV, marginH, marginV) }
+        /* --- Switches --------------------------------------------------- */
+        switchSnap = uiBuilder.createSwitch("Snap", true) { on ->
+            GlobalSettings.snapEnabled = on
+            controls.filter { it.type != ControlType.BUTTON }
+                .forEach { it.autoCenter = on }
+        }
+
+        switchHold = uiBuilder.createSwitch("Hold", false) { on ->
+            GlobalSettings.globalHold = on
+        }
+
+        switchTurbo = uiBuilder.createSwitch("Turbo", false) { on ->
+            GlobalSettings.globalTurbo = on
+        }
+
+        switchSwipe = uiBuilder.createSwitch("Swipe", false) { on ->
+            GlobalSettings.globalSwipe = on
+        }
+
+        // Add all switches to canvas
+        uiBuilder.addVerticalSwitches(
+            listOf(switchSnap, switchHold, switchTurbo, switchSwipe),
+            Gravity.TOP or Gravity.START,
+            16, 16, 48
         )
+
+        /* --- Save / Load ------------------------------------------------- */
+        btnSave = uiBuilder.addCornerButton("Save", Gravity.BOTTOM or Gravity.START) {
+            layoutManager.showSaveDialog()
+        }
+
+        btnLoad = uiBuilder.addCornerButton("Load", Gravity.BOTTOM or Gravity.END) {
+            layoutManager.showLoadDialog()
+        }
+
+        /* --- Add-FAB ---------------------------------------------------- */
+        fabAdd = uiBuilder.addFloatingActionButton(
+            android.R.drawable.ic_input_add,
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            0, 90
+        ) {
+            showAddPicker()
+        }
+
+        // Hide edit widgets by default
+        updateEditUi(GlobalSettings.editMode)
     }
 
-    /* -------- show / hide widgets depending on Edit-mode ------------- */
-    private fun updateEditUi(edit: Boolean) {
-        val vis = if (edit) View.VISIBLE else View.GONE
-        btnSave.visibility = vis
-        btnLoad.visibility = vis
-        fabAdd.visibility  = vis
-        /* global switches stay visible in both modes */
-        switchSnap.visibility  = View.VISIBLE
-        switchHold.visibility  = View.VISIBLE
-        switchTurbo.visibility = View.VISIBLE
-        switchSwipe.visibility = View.VISIBLE
-    }
-
-    // =============== "Add Control" flow ===============================
+    /**
+     * Show picker dialog to add a new control
+     */
     private fun showAddPicker() {
         val types = arrayOf("Button", "Stick", "TouchPad")
         AlertDialog.Builder(this)
@@ -235,95 +177,58 @@ class MainActivity : AppCompatActivity() {
                     1 -> ControlType.STICK
                     else -> ControlType.TOUCHPAD
                 }
-                createControl(type)
+                layoutManager.createControl(type)
             }
             .show()
     }
 
-    /** actually instantiate & drop one control on screen */
-    fun createControl(type: ControlType) {
-        val w  = if (type == ControlType.BUTTON) 140f else 220f
-        val id = "${type.name.lowercase()}_${System.currentTimeMillis()}"
+    /**
+     * Update UI components when edit mode changes
+     */
+    private fun updateEditUi(edit: Boolean) {
+        val editWidgets = listOf(btnSave, btnLoad, fabAdd)
+        uiBuilder.updateViewsVisibility(editWidgets, edit)
 
-        /* robust centre-of-screen position (fallback → 80 px) */
-        val cw = (canvas.width.takeIf { it > 0 } ?: canvas.measuredWidth).coerceAtLeast(1)
-        val ch = (canvas.height.takeIf { it > 0 } ?: canvas.measuredHeight).coerceAtLeast(1)
-        val x0 = ((cw - w) / 2f).coerceAtLeast(80f)
-        val y0 = ((ch - w) / 2f).coerceAtLeast(80f)
-
-        val c = Control(
-            id = id, type = type,
-            x = x0, y = y0, w = w, h = w,
-            payload = type.defaultPayload()
-        )
-        controls += c
-
-        val view = ControlView(this, c)
-        canvas.addView(view)
-
-        /* open its property sheet right away */
-        view.post { view.showProps() }
+        // Global switches stay visible in both modes
+        val globalSwitches = listOf(switchSnap, switchHold, switchTurbo, switchSwipe)
+        uiBuilder.updateViewsVisibility(globalSwitches, true)
     }
 
-    // =============== dialogs (save / load) ============================
-    private fun saveDialog() {
-        val input = EditText(this).apply { hint = "layout name" }
-        AlertDialog.Builder(this)
-            .setTitle("Save layout as…")
-            .setView(input)
-            .setPositiveButton("Save") { _, _ ->
-                val name = input.text.toString().trim()
-                if (name.isNotEmpty()) {
-                    saveControls(this, name, controls); layoutName = name
-                    toast("Saved as \"$name\"")
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
-    }
-
-    private fun loadDialog() {
-        val names = listLayouts(this)
-        if (names.isEmpty()) { toast("No saved layouts"); return }
-        AlertDialog.Builder(this)
-            .setTitle("Load layout")
-            .setItems(names.toTypedArray()) { _, i ->
-                val sel = names[i]
-                loadControls(this, sel)?.let {
-                    clearControlViews(); controls.clear(); controls += it
-                    spawnControlViews(); layoutName = sel
-                    toast("Loaded \"$sel\"")
-                } ?: toast("Failed to load \"$sel\"")
-            }
-            .show()
-    }
-
-    /* tiny convenience ------------------------------------------------ */
-    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-
-    /* called from ControlView ➕ */
+    /**
+     * Create a control from a model (used for duplication)
+     */
     fun createControlFrom(src: Control) {
-        controls += src
-        canvas.addView(ControlView(this, src).apply { tag = "control" })
+        layoutManager.createControlFrom(src)
     }
 
-    /* called from ControlView 🗑️ */
+    /**
+     * Remove a control from the layout
+     */
     fun removeControl(c: Control) {
-        controls.remove(c)
+        layoutManager.removeControl(c)
     }
 
+    // === LayoutManager.LayoutCallback implementation ===
 
-    /* ---------- initial hard-coded layout (unchanged) ---------------- */
-    private fun defaultLayout() = listOf(
-        Control(
-            id = "btnA", type = ControlType.BUTTON,
-            x = 300f, y = 900f, w = 140f, h = 140f,
-            payload = "BUTTON_A_PRESSED"
-        ),
-        Control(
-            id = "stickL", type = ControlType.STICK,
-            x = 80f, y = 600f, w = 220f, h = 220f,
-            payload = "STICK_L"
-        )
-    )
+    /**
+     * Called when a layout is loaded
+     */
+    override fun onLayoutLoaded(layoutName: String) {
+        this.layoutName = layoutName
+    }
+
+    /**
+     * Called when a layout is saved
+     */
+    override fun onLayoutSaved(layoutName: String) {
+        this.layoutName = layoutName
+    }
+
+    /**
+     * Clear all control views
+     */
+    override fun clearControlViews() {
+        canvas.children.filter { it.tag == "control" }.toList()
+            .forEach { canvas.removeView(it) }
+    }
 }
