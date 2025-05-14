@@ -7,4 +7,10 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Connection status colors -->
+    <color name="status_connected">#FF4CAF50</color>
+    <color name="status_connecting">#FFFFEB3B</color>
+    <color name="status_disconnected">#FF9E9E9E</color>
+    <color name="status_error">#FFF44336</color>
 </resources>

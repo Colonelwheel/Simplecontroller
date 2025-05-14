@@ -1,14 +1,18 @@
 package com.example.simplecontroller
 
+import android.content.Context
+import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.Gravity
+import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.widget.FrameLayout
-import android.widget.Switch
+import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.children
+import androidx.lifecycle.lifecycleScope
 import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.io.loadControls
 import com.example.simplecontroller.io.saveControls
@@ -20,15 +24,9 @@ import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
 import com.example.simplecontroller.ui.UIComponentBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
-/**
- * Refactored MainActivity that uses extracted components.
- *
- * This version delegates specialized functionality to helper classes for:
- * - UI component creation and management
- * - Layout loading and saving
- * - Swipe gesture handling
- */
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- persisted "current layout" name ---------- */
@@ -36,6 +34,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private var layoutName: String
         get() = prefs.getString("current", "default") ?: "default"
         set(v) = prefs.edit().putString("current", v).apply()
+
+    /* ---------- network settings prefs ---------- */
+    private val networkPrefs by lazy { getSharedPreferences("network", MODE_PRIVATE) }
 
     /* ---------- underlying data model ---------- */
     private val controls: MutableList<Control> by lazy {
@@ -58,6 +59,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var switchTurbo: Switch
     private lateinit var switchSwipe: Switch
 
+    /* ---------- connection UI ---------- */
+    private lateinit var connectionStatusText: TextView
+    private lateinit var btnConnect: Button
+
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
 
@@ -66,6 +71,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         canvas = findViewById(R.id.canvas)
+        connectionStatusText = findViewById(R.id.connectionStatus)
 
         // Initialize helpers
         uiBuilder = UIComponentBuilder(this, canvas)
@@ -77,19 +83,37 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Create UI
         setupUI()
 
+        // Setup connection status observer
+        observeConnectionStatus()
+
         // Load controls
         layoutManager.spawnControlViews()
+
+        // Load network settings
+        loadNetworkSettings()
     }
 
     override fun onStart() {
         super.onStart()
-        NetworkClient.start()
+
+        // Only auto-connect if auto-reconnect is enabled
+        if (networkPrefs.getBoolean("autoReconnect", false)) {
+            NetworkClient.start()
+        }
     }
 
     override fun onPause() {
         super.onPause()
         saveControls(this, layoutName, controls)   // auto-persist
-        NetworkClient.close()
+    }
+
+    override fun onStop() {
+        super.onStop()
+
+        // Only disconnect if auto-reconnect is disabled
+        if (!networkPrefs.getBoolean("autoReconnect", false)) {
+            NetworkClient.close()
+        }
     }
 
     // Override dispatchTouchEvent to handle swipe mode
@@ -108,12 +132,25 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /**
      * Set up all UI components
      */
+    /**
+     * Set up all UI components
+     */
     private fun setupUI() {
         /* --- Edit toggle ------------------------------------------------ */
         uiBuilder.addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
             GlobalSettings.editMode = !GlobalSettings.editMode
             (v as? android.widget.Button)?.text = if (GlobalSettings.editMode) "Done" else "Edit"
             updateEditUi(GlobalSettings.editMode)
+        }
+
+        /* --- Connection button ------------------------------------------ */
+        btnConnect = uiBuilder.addCornerButton(
+            "Connect",                  // Label
+            Gravity.TOP or Gravity.END, // Gravity
+            16,                         // Horizontal margin
+            64                          // Vertical margin
+        ) {
+            showConnectionSettingsDialog()
         }
 
         /* --- Switches --------------------------------------------------- */
@@ -135,10 +172,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             GlobalSettings.globalSwipe = on
         }
 
-        // Add all switches to canvas
+        // Changed back to LEFT side
         uiBuilder.addVerticalSwitches(
             listOf(switchSnap, switchHold, switchTurbo, switchSwipe),
-            Gravity.TOP or Gravity.START,
+            Gravity.TOP or Gravity.START,  // Changed from CENTER_VERTICAL to TOP
             16, 16, 48
         )
 
@@ -162,6 +199,114 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Hide edit widgets by default
         updateEditUi(GlobalSettings.editMode)
+    }
+
+    /**
+     * Observe connection status changes and update UI
+     */
+    private fun observeConnectionStatus() {
+        lifecycleScope.launch {
+            NetworkClient.connectionStatus.collectLatest { status ->
+                updateConnectionStatusUI(status)
+            }
+        }
+
+        // Also observe error messages
+        lifecycleScope.launch {
+            NetworkClient.lastErrorMessage.collectLatest { errorMsg ->
+                errorMsg?.let {
+                    Toast.makeText(this@MainActivity, it, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    /**
+     * Update connection status UI elements
+     */
+    private fun updateConnectionStatusUI(status: NetworkClient.ConnectionStatus) {
+        connectionStatusText.text = when (status) {
+            NetworkClient.ConnectionStatus.DISCONNECTED -> "Disconnected"
+            NetworkClient.ConnectionStatus.CONNECTING -> "Connecting..."
+            NetworkClient.ConnectionStatus.CONNECTED -> "Connected"
+            NetworkClient.ConnectionStatus.ERROR -> "Connection Error"
+        }
+
+        val color = when (status) {
+            NetworkClient.ConnectionStatus.DISCONNECTED -> ContextCompat.getColor(this, android.R.color.darker_gray)
+            NetworkClient.ConnectionStatus.CONNECTING -> ContextCompat.getColor(this, R.color.purple_500)
+            NetworkClient.ConnectionStatus.CONNECTED -> ContextCompat.getColor(this, android.R.color.holo_green_dark)
+            NetworkClient.ConnectionStatus.ERROR -> ContextCompat.getColor(this, android.R.color.holo_red_dark)
+        }
+
+        connectionStatusText.setTextColor(color)
+
+        // Update connect button text based on connection status
+        btnConnect.text = when (status) {
+            NetworkClient.ConnectionStatus.CONNECTED -> "Disconnect"
+            NetworkClient.ConnectionStatus.CONNECTING -> "Cancel"
+            else -> "Connect"
+        }
+
+        // Update connect button click behavior
+        btnConnect.setOnClickListener {
+            when (status) {
+                NetworkClient.ConnectionStatus.CONNECTED,
+                NetworkClient.ConnectionStatus.CONNECTING -> NetworkClient.close()
+                else -> showConnectionSettingsDialog()
+            }
+        }
+    }
+
+    /**
+     * Load network settings from SharedPreferences
+     */
+    private fun loadNetworkSettings() {
+        val host = networkPrefs.getString("serverHost", "10.0.2.2") ?: "10.0.2.2"
+        val port = networkPrefs.getInt("serverPort", 9001)
+        val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
+
+        NetworkClient.updateSettings(host, port, autoReconnect)
+    }
+
+    /**
+     * Show dialog to configure server connection settings
+     */
+    private fun showConnectionSettingsDialog() {
+        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_connection_settings, null)
+
+        // Get references to dialog views
+        val editHost = dialogView.findViewById<EditText>(R.id.editServerHost)
+        val editPort = dialogView.findViewById<EditText>(R.id.editServerPort)
+        val checkAutoReconnect = dialogView.findViewById<CheckBox>(R.id.checkboxAutoReconnect)
+
+        // Fill in current values
+        editHost.setText(networkPrefs.getString("serverHost", "10.0.2.2"))
+        editPort.setText(networkPrefs.getInt("serverPort", 9001).toString())
+        checkAutoReconnect.isChecked = networkPrefs.getBoolean("autoReconnect", false)
+
+        // Show the dialog
+        AlertDialog.Builder(this)
+            .setTitle("Server Connection")
+            .setView(dialogView)
+            .setPositiveButton("Connect") { _, _ ->
+                // Save settings
+                val host = editHost.text.toString()
+                val port = editPort.text.toString().toIntOrNull() ?: 9001
+                val autoReconnect = checkAutoReconnect.isChecked
+
+                networkPrefs.edit()
+                    .putString("serverHost", host)
+                    .putInt("serverPort", port)
+                    .putBoolean("autoReconnect", autoReconnect)
+                    .apply()
+
+                // Update client and connect
+                NetworkClient.updateSettings(host, port, autoReconnect)
+                NetworkClient.start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
@@ -194,6 +339,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Global switches stay visible in both modes
         val globalSwitches = listOf(switchSnap, switchHold, switchTurbo, switchSwipe)
         uiBuilder.updateViewsVisibility(globalSwitches, true)
+
+        // Connection UI always visible
+        connectionStatusText.visibility = View.VISIBLE
+        btnConnect.visibility = View.VISIBLE
     }
 
     /**

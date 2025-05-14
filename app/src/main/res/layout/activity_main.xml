@@ -2,4 +2,21 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/canvas"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"/>
+    android:layout_height="match_parent">
+
+    <!-- Connection status indicator (top-center) -->
+    <TextView
+        android:id="@+id/connectionStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:background="#88000000"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="6dp"
+        android:layout_margin="8dp"
+        android:text="Disconnected"
+        android:textColor="#FFFFFF"/>
+
+    <!-- Connect button (will be added programmatically) -->
+
+</FrameLayout>

@@ -10,7 +10,7 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 /**
  * Builds and manages UI components for the main activity.
- * 
+ *
  * This class centralizes creation of common UI elements like buttons, switches,
  * and handles their placement within the main canvas.
  */
@@ -20,24 +20,32 @@ class UIComponentBuilder(
 ) {
     /**
      * Add a button to a corner of the canvas
-     * 
+     *
      * @param label Button text
      * @param gravity Position (e.g., Gravity.TOP or Gravity.END)
+     * @param marginH Horizontal margin (optional)
+     * @param marginV Vertical margin (optional)
      * @param onClick Click handler
      * @return The created button
      */
-    fun addCornerButton(label: String, gravity: Int, onClick: (View) -> Unit): Button {
+    fun addCornerButton(
+        label: String,
+        gravity: Int,
+        marginH: Int = 16,
+        marginV: Int = 16,
+        onClick: (View) -> Unit
+    ): Button {
         return Button(context).apply {
             text = label
             alpha = 0.7f
             setOnClickListener(onClick)
-            addViewToCanvas(this, gravity, 16, 16)
+            addViewToCanvas(this, gravity, marginH, marginV)
         }
     }
-    
+
     /**
      * Create a switch with specified properties
-     * 
+     *
      * @param label Switch text
      * @param initialState Initial checked state
      * @param onChange Change handler
@@ -53,10 +61,10 @@ class UIComponentBuilder(
         isChecked = initialState
         setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
     }
-    
+
     /**
      * Add a floating action button to the canvas
-     * 
+     *
      * @param iconResource Icon resource ID
      * @param gravity Position gravity
      * @param marginH Horizontal margin
@@ -81,7 +89,7 @@ class UIComponentBuilder(
 
     /**
      * Helper to add a view to the canvas with specific layout parameters
-     * 
+     *
      * @param view The view to add
      * @param gravity Position gravity
      * @param marginH Horizontal margin
@@ -96,10 +104,10 @@ class UIComponentBuilder(
             ).apply { setMargins(marginH, marginV, marginH, marginV) }
         )
     }
-    
+
     /**
      * Add multiple switches vertically aligned
-     * 
+     *
      * @param switches List of switches to add
      * @param baseGravity Base gravity for positioning
      * @param startMarginH Horizontal margin
@@ -117,10 +125,10 @@ class UIComponentBuilder(
             addViewToCanvas(switch, baseGravity, startMarginH, startMarginV + (index * spacing))
         }
     }
-    
+
     /**
      * Update the visibility of a set of views
-     * 
+     *
      * @param views List of views to update
      * @param visible Whether the views should be visible
      */
