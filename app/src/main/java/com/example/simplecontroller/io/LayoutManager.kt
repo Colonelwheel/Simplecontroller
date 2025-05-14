@@ -72,6 +72,7 @@ class LayoutManager(
             ControlType.BUTTON -> "BUTTON_PRESSED"
             ControlType.STICK -> "STICK"
             ControlType.TOUCHPAD -> "TOUCHPAD"
+            ControlType.RECENTER -> "RECENTER"
         }
 
         // Create control model
