@@ -157,9 +157,38 @@ class ControlViewHelper(
      * Send the control's payload 
      */
     fun firePayload() {
-        model.payload.split(',', ' ')
-            .filter { it.isNotBlank() }
-            .forEach { NetworkClient.send(it.trim()) }
+        // If the button is latched, send _HOLD version to prevent auto-release
+        if (parentView is ControlView && (parentView as ControlView).isLatched) {
+            // For Xbox controller buttons, use the _HOLD suffix
+            val commands = model.payload.split(',', ' ')
+                .filter { it.isNotBlank() }
+                .map { cmd ->
+                    if (cmd.startsWith("X360") && !cmd.contains("_RELEASE")) {
+                        "${cmd}_HOLD"
+                    } else {
+                        cmd
+                    }
+                }
+
+            commands.forEach { NetworkClient.send(it.trim()) }
+        } else {
+            // Regular version with auto-release for normal presses
+            model.payload.split(',', ' ')
+                .filter { it.isNotBlank() }
+                .forEach { NetworkClient.send(it.trim()) }
+        }
+    }
+
+    // Add this to handle releasing held buttons
+    fun releaseLatched() {
+        if (model.payload.contains("X360")) {
+            // For each Xbox button in the payload, send a release command
+            model.payload.split(',', ' ')
+                .filter { it.isNotBlank() && it.startsWith("X360") }
+                .forEach {
+                    NetworkClient.send("${it}_RELEASE".trim())
+                }
+        }
     }
 
     /**

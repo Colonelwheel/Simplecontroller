@@ -30,13 +30,26 @@ class ControlView(
     val model: Control
 ) : FrameLayout(context) {
 
+
+    /*hold*/
+    private val holdHandler = Handler(Looper.getMainLooper())
+
     /* ───────── member variables ────────── */
     // For dragging in edit mode
     private var dX = 0f
     private var dY = 0f
 
     // State tracking
-    private var isLatched = false          // for Hold / globalHold
+    var isLatched = false
+        set(value) {
+            val oldValue = field
+            field = value
+
+            // If we're turning off latched mode, release any held buttons
+            if (oldValue && !value) {
+                uiHelper.releaseLatched()
+            }
+        }
     private var leftHeld = false           // for one-finger drag or toggle
 
     // Handler for UI updates
@@ -172,14 +185,36 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (GlobalSettings.globalTurbo) uiHelper.startRepeat() else uiHelper.firePayload()
+                    if (GlobalSettings.globalTurbo) {
+                        uiHelper.startRepeat()
+                    } else {
+                        uiHelper.firePayload()
+
+                        // Start long press detection for hold toggle
+                        if (model.holdToggle) {
+                            holdHandler.removeCallbacksAndMessages(null)
+                            holdHandler.postDelayed({
+                                // This executes after holdDurationMs
+                                isLatched = !isLatched
+                                isPressed = isLatched
+                                invalidate() // Redraw to show the latched state
+                            }, model.holdDurationMs)
+                        }
+                    }
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
-                    if (GlobalSettings.globalHold || model.holdToggle) {
+
+                    // Only toggle latch state if we're using global hold OR
+                    // using model.holdToggle but the long press didn't happen
+                    // (e.g., quick tap)
+                    if (GlobalSettings.globalHold && !model.holdToggle) {
                         isLatched = !isLatched
                         isPressed = isLatched
-                        invalidate() // Redraw to show the latched state with the new color
+                        invalidate() // Redraw to show the latched state
+                    } else if (model.holdToggle) {
+                        // Cancel pending hold toggle if finger is lifted before holdDurationMs
+                        holdHandler.removeCallbacksAndMessages(null)
                     }
                 }
             }
