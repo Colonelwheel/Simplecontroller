@@ -46,6 +46,13 @@ class LayoutManager(
     }
 
     /**
+     * Creates and returns a control view for the given control model
+     */
+    fun createControlView(control: Control): ControlView {
+        return controlCreator(control).apply { tag = "control" }
+    }
+
+    /**
      * Create control views for all controls in the list
      */
     fun spawnControlViews() {

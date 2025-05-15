@@ -268,10 +268,25 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         }
 
         val color = when (status) {
-            NetworkClient.ConnectionStatus.DISCONNECTED -> ContextCompat.getColor(this, android.R.color.darker_gray)
-            NetworkClient.ConnectionStatus.CONNECTING -> ContextCompat.getColor(this, R.color.purple_500)
-            NetworkClient.ConnectionStatus.CONNECTED -> ContextCompat.getColor(this, android.R.color.holo_green_dark)
-            NetworkClient.ConnectionStatus.ERROR -> ContextCompat.getColor(this, android.R.color.holo_red_dark)
+            NetworkClient.ConnectionStatus.DISCONNECTED -> ContextCompat.getColor(
+                this,
+                android.R.color.darker_gray
+            )
+
+            NetworkClient.ConnectionStatus.CONNECTING -> ContextCompat.getColor(
+                this,
+                R.color.purple_500
+            )
+
+            NetworkClient.ConnectionStatus.CONNECTED -> ContextCompat.getColor(
+                this,
+                android.R.color.holo_green_dark
+            )
+
+            NetworkClient.ConnectionStatus.ERROR -> ContextCompat.getColor(
+                this,
+                android.R.color.holo_red_dark
+            )
         }
 
         connectionStatusText.setTextColor(color)
@@ -288,6 +303,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
                 NetworkClient.ConnectionStatus.CONNECTING -> NetworkClient.close()
+
                 else -> showConnectionSettingsDialog()
             }
         }
@@ -308,7 +324,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Show dialog to configure server connection settings
      */
     private fun showConnectionSettingsDialog() {
-        val dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_connection_settings, null)
+        val dialogView =
+            LayoutInflater.from(this).inflate(R.layout.dialog_connection_settings, null)
 
         // Get references to dialog views
         val editHost = dialogView.findViewById<EditText>(R.id.editServerHost)
@@ -345,21 +362,30 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     /**
-     * Show picker dialog to add a new control
+     * Show picker dialog to add a new control or create a template layout
      */
     private fun showAddPicker() {
-        val types = arrayOf("Button", "Stick", "TouchPad", "Re-center Button")
+        val options = arrayOf(
+            "Button",
+            "Stick",
+            "TouchPad",
+            "Re-center Button",
+            "--- Templates ---",
+            "Xbox Controller Layout"
+        )
+
         AlertDialog.Builder(this)
-            .setTitle("Add control…")
-            .setItems(types) { _, i ->
-                val type = when (i) {
-                    0 -> ControlType.BUTTON
-                    1 -> ControlType.STICK
-                    2 -> ControlType.TOUCHPAD
-                    3 -> ControlType.RECENTER
-                    else -> ControlType.BUTTON
+            .setTitle("Add control or layout…")
+            .setItems(options) { _, i ->
+                when (i) {
+                    0 -> layoutManager.createControl(ControlType.BUTTON)
+                    1 -> layoutManager.createControl(ControlType.STICK)
+                    2 -> layoutManager.createControl(ControlType.TOUCHPAD)
+                    3 -> layoutManager.createControl(ControlType.RECENTER)
+                    4 -> {} // This is just a divider item
+                    5 -> createXboxControllerLayout()
+                    // Add more templates here as needed
                 }
-                layoutManager.createControl(type)
             }
             .show()
     }
@@ -416,5 +442,278 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun clearControlViews() {
         canvas.children.filter { it.tag == "control" }.toList()
             .forEach { canvas.removeView(it) }
+    }
+
+    /**
+     * Creates a standard Xbox controller layout
+     */
+    private fun createXboxControllerLayout() {
+        // First clear existing controls
+        controls.clear()
+        clearControlViews()
+
+        // Screen dimensions for positioning
+        val screenWidth = canvas.width.toFloat()
+        val screenHeight = canvas.height.toFloat()
+
+        // Define standard sizes
+        val buttonSize = 120f
+        val stickSize = 200f
+        val shoulderSize = 100f
+        val dpadSize = 160f
+
+        // Function to create and add a control
+        fun addControl(
+            id: String,
+            type: ControlType,
+            x: Float,
+            y: Float,
+            w: Float,
+            h: Float,
+            payload: String,
+            name: String = ""
+        ): Control {
+            val control = Control(
+                id = id,
+                type = type,
+                x = x,
+                y = y,
+                w = w,
+                h = h,
+                payload = payload,
+                name = name
+            )
+            controls.add(control)
+            canvas.addView(layoutManager.createControlView(control))
+            return control
+        }
+
+        // Left stick (positioned on the left side)
+        addControl(
+            "left_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.2f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_L",
+            name = "Left Stick"
+        )
+
+        // Right stick (positioned on the right side)
+        addControl(
+            "right_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.75f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_R",
+            name = "Right Stick"
+        )
+
+        // Face buttons (ABXY) positioned on the right
+        // A Button (bottom)
+        addControl(
+            "a_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.75f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360A",
+            name = "A"
+        )
+
+        // B Button (right)
+        addControl(
+            "b_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.9f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360B",
+            name = "B"
+        )
+
+        // X Button (left)
+        addControl(
+            "x_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.7f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360X",
+            name = "X"
+        )
+
+        // Y Button (top)
+        addControl(
+            "y_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.55f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360Y",
+            name = "Y"
+        )
+
+        // D-Pad (positioned on the left)
+        // D-Pad Up
+        addControl(
+            "dpad_up",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.35f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360UP",
+            name = "↑"
+        )
+
+        // D-Pad Down
+        addControl(
+            "dpad_down",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.5f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360DOWN",
+            name = "↓"
+        )
+
+        // D-Pad Left
+        addControl(
+            "dpad_left",
+            ControlType.BUTTON,
+            x = screenWidth * 0.1f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360LEFT",
+            name = "←"
+        )
+
+        // D-Pad Right
+        addControl(
+            "dpad_right",
+            ControlType.BUTTON,
+            x = screenWidth * 0.3f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360RIGHT",
+            name = "→"
+        )
+
+        // Shoulder Buttons (positioned at the top)
+        // Left Shoulder (LB)
+        addControl(
+            "lb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360LB",
+            name = "LB"
+        )
+
+        // Right Shoulder (RB)
+        addControl(
+            "rb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360RB",
+            name = "RB"
+        )
+
+        // Triggers (positioned at the top)
+        // Left Trigger (LT) - using button for now, could make special trigger control later
+        addControl(
+            "lt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "LT:1.0", // Fully pressed trigger
+            name = "LT"
+        )
+
+        // Right Trigger (RT)
+        addControl(
+            "rt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "RT:1.0",
+            name = "RT"
+        )
+
+        // Center buttons (Start/Back/Guide)
+        // Start button
+        addControl(
+            "start_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.6f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360START",
+            name = "Start"
+        )
+
+        // Back button
+        addControl(
+            "back_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.4f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360BACK",
+            name = "Back"
+        )
+
+        // Stick clickable buttons
+        // Left stick button (press)
+        addControl(
+            "ls_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360LS",
+            name = "LS"
+        )
+
+        // Right stick button (press)
+        addControl(
+            "rs_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.75f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360RS",
+            name = "RS"
+        )
+
+        // Save the layout
+        saveControls(this, "xbox_standard", controls)
+        layoutName = "xbox_standard"
+
+        Toast.makeText(this, "Xbox controller layout created!", Toast.LENGTH_SHORT).show()
     }
 }
