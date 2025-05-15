@@ -19,7 +19,7 @@ import com.example.simplecontroller.net.NetworkClient
 
 /**
  * Helper class for creating and managing ControlView UI elements and behavior.
- * 
+ *
  * This class handles common functionality used by ControlView instances:
  * - Creating and managing UI controls (labels, buttons)
  * - Helper methods for payload handling
@@ -33,10 +33,10 @@ class ControlViewHelper(
 ) {
     // UI Handler for callbacks
     private val uiHandler = Handler(Looper.getMainLooper())
-    
+
     // For turbo/repeat functionality
     private var repeater: Runnable? = null
-    
+
     // UI elements
     private val label = TextView(context).apply {
         textSize = 12f
@@ -44,28 +44,28 @@ class ControlViewHelper(
         setShadowLayer(4f, 0f, 0f, Color.BLACK)
         gravity = Gravity.CENTER
     }
-    
+
     private val gear: ImageButton
     private val dup: ImageButton
     private val del: ImageButton
-    
+
     init {
         // Initialize UI elements
         gear = makeIcon(
             android.R.drawable.ic_menu_manage,
             Gravity.TOP or Gravity.END
         ) { showProperties() }
-        
+
         dup = makeIcon(
             android.R.drawable.ic_menu_add,
             Gravity.TOP or Gravity.START
         ) { if (GlobalSettings.editMode) duplicateSelf() }
-        
+
         del = makeIcon(
             android.R.drawable.ic_menu_delete,
             Gravity.TOP or Gravity.CENTER_HORIZONTAL
         ) { if (GlobalSettings.editMode) confirmDelete() }
-        
+
         // Add to parent view
         parentView.addView(label)
         parentView.addView(gear)
@@ -89,7 +89,7 @@ class ControlViewHelper(
             )
             setOnClickListener { onClick() }
         }
-    
+
     /**
      * Update the label text based on the model name
      */
@@ -97,7 +97,7 @@ class ControlViewHelper(
         label.text = model.name
         label.visibility = if (model.name.isNotEmpty()) View.VISIBLE else View.GONE
     }
-    
+
     /**
      * Update overlay visibility based on edit mode
      */
@@ -107,7 +107,7 @@ class ControlViewHelper(
         dup.visibility = vis
         del.visibility = vis
     }
-    
+
     /**
      * Show the property sheet for this control
      */
@@ -120,13 +120,13 @@ class ControlViewHelper(
             parentView.layoutParams = lp
             updateLabel()
             parentView.invalidate()
-            
+
             // Stop any running senders when settings change
             parentView.stopContinuousSending()
             parentView.stopDirectionalCommands()
         }.showPropertySheet()
     }
-    
+
     /**
      * Create a duplicate of this control
      */
@@ -138,7 +138,7 @@ class ControlViewHelper(
         )
         (context as? MainActivity)?.createControlFrom(copy)
     }
-    
+
     /**
      * Show delete confirmation dialog
      */
@@ -152,9 +152,9 @@ class ControlViewHelper(
             .setNegativeButton("Cancel", null)
             .show()
     }
-    
+
     /**
-     * Send the control's payload 
+     * Send the control's payload
      */
     fun firePayload() {
         // If the button is latched, send _HOLD version to prevent auto-release
@@ -179,14 +179,21 @@ class ControlViewHelper(
         }
     }
 
-    // Add this to handle releasing held buttons
+    // Improved function to handle releasing held buttons
     fun releaseLatched() {
         if (model.payload.contains("X360")) {
-            // For each Xbox button in the payload, send a release command
+            // For each Xbox button in the payload, send a proper release command
             model.payload.split(',', ' ')
                 .filter { it.isNotBlank() && it.startsWith("X360") }
-                .forEach {
-                    NetworkClient.send("${it}_RELEASE".trim())
+                .forEach { cmd ->
+                    // If the command already has _HOLD, replace it with _RELEASE
+                    // Otherwise, just append _RELEASE
+                    val releaseCmd = if (cmd.endsWith("_HOLD")) {
+                        cmd.replace("_HOLD", "_RELEASE")
+                    } else {
+                        "${cmd}_RELEASE"
+                    }
+                    NetworkClient.send(releaseCmd.trim())
                 }
         }
     }
@@ -204,7 +211,7 @@ class ControlViewHelper(
         }
         uiHandler.postDelayed(repeater!!, GlobalSettings.turboSpeed)
     }
-    
+
     /**
      * Stop repeating the payload
      */
