@@ -5,6 +5,8 @@ import android.content.SharedPreferences
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
+import android.view.Menu
+import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
@@ -22,6 +24,7 @@ import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
+import com.example.simplecontroller.ui.ThemeManager
 import com.example.simplecontroller.ui.UIComponentBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.flow.collectLatest
@@ -68,10 +71,19 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     // =============== life-cycle ======================================
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Initialize ThemeManager before setting content view
+        ThemeManager.init(this)
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         canvas = findViewById(R.id.canvas)
         connectionStatusText = findViewById(R.id.connectionStatus)
+
+        // Apply dark theme background to canvas
+        canvas.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_background))
+
+        // Apply text color to connection status
+        connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
         // Initialize helpers
         uiBuilder = UIComponentBuilder(this, canvas)
@@ -91,6 +103,22 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Load network settings
         loadNetworkSettings()
+    }
+
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.main_menu, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        return when (item.itemId) {
+            R.id.menu_toggle_theme -> {
+                ThemeManager.toggleDarkMode(this)
+                recreate() // Recreate activity to apply theme changes
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
     }
 
     override fun onStart() {
@@ -270,17 +298,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val color = when (status) {
             NetworkClient.ConnectionStatus.DISCONNECTED -> ContextCompat.getColor(
                 this,
-                android.R.color.darker_gray
+                R.color.dark_text_secondary
             )
 
             NetworkClient.ConnectionStatus.CONNECTING -> ContextCompat.getColor(
                 this,
-                R.color.purple_500
+                R.color.primary_blue
             )
 
             NetworkClient.ConnectionStatus.CONNECTED -> ContextCompat.getColor(
                 this,
-                android.R.color.holo_green_dark
+                R.color.button_pressed_blue
             )
 
             NetworkClient.ConnectionStatus.ERROR -> ContextCompat.getColor(
@@ -337,8 +365,18 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         editPort.setText(networkPrefs.getInt("serverPort", 9001).toString())
         checkAutoReconnect.isChecked = networkPrefs.getBoolean("autoReconnect", false)
 
-        // Show the dialog
-        AlertDialog.Builder(this)
+        // Apply theme to dialog elements
+        editHost.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+        editHost.setHintTextColor(ContextCompat.getColor(this, R.color.dark_text_secondary))
+        editPort.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+        editPort.setHintTextColor(ContextCompat.getColor(this, R.color.dark_text_secondary))
+        checkAutoReconnect.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+
+        // Apply dark theme to dialog background
+        dialogView.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_surface))
+
+        // Show the dialog with themed appearance
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Server Connection")
             .setView(dialogView)
             .setPositiveButton("Connect") { _, _ ->
@@ -358,7 +396,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 NetworkClient.start()
             }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        // Apply styling to dialog buttons
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
+            ContextCompat.getColor(this, R.color.primary_blue)
+        )
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(
+            ContextCompat.getColor(this, R.color.primary_blue)
+        )
     }
 
     /**
@@ -374,7 +421,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             "Xbox Controller Layout"
         )
 
-        AlertDialog.Builder(this)
+        // Show dialog with dark theme
+        val dialog = AlertDialog.Builder(this)
             .setTitle("Add control or layout…")
             .setItems(options) { _, i ->
                 when (i) {
@@ -387,7 +435,20 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     // Add more templates here as needed
                 }
             }
-            .show()
+            .create()
+
+        dialog.window?.setBackgroundDrawableResource(R.color.dark_surface)
+        dialog.show()
+
+        // Apply text color to list items (needs to be done after dialog is shown)
+        dialog.listView?.let { listView ->
+            for (i in 0 until listView.count) {
+                val v = listView.getChildAt(i)
+                if (v is TextView) {
+                    v.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+                }
+            }
+        }
     }
 
     /**

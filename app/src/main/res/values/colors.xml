@@ -8,6 +8,23 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
+    <!-- Dark mode theme colors with black and blue -->
+    <color name="dark_background">#FF121212</color>
+    <color name="darker_black">#FF000000</color>
+    <color name="dark_surface">#FF1E1E1E</color>
+    <color name="primary_blue">#FF2979FF</color>
+    <color name="secondary_blue">#FF0D47A1</color>
+    <color name="accent_blue">#FF40C4FF</color>
+    <color name="dark_text_primary">#FFEEEEEE</color>
+    <color name="dark_text_secondary">#FFB0B0B0</color>
+    <color name="button_blue">#FF1E88E5</color>
+    <color name="button_pressed_blue">#FF2979FF</color>
+    <color name="stick_blue">#FF0D47A1</color>
+    <color name="stick_pressed_blue">#FF1A237E</color>
+    <color name="touchpad_blue">#220D47A1</color>
+    <color name="recenter_orange">#FFFF9800</color>
+    <color name="recenter_pressed_orange">#FFFFC107</color>
+
     <!-- Connection status colors -->
     <color name="status_connected">#FF4CAF50</color>
     <color name="status_connecting">#FFFFEB3B</color>

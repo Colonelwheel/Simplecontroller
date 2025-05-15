@@ -3,7 +3,8 @@
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="16dp"
+    android:background="@color/dark_surface">
 
     <TextView
         android:layout_width="match_parent"
@@ -11,12 +12,14 @@
         android:text="Server Connection Settings"
         android:textSize="18sp"
         android:textStyle="bold"
+        android:textColor="@color/dark_text_primary"
         android:layout_marginBottom="16dp"/>
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp">
+        android:layout_marginBottom="8dp"
+        android:textColorHint="@color/dark_text_secondary">
 
         <EditText
             android:id="@+id/editServerHost"
@@ -24,13 +27,16 @@
             android:layout_height="wrap_content"
             android:hint="Server IP Address"
             android:inputType="text"
+            android:textColor="@color/dark_text_primary"
+            android:backgroundTint="@color/primary_blue"
             android:singleLine="true" />
     </com.google.android.material.textfield.TextInputLayout>
 
     <com.google.android.material.textfield.TextInputLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="16dp"
+        android:textColorHint="@color/dark_text_secondary">
 
         <EditText
             android:id="@+id/editServerPort"
@@ -38,6 +44,8 @@
             android:layout_height="wrap_content"
             android:hint="Port Number"
             android:inputType="number"
+            android:textColor="@color/dark_text_primary"
+            android:backgroundTint="@color/primary_blue"
             android:singleLine="true" />
     </com.google.android.material.textfield.TextInputLayout>
 
@@ -45,6 +53,8 @@
         android:id="@+id/checkboxAutoReconnect"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Auto-reconnect when connection lost"/>
+        android:text="Auto-reconnect when connection lost"
+        android:textColor="@color/dark_text_primary"
+        android:buttonTint="@color/primary_blue"/>
 
 </LinearLayout>

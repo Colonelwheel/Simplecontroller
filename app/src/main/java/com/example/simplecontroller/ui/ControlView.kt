@@ -9,7 +9,9 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.core.content.ContextCompat
 import com.example.simplecontroller.MainActivity
+import com.example.simplecontroller.R
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
@@ -29,7 +31,6 @@ class ControlView(
     context: Context,
     val model: Control
 ) : FrameLayout(context) {
-
 
     /*hold*/
     private val holdHandler = Handler(Looper.getMainLooper())
@@ -115,23 +116,33 @@ class ControlView(
         super.onDraw(c)
         when (model.type) {
             ControlType.BUTTON -> {
-                // Use a brighter color if the button is latched (held)
-                paint.color = if (isLatched) 0xFF4CAF50.toInt() else 0xFF2196F3.toInt()
+                // Use a brighter color if the button is latched (held) with theme colors
+                paint.color = if (isLatched)
+                    ContextCompat.getColor(context, R.color.button_pressed_blue)
+                else
+                    ContextCompat.getColor(context, R.color.button_blue)
                 c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
             }
             ControlType.RECENTER -> {
-                // Re-center button uses a distinctive orange color
-                paint.color = if (isLatched) 0xFFFF9800.toInt() else 0xFFFFC107.toInt() // Orange color
+                // Re-center button uses a distinctive orange color with theme colors
+                paint.color = if (isLatched)
+                    ContextCompat.getColor(context, R.color.recenter_pressed_orange)
+                else
+                    ContextCompat.getColor(context, R.color.recenter_orange)
                 c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
             }
             ControlType.STICK -> {
-                paint.color = 0x552196F3
+                // Background of the stick area with theme colors
+                paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
-                paint.color = 0xFF2196F3.toInt()
+
+                // The stick itself with theme colors
+                paint.color = ContextCompat.getColor(context, R.color.stick_blue)
                 c.drawCircle(width/2f, height/2f, min(width, height)/6f, paint)
             }
             ControlType.TOUCHPAD -> {
-                paint.color = 0x332196F3
+                // Semi-transparent touchpad area with theme colors
+                paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
             }
         }
@@ -240,7 +251,7 @@ class ControlView(
                     isLatched = true
                     isPressed = true
                     invalidate()
-                    
+
                     // Trigger re-centering of all sticks
                     SwipeManager.recenterAllSticks()
                 }

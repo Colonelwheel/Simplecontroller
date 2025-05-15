@@ -12,6 +12,7 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.LinearLayout
 import androidx.core.content.ContextCompat
+import com.example.simplecontroller.R
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 
 /**
@@ -44,6 +45,9 @@ class UIComponentBuilder(
         return Button(context).apply {
             text = label
             alpha = 0.7f
+            // Add theme-specific styling
+            setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.button_blue)
             setOnClickListener(onClick)
             addViewToCanvas(this, gravity, marginH, marginV)
         }
@@ -64,6 +68,10 @@ class UIComponentBuilder(
     ): Switch = Switch(context).apply {
         text = label
         alpha = 0.7f
+        // Add theme-specific styling
+        setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
+        thumbTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
+        trackTintList = ContextCompat.getColorStateList(context, R.color.secondary_blue)
         isChecked = initialState
         setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
     }
@@ -88,6 +96,9 @@ class UIComponentBuilder(
         return FloatingActionButton(context).apply {
             setImageResource(iconResource)
             alpha = 0.85f
+            // Add theme-specific styling
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
+            imageTintList = ContextCompat.getColorStateList(context, R.color.dark_text_primary)
             setOnClickListener { onClick() }
             addViewToCanvas(this, gravity, marginH, marginV)
         }
@@ -187,6 +198,10 @@ class UIComponentBuilder(
             )
             background = ContextCompat.getDrawable(context, android.R.drawable.edit_text)
             setPadding(8, 0, 8, 0)
+            // Add theme-specific styling
+            setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
+            setHintTextColor(ContextCompat.getColor(context, R.color.dark_text_secondary))
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.dark_surface)
         }
 
         // Create apply button
@@ -195,6 +210,8 @@ class UIComponentBuilder(
             background = null
             alpha = 0.8f
             setPadding(4, 4, 4, 4)
+            // Add theme-specific styling
+            imageTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
             setOnClickListener {
                 val value = editText.text.toString()
                 if (value.isNotEmpty()) {

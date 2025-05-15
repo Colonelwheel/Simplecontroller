@@ -12,6 +12,8 @@ import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import kotlin.math.roundToInt
+import androidx.core.content.ContextCompat
+import com.example.simplecontroller.R
 
 /**
  * Builds property sheet dialogs for controls.
@@ -41,7 +43,7 @@ class PropertySheetBuilder(
         val directionalContainer: LinearLayout,
         val payloadField: AutoCompleteTextView
     )
-    
+
     /**
      * Shows the property sheet dialog with all appropriate UI elements for this control type.
      */
@@ -51,17 +53,80 @@ class PropertySheetBuilder(
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 24, 32, 8)
+            setBackgroundColor(ContextCompat.getColor(context, R.color.dark_surface))
         }
         scrollView.addView(container)
-        
+
         // Build all UI components
         val components = buildUIComponents(container)
-        
+
         // Create and show the dialog
-        AlertDialog.Builder(context).setTitle("Properties").setView(scrollView)
+        val alertDialog = AlertDialog.Builder(context)
+            .setTitle("Properties")
+            .setView(scrollView)
             .setPositiveButton("OK") { _, _ -> saveProperties(components) }
             .setNegativeButton("Cancel", null)
-            .show()
+            .create()
+
+        alertDialog.window?.setBackgroundDrawableResource(R.color.dark_surface)
+        alertDialog.show()
+
+        // Style dialog buttons
+        alertDialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
+            ContextCompat.getColor(context, R.color.primary_blue)
+        )
+        alertDialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(
+            ContextCompat.getColor(context, R.color.primary_blue)
+        )
+    }
+
+    /**
+     * Apply dark theme styling to dialog components
+     */
+    private fun applyThemeStylingToComponents(components: UIComponents) {
+        // Apply text colors
+        components.nameField.setTextColor(ThemeManager.getTextColor(context))
+        components.nameField.setHintTextColor(ContextCompat.getColor(context, R.color.dark_text_secondary))
+
+        components.payloadField.setTextColor(ThemeManager.getTextColor(context))
+        components.payloadField.setHintTextColor(ContextCompat.getColor(context, R.color.dark_text_secondary))
+
+        // Handle optional fields
+        components.sensitivitySeek?.progressTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+        components.sensitivitySeek?.thumbTintList =
+            ContextCompat.getColorStateList(context, R.color.accent_blue)
+
+        // Style checkboxes
+        components.holdToggle.setTextColor(ThemeManager.getTextColor(context))
+        components.holdToggle.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        components.autoCenter.setTextColor(ThemeManager.getTextColor(context))
+        components.autoCenter.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        components.swipeActivate.setTextColor(ThemeManager.getTextColor(context))
+        components.swipeActivate.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        components.holdLeftWhileTouch.setTextColor(ThemeManager.getTextColor(context))
+        components.holdLeftWhileTouch.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        components.toggleLeftClick.setTextColor(ThemeManager.getTextColor(context))
+        components.toggleLeftClick.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        components.directionalMode.setTextColor(ThemeManager.getTextColor(context))
+        components.directionalMode.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
+        // Style duration field
+        components.holdDurationField.setTextColor(ThemeManager.getTextColor(context))
+        components.holdDurationField.setHintTextColor(
+            ContextCompat.getColor(context, R.color.dark_text_secondary)
+        )
     }
 
     /**
