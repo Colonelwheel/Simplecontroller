@@ -49,6 +49,41 @@
             android:singleLine="true" />
     </com.google.android.material.textfield.TextInputLayout>
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Player Selection"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="@color/dark_text_primary"
+        android:layout_marginBottom="8dp"/>
+
+    <RadioGroup
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <RadioButton
+            android:id="@+id/radioPlayer1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Player 1"
+            android:textColor="@color/dark_text_primary"
+            android:buttonTint="@color/primary_blue"
+            android:checked="true"
+            android:layout_weight="1"/>
+
+        <RadioButton
+            android:id="@+id/radioPlayer2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Player 2"
+            android:textColor="@color/dark_text_primary"
+            android:buttonTint="@color/primary_blue"
+            android:layout_weight="1"/>
+    </RadioGroup>
+
     <CheckBox
         android:id="@+id/checkboxAutoReconnect"
         android:layout_width="match_parent"

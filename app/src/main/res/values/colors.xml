@@ -25,6 +25,10 @@
     <color name="recenter_orange">#FFFF9800</color>
     <color name="recenter_pressed_orange">#FFFFC107</color>
 
+    <!-- Player-specific colors -->
+    <color name="player1_color">#225599</color>
+    <color name="player2_color">#993322</color>
+
     <!-- Connection status colors -->
     <color name="status_connected">#FF4CAF50</color>
     <color name="status_connecting">#FFFFEB3B</color>

@@ -85,6 +85,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Apply text color to connection status
         connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
+        // Set the saved player role
+        val savedPlayerRole =
+            networkPrefs.getString("playerRole", NetworkClient.PlayerRole.PLAYER1.name)
+        val playerRole = try {
+            NetworkClient.PlayerRole.valueOf(savedPlayerRole ?: "PLAYER1")
+        } catch (e: Exception) {
+            NetworkClient.PlayerRole.PLAYER1
+        }
+        NetworkClient.setPlayerRole(playerRole)
+
         // Initialize helpers
         uiBuilder = UIComponentBuilder(this, canvas)
         layoutManager = LayoutManager(this, canvas, controls) { control ->
@@ -103,6 +113,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Load network settings
         loadNetworkSettings()
+
+        // Update player role indicator
+        updatePlayerRoleIndicator()
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -117,6 +130,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 recreate() // Recreate activity to apply theme changes
                 true
             }
+
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -271,6 +285,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         lifecycleScope.launch {
             NetworkClient.connectionStatus.collectLatest { status ->
                 updateConnectionStatusUI(status)
+                updatePlayerRoleIndicator()
             }
         }
 
@@ -345,6 +360,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val port = networkPrefs.getInt("serverPort", 9001)
         val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
 
+        // Load player role
+        val savedPlayerRole =
+            networkPrefs.getString("playerRole", NetworkClient.PlayerRole.PLAYER1.name)
+        val playerRole = try {
+            NetworkClient.PlayerRole.valueOf(savedPlayerRole ?: "PLAYER1")
+        } catch (e: Exception) {
+            NetworkClient.PlayerRole.PLAYER1
+        }
+
+        // Set player role and update connection settings
+        NetworkClient.setPlayerRole(playerRole)
         NetworkClient.updateSettings(host, port, autoReconnect)
     }
 
@@ -360,6 +386,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val editPort = dialogView.findViewById<EditText>(R.id.editServerPort)
         val checkAutoReconnect = dialogView.findViewById<CheckBox>(R.id.checkboxAutoReconnect)
 
+        // Add radio buttons for player selection
+        val radioPlayer1 = dialogView.findViewById<RadioButton>(R.id.radioPlayer1)
+        val radioPlayer2 = dialogView.findViewById<RadioButton>(R.id.radioPlayer2)
+
+        // Set default selected player based on current setting
+        if (NetworkClient.getPlayerRole() == NetworkClient.PlayerRole.PLAYER1) {
+            radioPlayer1.isChecked = true
+        } else {
+            radioPlayer2.isChecked = true
+        }
+
         // Fill in current values
         editHost.setText(networkPrefs.getString("serverHost", "10.0.2.2"))
         editPort.setText(networkPrefs.getInt("serverPort", 9001).toString())
@@ -371,6 +408,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         editPort.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
         editPort.setHintTextColor(ContextCompat.getColor(this, R.color.dark_text_secondary))
         checkAutoReconnect.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+        radioPlayer1.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+        radioPlayer2.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
         // Apply dark theme to dialog background
         dialogView.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_surface))
@@ -385,15 +424,27 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 val port = editPort.text.toString().toIntOrNull() ?: 9001
                 val autoReconnect = checkAutoReconnect.isChecked
 
+                // Set player role
+                val playerRole = if (radioPlayer1.isChecked)
+                    NetworkClient.PlayerRole.PLAYER1
+                else
+                    NetworkClient.PlayerRole.PLAYER2
+
+                // Save to preferences
                 networkPrefs.edit()
                     .putString("serverHost", host)
                     .putInt("serverPort", port)
                     .putBoolean("autoReconnect", autoReconnect)
+                    .putString("playerRole", playerRole.name)
                     .apply()
 
                 // Update client and connect
+                NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
                 NetworkClient.start()
+
+                // Update UI to reflect player role
+                updatePlayerRoleIndicator()
             }
             .setNegativeButton("Cancel", null)
             .create()
@@ -409,6 +460,34 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     /**
+     * Update the UI to indicate which player role is active
+     */
+    private fun updatePlayerRoleIndicator() {
+        // Get current player role
+        val playerRole = NetworkClient.getPlayerRole()
+
+        // Update the connection status text to include player role
+        val statusText = when (NetworkClient.connectionStatus.value) {
+            NetworkClient.ConnectionStatus.DISCONNECTED -> "Disconnected"
+            NetworkClient.ConnectionStatus.CONNECTING -> "Connecting..."
+            NetworkClient.ConnectionStatus.CONNECTED -> "Connected"
+            NetworkClient.ConnectionStatus.ERROR -> "Connection Error"
+        }
+
+        connectionStatusText.text = when (playerRole) {
+            NetworkClient.PlayerRole.PLAYER1 -> "P1: $statusText"
+            NetworkClient.PlayerRole.PLAYER2 -> "P2: $statusText"
+        }
+
+        // Optional: Update the background color of the status indicator
+        val bgColor = when (playerRole) {
+            NetworkClient.PlayerRole.PLAYER1 -> ContextCompat.getColor(this, R.color.player1_color)
+            NetworkClient.PlayerRole.PLAYER2 -> ContextCompat.getColor(this, R.color.player2_color)
+        }
+        connectionStatusText.setBackgroundColor(bgColor)
+    }
+
+    /**
      * Show picker dialog to add a new control or create a template layout
      */
     private fun showAddPicker() {
@@ -417,8 +496,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             "Stick",
             "TouchPad",
             "Re-center Button",
-            "--- Templates ---",
-            "Xbox Controller Layout"
+            "--- Layouts ---",
+            "Xbox Controller Layout",
+            "Player 1 Xbox Layout",
+            "Player 2 Xbox Layout"
         )
 
         // Show dialog with dark theme
@@ -432,7 +513,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     3 -> layoutManager.createControl(ControlType.RECENTER)
                     4 -> {} // This is just a divider item
                     5 -> createXboxControllerLayout()
-                    // Add more templates here as needed
+                    6 -> createPlayer1XboxLayout()
+                    7 -> createPlayer2XboxLayout()
                 }
             }
             .create()
@@ -440,7 +522,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         dialog.window?.setBackgroundDrawableResource(R.color.dark_surface)
         dialog.show()
 
-        // Apply text color to list items (needs to be done after dialog is shown)
+        // Apply text color to list items
         dialog.listView?.let { listView ->
             for (i in 0 until listView.count) {
                 val v = listView.getChildAt(i)
@@ -776,5 +858,552 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         layoutName = "xbox_standard"
 
         Toast.makeText(this, "Xbox controller layout created!", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * Creates a Player 1 Xbox controller layout
+     */
+    private fun createPlayer1XboxLayout() {
+        // First clear existing controls
+        controls.clear()
+        clearControlViews()
+
+        // Screen dimensions for positioning
+        val screenWidth = canvas.width.toFloat()
+        val screenHeight = canvas.height.toFloat()
+
+        // Define standard sizes
+        val buttonSize = 120f
+        val stickSize = 200f
+        val shoulderSize = 100f
+        val dpadSize = 160f
+
+        // Function to create and add a control
+        fun addControl(
+            id: String,
+            type: ControlType,
+            x: Float,
+            y: Float,
+            w: Float,
+            h: Float,
+            payload: String,
+            name: String = ""
+        ): Control {
+            val control = Control(
+                id = id,
+                type = type,
+                x = x,
+                y = y,
+                w = w,
+                h = h,
+                payload = payload,
+                name = name
+            )
+            controls.add(control)
+            canvas.addView(layoutManager.createControlView(control))
+            return control
+        }
+
+        // Left stick (positioned on the left side)
+        addControl(
+            "p1_left_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.2f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_L",
+            name = "P1 Left Stick"
+        )
+
+        // Right stick (positioned on the right side)
+        addControl(
+            "p1_right_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.75f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_R",
+            name = "P1 Right Stick"
+        )
+
+        // Face buttons (ABXY) positioned on the right
+        // A Button (bottom)
+        addControl(
+            "p1_a_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.75f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360A",
+            name = "P1 A"
+        )
+
+        // B Button (right)
+        addControl(
+            "p1_b_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.9f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360B",
+            name = "P1 B"
+        )
+
+        // X Button (left)
+        addControl(
+            "p1_x_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.7f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360X",
+            name = "P1 X"
+        )
+
+        // Y Button (top)
+        addControl(
+            "p1_y_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.55f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360Y",
+            name = "P1 Y"
+        )
+
+        // D-Pad (positioned on the left)
+        // D-Pad Up
+        addControl(
+            "p1_dpad_up",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.35f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360UP",
+            name = "P1 ↑"
+        )
+
+        // D-Pad Down
+        addControl(
+            "p1_dpad_down",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.5f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360DOWN",
+            name = "P1 ↓"
+        )
+
+        // D-Pad Left
+        addControl(
+            "p1_dpad_left",
+            ControlType.BUTTON,
+            x = screenWidth * 0.1f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360LEFT",
+            name = "P1 ←"
+        )
+
+        // D-Pad Right
+        addControl(
+            "p1_dpad_right",
+            ControlType.BUTTON,
+            x = screenWidth * 0.3f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360RIGHT",
+            name = "P1 →"
+        )
+
+        // Shoulder Buttons (positioned at the top)
+        // Left Shoulder (LB)
+        addControl(
+            "p1_lb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360LB",
+            name = "P1 LB"
+        )
+
+        // Right Shoulder (RB)
+        addControl(
+            "p1_rb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360RB",
+            name = "P1 RB"
+        )
+
+        // Triggers (positioned at the top)
+        // Left Trigger (LT) - using button for now, could make special trigger control later
+        addControl(
+            "p1_lt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "LT:1.0", // Fully pressed trigger
+            name = "P1 LT"
+        )
+
+        // Right Trigger (RT)
+        addControl(
+            "p1_rt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "RT:1.0",
+            name = "P1 RT"
+        )
+
+        // Center buttons (Start/Back/Guide)
+        // Start button
+        addControl(
+            "p1_start_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.6f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360START",
+            name = "P1 Start"
+        )
+
+        // Back button
+        addControl(
+            "p1_back_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.4f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360BACK",
+            name = "P1 Back"
+        )
+
+        // Stick clickable buttons
+        // Left stick button (press)
+        addControl(
+            "p1_ls_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360LS",
+            name = "P1 LS"
+        )
+
+        // Right stick button (press)
+        addControl(
+            "p1_rs_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.75f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360RS",
+            name = "P1 RS"
+        )
+
+        // Save the layout
+        saveControls(this, "player1_xbox", controls)
+        layoutName = "player1_xbox"
+
+        Toast.makeText(this, "Player 1 Xbox layout created!", Toast.LENGTH_SHORT).show()
+    }
+
+
+    /**
+     * Creates a Player 2 Xbox controller layout
+     */
+    private fun createPlayer2XboxLayout() {
+        // First clear existing controls
+        controls.clear()
+        clearControlViews()
+
+        // Screen dimensions for positioning
+        val screenWidth = canvas.width.toFloat()
+        val screenHeight = canvas.height.toFloat()
+
+        // Define standard sizes
+        val buttonSize = 120f
+        val stickSize = 200f
+        val shoulderSize = 100f
+        val dpadSize = 160f
+
+        // Function to create and add a control
+        fun addControl(
+            id: String,
+            type: ControlType,
+            x: Float,
+            y: Float,
+            w: Float,
+            h: Float,
+            payload: String,
+            name: String = ""
+        ): Control {
+            val control = Control(
+                id = id,
+                type = type,
+                x = x,
+                y = y,
+                w = w,
+                h = h,
+                payload = payload,
+                name = name
+            )
+            controls.add(control)
+            canvas.addView(layoutManager.createControlView(control))
+            return control
+        }
+
+        // Left stick (positioned on the left side)
+        addControl(
+            "p2_left_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.2f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_L",
+            name = "P2 Left Stick"
+        )
+
+        // Right stick (positioned on the right side)
+        addControl(
+            "p2_right_stick",
+            ControlType.STICK,
+            x = screenWidth * 0.75f - stickSize / 2,
+            y = screenHeight * 0.6f - stickSize / 2,
+            w = stickSize,
+            h = stickSize,
+            payload = "STICK_R",
+            name = "P2 Right Stick"
+        )
+
+        // Face buttons (ABXY) positioned on the right
+        // A Button (bottom)
+        addControl(
+            "p2_a_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.75f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360A",
+            name = "P2 A"
+        )
+
+        // B Button (right)
+        addControl(
+            "p2_b_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.9f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360B",
+            name = "P2 B"
+        )
+
+        // X Button (left)
+        addControl(
+            "p2_x_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.7f - buttonSize / 2,
+            y = screenHeight * 0.65f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360X",
+            name = "P2 X"
+        )
+
+        // Y Button (top)
+        addControl(
+            "p2_y_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - buttonSize / 2,
+            y = screenHeight * 0.55f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360Y",
+            name = "P2 Y"
+        )
+
+        // D-Pad (positioned on the left)
+        // D-Pad Up
+        addControl(
+            "p2_dpad_up",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.35f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360UP",
+            name = "P2 ↑"
+        )
+
+        // D-Pad Down
+        addControl(
+            "p2_dpad_down",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 2,
+            y = screenHeight * 0.5f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360DOWN",
+            name = "P2 ↓"
+        )
+
+        // D-Pad Left
+        addControl(
+            "p2_dpad_left",
+            ControlType.BUTTON,
+            x = screenWidth * 0.1f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360LEFT",
+            name = "P2 ←"
+        )
+
+        // D-Pad Right
+        addControl(
+            "p2_dpad_right",
+            ControlType.BUTTON,
+            x = screenWidth * 0.3f - buttonSize / 2,
+            y = screenHeight * 0.425f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize,
+            payload = "X360RIGHT",
+            name = "P2 →"
+        )
+
+        // Shoulder Buttons (positioned at the top)
+        // Left Shoulder (LB)
+        addControl(
+            "p2_lb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360LB",
+            name = "P2 LB"
+        )
+
+        // Right Shoulder (RB)
+        addControl(
+            "p2_rb_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.15f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "X360RB",
+            name = "P2 RB"
+        )
+
+        // Triggers (positioned at the top)
+        // Left Trigger (LT) - using button for now, could make special trigger control later
+        addControl(
+            "p2_lt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "LT:1.0", // Fully pressed trigger
+            name = "P2 LT"
+        )
+
+        // Right Trigger (RT)
+        addControl(
+            "p2_rt_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.8f - shoulderSize / 2,
+            y = screenHeight * 0.05f - shoulderSize / 2,
+            w = shoulderSize,
+            h = shoulderSize,
+            payload = "RT:1.0",
+            name = "P2 RT"
+        )
+
+        // Center buttons (Start/Back/Guide)
+        // Start button
+        addControl(
+            "p2_start_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.6f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360START",
+            name = "P2 Start"
+        )
+
+        // Back button
+        addControl(
+            "p2_back_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.4f - buttonSize / 2,
+            y = screenHeight * 0.3f - buttonSize / 2,
+            w = buttonSize,
+            h = buttonSize * 0.6f,
+            payload = "X360BACK",
+            name = "P2 Back"
+        )
+
+        // Stick clickable buttons
+        // Left stick button (press)
+        addControl(
+            "p2_ls_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.2f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360LS",
+            name = "P2 LS"
+        )
+
+        // Right stick button (press)
+        addControl(
+            "p2_rs_button",
+            ControlType.BUTTON,
+            x = screenWidth * 0.75f - buttonSize / 3,
+            y = screenHeight * 0.7f - buttonSize / 3,
+            w = buttonSize * 0.6f,
+            h = buttonSize * 0.6f,
+            payload = "X360RS",
+            name = "P2 RS"
+        )
+
+        // Save the layout
+        saveControls(this, "player2_xbox", controls)
+        layoutName = "player2_xbox"
+
+        Toast.makeText(this, "Player 2 Xbox controller layout created!", Toast.LENGTH_SHORT).show()
     }
 }

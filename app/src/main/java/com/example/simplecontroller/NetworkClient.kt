@@ -21,6 +21,15 @@ object NetworkClient {
         ERROR
     }
 
+    // Define player roles
+    enum class PlayerRole {
+        PLAYER1,
+        PLAYER2
+    }
+
+    // Current player selection
+    private var currentPlayerRole = PlayerRole.PLAYER1
+
     // Expose connection status as state flow for UI updates
     private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
     val connectionStatus = _connectionStatus.asStateFlow()
@@ -60,6 +69,23 @@ object NetworkClient {
         }
     }
 
+    /** Set the player role for this client */
+    fun setPlayerRole(role: PlayerRole) {
+        currentPlayerRole = role
+        Log.d("NetworkClient", "Player role set to: $role")
+
+        // If already connected, send player registration
+        if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+            val roleId = if (role == PlayerRole.PLAYER1) "player1" else "player2"
+            send("REGISTER:$roleId")
+        }
+    }
+
+    /** Get the current player role */
+    fun getPlayerRole(): PlayerRole {
+        return currentPlayerRole
+    }
+
     /** Start connection to server */
     fun start() {
         if (_connectionStatus.value == ConnectionStatus.CONNECTING) return
@@ -78,6 +104,10 @@ object NetworkClient {
                 _connectionStatus.value = ConnectionStatus.CONNECTED
                 reconnectAttempts = 0
                 Log.d("NetworkClient", "Connected successfully")
+
+                // Register player role with server
+                val roleId = if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"
+                send("REGISTER:$roleId")
 
                 for (msg in channel) {
                     try {
@@ -112,6 +142,7 @@ object NetworkClient {
         }
     }
 
+
     /** Close the connection */
     fun close() {
         reconnectHandler.removeCallbacks(reconnectRunnable)
@@ -145,10 +176,23 @@ object NetworkClient {
         reconnectHandler.postDelayed(reconnectRunnable, reconnectDelayMs)
     }
 
-    /** Non‑blocking, thread‑safe. */
+    /**
+     * Send a command with the current player prefix.
+     * Non‑blocking, thread‑safe.
+     */
     fun send(message: String) {
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
-            channel.trySend(message)
+            // Prefix message with player ID if it doesn't already have one
+            val prefixedMessage = if (message.startsWith("REGISTER:") ||
+                message.startsWith("player1:") ||
+                message.startsWith("player2:")) {
+                message
+            } else {
+                val playerPrefix = if (currentPlayerRole == PlayerRole.PLAYER1) "player1:" else "player2:"
+                "$playerPrefix$message"
+            }
+
+            channel.trySend(prefixedMessage)
         } else {
             Log.w("NetworkClient", "Cannot send when not connected")
         }
