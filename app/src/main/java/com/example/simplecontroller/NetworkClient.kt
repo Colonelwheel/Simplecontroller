@@ -4,12 +4,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import kotlinx.coroutines.*
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.io.BufferedWriter
-import java.io.OutputStreamWriter
-import java.net.Socket
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.SocketException
 
 object NetworkClient {
@@ -50,11 +49,21 @@ object NetworkClient {
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectRunnable = Runnable { start() }
 
-    private val channel = Channel<String>(Channel.UNLIMITED)
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // Heartbeat for connection verification
+    private val heartbeatHandler = Handler(Looper.getMainLooper())
+    private val heartbeatInterval = 2000L // 2 seconds
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+                sendHeartbeat()
+                heartbeatHandler.postDelayed(this, heartbeatInterval)
+            }
+        }
+    }
 
-    private var socket: Socket? = null
-    private var writer: BufferedWriter? = null
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var socket: DatagramSocket? = null
+    private var serverAddress: InetAddress? = null
 
     /** Update connection settings */
     fun updateSettings(host: String, port: Int, autoReconnectEnabled: Boolean) {
@@ -96,36 +105,32 @@ object NetworkClient {
                 // Cancel any pending reconnect attempts
                 reconnectHandler.removeCallbacks(reconnectRunnable)
 
-                Log.d("NetworkClient", "Connecting to $hostAddress:$portNumber")
-                socket = Socket(hostAddress, portNumber).also {
-                    writer = BufferedWriter(OutputStreamWriter(it.getOutputStream()))
-                }
+                Log.d("NetworkClient", "Connecting to $hostAddress:$portNumber via UDP")
+
+                // Close existing socket if any
+                socket?.close()
+
+                // Create a new UDP socket
+                socket = DatagramSocket()
+                serverAddress = InetAddress.getByName(hostAddress)
+
+                // Send an initial connection message to establish communication
+                val connectMessage = "CONNECT:${if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"}"
+                sendRaw(connectMessage)
+
+                // Start listening for responses in a separate coroutine
+                startListening()
 
                 _connectionStatus.value = ConnectionStatus.CONNECTED
                 reconnectAttempts = 0
-                Log.d("NetworkClient", "Connected successfully")
+                Log.d("NetworkClient", "Connected successfully via UDP")
+
+                // Start heartbeat
+                heartbeatHandler.post(heartbeatRunnable)
 
                 // Register player role with server
                 val roleId = if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"
                 send("REGISTER:$roleId")
-
-                for (msg in channel) {
-                    try {
-                        writer?.apply {
-                            write(msg)
-                            newLine()
-                            flush()
-                        }
-                    } catch (e: SocketException) {
-                        Log.e("NetworkClient", "Socket error while sending", e)
-                        _lastErrorMessage.value = "Error sending data: ${e.message}"
-                        handleDisconnect()
-                        break
-                    } catch (e: Exception) {
-                        Log.e("NetworkClient", "Error sending data", e)
-                        _lastErrorMessage.value = "Error sending data: ${e.message}"
-                    }
-                }
             } catch (e: Exception) {
                 Log.e("NetworkClient", "Connection error", e)
                 _connectionStatus.value = ConnectionStatus.ERROR
@@ -134,27 +139,75 @@ object NetworkClient {
                 if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
                     scheduleReconnect()
                 }
-            } finally {
-                if (_connectionStatus.value != ConnectionStatus.CONNECTING) {
-                    closeConnection()
+            }
+        }
+    }
+
+    /** Start listening for server responses */
+    private fun startListening() {
+        scope.launch {
+            val buffer = ByteArray(1024)
+            val packet = DatagramPacket(buffer, buffer.size)
+
+            while (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+                try {
+                    socket?.soTimeout = 5000 // 5 second timeout
+                    socket?.receive(packet)
+                    val received = String(packet.data, 0, packet.length)
+
+                    // Handle received message (e.g., PING responses, etc.)
+                    handleServerMessage(received)
+                } catch (e: SocketException) {
+                    if (_connectionStatus.value == ConnectionStatus.DISCONNECTED) {
+                        // Socket was intentionally closed, exit gracefully
+                        break
+                    }
+
+                    Log.e("NetworkClient", "Socket error while listening", e)
+                    handleDisconnect()
+                    break
+                } catch (e: Exception) {
+                    Log.e("NetworkClient", "Error receiving data", e)
+                    if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+                        _lastErrorMessage.value = "Connection error: ${e.message}"
+                    }
                 }
             }
         }
     }
 
+    /** Handle messages from the server */
+    private fun handleServerMessage(message: String) {
+        when {
+            message.startsWith("PONG") -> {
+                // Heartbeat response, connection is still alive
+                Log.d("NetworkClient", "Received heartbeat response")
+            }
+            // Add other message types as needed
+        }
+    }
+
+    /** Send a heartbeat to verify connection */
+    private fun sendHeartbeat() {
+        try {
+            sendRaw("PING")
+        } catch (e: Exception) {
+            Log.e("NetworkClient", "Failed to send heartbeat", e)
+            handleDisconnect()
+        }
+    }
 
     /** Close the connection */
     fun close() {
         reconnectHandler.removeCallbacks(reconnectRunnable)
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
         reconnectAttempts = 0
         closeConnection()
     }
 
-    /** Internal method to close socket and writer */
+    /** Internal method to close socket */
     private fun closeConnection() {
-        runCatching { writer?.close() }
-        runCatching { socket?.close() }
-        writer = null
+        socket?.close()
         socket = null
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
         scope.coroutineContext.cancelChildren()
@@ -176,23 +229,56 @@ object NetworkClient {
         reconnectHandler.postDelayed(reconnectRunnable, reconnectDelayMs)
     }
 
+    /** Send raw data directly without player prefix */
+    private fun sendRaw(message: String) {
+        socket?.let { socket ->
+            serverAddress?.let { address ->
+                try {
+                    val buffer = message.toByteArray()
+                    val packet = DatagramPacket(buffer, buffer.size, address, portNumber)
+                    socket.send(packet)
+                } catch (e: Exception) {
+                    Log.e("NetworkClient", "Error sending data: ${e.message}")
+                    throw e
+                }
+            }
+        }
+    }
+
     /**
      * Send a command with the current player prefix.
      * Non‑blocking, thread‑safe.
      */
     fun send(message: String) {
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
-            // Prefix message with player ID if it doesn't already have one
-            val prefixedMessage = if (message.startsWith("REGISTER:") ||
-                message.startsWith("player1:") ||
-                message.startsWith("player2:")) {
-                message
-            } else {
-                val playerPrefix = if (currentPlayerRole == PlayerRole.PLAYER1) "player1:" else "player2:"
-                "$playerPrefix$message"
-            }
+            scope.launch {
+                try {
+                    // Prefix message with player ID if it doesn't already have one
+                    val prefixedMessage = if (message.startsWith("REGISTER:") ||
+                        message.startsWith("player1:") ||
+                        message.startsWith("player2:")) {
+                        message
+                    } else {
+                        val playerPrefix = if (currentPlayerRole == PlayerRole.PLAYER1) "player1:" else "player2:"
+                        "$playerPrefix$message"
+                    }
 
-            channel.trySend(prefixedMessage)
+                    // Send the message via UDP
+                    serverAddress?.let { address ->
+                        val buffer = prefixedMessage.toByteArray()
+                        val packet = DatagramPacket(buffer, buffer.size, address, portNumber)
+                        socket?.send(packet)
+                    }
+                } catch (e: Exception) {
+                    Log.e("NetworkClient", "Failed to send message: ${e.message}")
+                    _lastErrorMessage.value = "Failed to send data: ${e.message}"
+
+                    // Check if this is a connection error
+                    if (e is SocketException) {
+                        handleDisconnect()
+                    }
+                }
+            }
         } else {
             Log.w("NetworkClient", "Cannot send when not connected")
         }

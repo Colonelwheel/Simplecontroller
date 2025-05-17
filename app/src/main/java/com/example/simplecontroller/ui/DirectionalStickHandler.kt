@@ -5,6 +5,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
 /**
@@ -29,11 +30,17 @@ class DirectionalStickHandler(
     private var sendingDownSuperBoost = false
     private var sendingLeftSuperBoost = false
     private var sendingRightSuperBoost = false
-    
+
     // Store the last stick position for continuous sending
     private var lastStickX = 0f
     private var lastStickY = 0f
-    
+
+    // Use UDP for analog position updates (not directional commands)
+    private var useUdp = true
+
+    // Faster continuous sending interval
+    private val continuousSendIntervalMs = 50L // 50ms ~20Hz (was 100ms)
+
     /**
      * Handle directional stick inputs, sending button commands instead of analog values
      * @param x Normalized X position (-1 to 1)
@@ -44,7 +51,13 @@ class DirectionalStickHandler(
         // Store last position
         lastStickX = x
         lastStickY = y
-        
+
+        // For move events with significant motion, also send raw position via UDP
+        // This helps with smoother transitions between directional zones
+        if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
+            UdpClient.sendStickPosition("DIR_${model.id}", x, y)
+        }
+
         // Track whether we've sent commands for each direction this frame
         var sentUp = false
         var sentDown = false
@@ -68,7 +81,19 @@ class DirectionalStickHandler(
         fun sendCommand(command: String, update: () -> Unit) {
             command.split(',', ' ')
                 .filter { it.isNotBlank() }
-                .forEach { NetworkClient.send(it.trim()) }
+                .forEach {
+                    if (useUdp) {
+                        // Try UDP first for lower latency
+                        try {
+                            UdpClient.sendCommand(it.trim())
+                        } catch (e: Exception) {
+                            // Fall back to TCP if UDP fails
+                            NetworkClient.send(it.trim())
+                        }
+                    } else {
+                        NetworkClient.send(it.trim())
+                    }
+                }
             update()
         }
 
@@ -119,7 +144,7 @@ class DirectionalStickHandler(
             startDirectionalSending(sentUp, sentDown, sentLeft, sentRight)
         }
     }
-    
+
     /**
      * Start continuous sending of directional commands
      */
@@ -159,7 +184,13 @@ class DirectionalStickHandler(
                         else model.upCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                            .forEach {
+                                if (useUdp) {
+                                    UdpClient.sendCommand(it.trim())
+                                } else {
+                                    NetworkClient.send(it.trim())
+                                }
+                            }
                     }
 
                     if (sendingDown) {
@@ -168,7 +199,13 @@ class DirectionalStickHandler(
                         else model.downCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                            .forEach {
+                                if (useUdp) {
+                                    UdpClient.sendCommand(it.trim())
+                                } else {
+                                    NetworkClient.send(it.trim())
+                                }
+                            }
                     }
 
                     if (sendingLeft) {
@@ -177,7 +214,13 @@ class DirectionalStickHandler(
                         else model.leftCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                            .forEach {
+                                if (useUdp) {
+                                    UdpClient.sendCommand(it.trim())
+                                } else {
+                                    NetworkClient.send(it.trim())
+                                }
+                            }
                     }
 
                     if (sendingRight) {
@@ -186,18 +229,24 @@ class DirectionalStickHandler(
                         else model.rightCommand
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                            .forEach {
+                                if (useUdp) {
+                                    UdpClient.sendCommand(it.trim())
+                                } else {
+                                    NetworkClient.send(it.trim())
+                                }
+                            }
                     }
 
-                    uiHandler.postDelayed(this, 100L) // Send every 100ms
+                    uiHandler.postDelayed(this, continuousSendIntervalMs) // Send at faster rate
                 }
             }
 
             // Start continuous sending
-            uiHandler.postDelayed(continuousDirectional!!, 100L)
+            uiHandler.postDelayed(continuousDirectional!!, continuousSendIntervalMs)
         }
     }
-    
+
     /**
      * Stop any continuous directional commands being sent
      */
@@ -216,5 +265,15 @@ class DirectionalStickHandler(
         sendingDownSuperBoost = false
         sendingLeftSuperBoost = false
         sendingRightSuperBoost = false
+
+        // Also send a final zero position via UDP to ensure server knows we've stopped
+        UdpClient.sendStickPosition("DIR_${model.id}", 0f, 0f)
+    }
+
+    /**
+     * Set whether to use UDP for commands (default is true)
+     */
+    fun setUseUdp(enabled: Boolean) {
+        useUdp = enabled
     }
 }

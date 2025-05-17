@@ -29,6 +29,7 @@ import com.example.simplecontroller.ui.UIComponentBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import com.example.simplecontroller.net.UdpClient
 
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
@@ -377,6 +378,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Set player role and update connection settings
         NetworkClient.setPlayerRole(playerRole)
         NetworkClient.updateSettings(host, port, autoReconnect)
+
+        // Also initialize UdpClient with the same settings
+        UdpClient.initialize(host, port)
     }
 
     /**

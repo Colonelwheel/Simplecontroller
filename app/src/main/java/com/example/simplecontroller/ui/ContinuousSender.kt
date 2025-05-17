@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
 /**
@@ -22,8 +23,11 @@ class ContinuousSender(
     private var lastStickY = 0f
 
     // Throttle sending frequency
-    private val sendIntervalMs = 16L  // ~60 FPS (down from 33ms)
+    private val sendIntervalMs = 10L  // ~100 FPS (down from 16ms)
     private var lastSendTimeMs = 0L
+
+    // Use UDP by default for faster transmission
+    private val useUdp = true
 
     /**
      * Set the last position to be continuously sent
@@ -37,7 +41,17 @@ class ContinuousSender(
             // Direct send with throttling for immediate response
             val currentTimeMs = System.currentTimeMillis()
             if (currentTimeMs - lastSendTimeMs >= sendIntervalMs) {
-                NetworkClient.send("${model.payload}:${"%.2f".format(x)},${"%.2f".format(y)}")
+                // Apply response curve for more precise control
+                val curvedX = applyResponseCurve(x)
+                val curvedY = applyResponseCurve(y)
+
+                if (useUdp) {
+                    // Use UDP for faster transmission
+                    UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
+                } else {
+                    // Fallback to TCP
+                    NetworkClient.send("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
+                }
                 lastSendTimeMs = currentTimeMs
             }
         }
@@ -53,7 +67,11 @@ class ContinuousSender(
         // More aggressive deadzone to prevent drift
         if (abs(lastStickX) < 0.15f && abs(lastStickY) < 0.15f) {
             // Send a center position to ensure stick stops
-            NetworkClient.send("${model.payload}:0.00,0.00")
+            if (useUdp) {
+                UdpClient.sendStickPosition(model.payload, 0f, 0f)
+            } else {
+                NetworkClient.send("${model.payload}:0.00,0.00")
+            }
             return
         }
 
@@ -68,14 +86,28 @@ class ContinuousSender(
 
                 // Only send if values are significant
                 if (abs(currentX) > 0.15f || abs(currentY) > 0.15f) {
-                    NetworkClient.send("${model.payload}:${"%.2f".format(currentX)},${"%.2f".format(currentY)}")
+                    // Apply response curve for more precise control
+                    val curvedX = applyResponseCurve(currentX)
+                    val curvedY = applyResponseCurve(currentY)
+
+                    if (useUdp) {
+                        // Use UDP for faster transmission
+                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
+                    } else {
+                        // Fallback to TCP
+                        NetworkClient.send("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
+                    }
 
                     // Reduce intensity for next update (creates a smooth stopping effect)
                     decayFactor *= 0.95f
                     uiHandler.postDelayed(this, sendIntervalMs)
                 } else {
                     // Stopped moving, send a final zero position to ensure we stop
-                    NetworkClient.send("${model.payload}:0.00,0.00")
+                    if (useUdp) {
+                        UdpClient.sendStickPosition(model.payload, 0f, 0f)
+                    } else {
+                        NetworkClient.send("${model.payload}:0.00,0.00")
+                    }
                     continuousSender = null
                 }
             }
@@ -94,7 +126,13 @@ class ContinuousSender(
 
         // Send a final zero position to ensure controls stop
         if (abs(lastStickX) > 0.01f || abs(lastStickY) > 0.01f) {
-            NetworkClient.send("${model.payload}:0.00,0.00")
+            if (useUdp) {
+                UdpClient.sendStickPosition(model.payload, 0f, 0f)
+                // Also send via TCP for reliability
+                NetworkClient.send("${model.payload}:0.00,0.00")
+            } else {
+                NetworkClient.send("${model.payload}:0.00,0.00")
+            }
             lastStickX = 0f
             lastStickY = 0f
         }
@@ -112,6 +150,7 @@ class ContinuousSender(
      * This gives finer control near center, more speed at edges
      */
     private fun applyResponseCurve(value: Float): Float {
-        return value * abs(value)  // Square response curve
+        // Square response curve with sign preservation
+        return value * abs(value)
     }
 }
