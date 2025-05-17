@@ -7,8 +7,6 @@ import java.net.InetAddress
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -31,13 +29,8 @@ object UdpClient {
     // Player role from NetworkClient
     private val playerRole get() = NetworkClient.getPlayerRole()
 
-    // Connection status with flow for observability
-    private val _connectionStatus = MutableStateFlow(false)
-    val connectionStatus = _connectionStatus.asStateFlow()
-
-    // Packet statistics for debugging
-    private var packetsSent = 0
-    private var packetsDropped = 0
+    // Connection status
+    private var isInitialized = false
 
     /**
      * Initialize the UDP client with server details
@@ -56,35 +49,11 @@ object UdpClient {
                 socket = DatagramSocket()
                 socket?.soTimeout = 1000  // 1 second timeout
 
-                _connectionStatus.value = true
+                isInitialized = true
                 Log.d(TAG, "UDP client initialized successfully")
-                
-                // Send test packet to verify connection
-                sendTestPacket()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize UDP client: ${e.message}", e)
-                _connectionStatus.value = false
-            }
-        }
-    }
-
-    /**
-     * Send a test packet to verify UDP connectivity
-     */
-    private fun sendTestPacket() {
-        scope.launch {
-            try {
-                val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                val message = "${playerPrefix}UDP_TEST"
-                val buffer = message.toByteArray()
-                
-                if (socket != null && serverAddress != null) {
-                    val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
-                    socket?.send(packet)
-                    Log.d(TAG, "Sent UDP test packet")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send UDP test packet: ${e.message}")
+                isInitialized = false
             }
         }
     }
@@ -93,8 +62,7 @@ object UdpClient {
      * Send position data via UDP for lowest latency
      */
     fun sendPosition(x: Float, y: Float) {
-        if (!isInitialized()) {
-            packetsDropped++
+        if (!isInitialized || socket == null || serverAddress == null) {
             return
         }
 
@@ -108,18 +76,11 @@ object UdpClient {
                 // Create and send packet
                 val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
                 socket?.send(packet)
-                packetsSent++
-                
-                // Log every 100th packet to avoid log spamming
-                if (packetsSent % 100 == 0) {
-                    Log.d(TAG, "UDP stats: sent=$packetsSent, dropped=$packetsDropped")
-                }
             } catch (e: Exception) {
                 // Only log occasionally to avoid overwhelming logs
                 if (Math.random() < 0.01) {
                     Log.e(TAG, "Error sending UDP position: ${e.message}")
                 }
-                packetsDropped++
             }
         }
     }
@@ -135,8 +96,7 @@ object UdpClient {
      * Send a stick position update
      */
     fun sendStickPosition(stickName: String, x: Float, y: Float) {
-        if (!isInitialized()) {
-            packetsDropped++
+        if (!isInitialized || socket == null || serverAddress == null) {
             return
         }
 
@@ -150,38 +110,11 @@ object UdpClient {
                 // Create and send packet
                 val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
                 socket?.send(packet)
-                packetsSent++
             } catch (e: Exception) {
                 // Only log occasionally to avoid overwhelming logs
                 if (Math.random() < 0.01) {
                     Log.e(TAG, "Error sending UDP stick position: ${e.message}")
                 }
-                packetsDropped++
-            }
-        }
-    }
-
-    /**
-     * Send button press via UDP for lowest latency
-     */
-    fun sendButtonPress(buttonName: String) {
-        if (!isInitialized()) {
-            return
-        }
-
-        scope.launch {
-            try {
-                // Create message with player prefix
-                val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                val message = "${playerPrefix}${buttonName}"
-                val buffer = message.toByteArray()
-
-                // Create and send packet
-                val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
-                socket?.send(packet)
-                Log.d(TAG, "Sent UDP button press: $buttonName")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending UDP button press: ${e.message}")
             }
         }
     }
@@ -192,8 +125,7 @@ object UdpClient {
     fun close() {
         socket?.close()
         socket = null
-        _connectionStatus.value = false
-        Log.d(TAG, "UDP client closed")
+        isInitialized = false
     }
 
     /**
@@ -204,27 +136,5 @@ object UdpClient {
         if (host != serverAddress?.hostAddress || port != serverPort) {
             initialize(host, port)
         }
-    }
-    
-    /**
-     * Check if UDP client is initialized and ready
-     */
-    fun isInitialized(): Boolean {
-        return socket != null && serverAddress != null && _connectionStatus.value
-    }
-    
-    /**
-     * Get usage statistics
-     */
-    fun getStats(): String {
-        return "UDP: sent=$packetsSent, dropped=$packetsDropped"
-    }
-    
-    /**
-     * Reset packet statistics
-     */
-    fun resetStats() {
-        packetsSent = 0
-        packetsDropped = 0
     }
 }

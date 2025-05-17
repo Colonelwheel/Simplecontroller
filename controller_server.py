@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 
 # Server configuration
 HOST = '0.0.0.0'  # Listen on all interfaces
-TCP_PORT = 9001   # TCP port for regular commands
-UDP_PORT = 9001   # UDP port for position data (same as TCP for simplicity)
+PORT = 9001       # Port used in your Android app's NetworkClient.kt
 
 # Create a virtual Xbox 360 controller
 gamepad = vgamepad.VX360Gamepad()
@@ -366,64 +365,9 @@ def process_command(data):
     except Exception as e:
         logger.error(f"Error processing command '{data}': {str(e)}")
 
-def process_udp_message(data, addr):
-    """Process incoming UDP message, typically from the UDP client"""
-    # Log the UDP message (for debugging)
-    message = data.decode('utf-8').strip()
-    
-    # Only log occasionally to reduce spam for frequent position updates
-    if message.startswith("player1:POS:") or message.startswith("player2:POS:") or \
-       message.startswith("player1:STICK_") or message.startswith("player2:STICK_"):
-        # Log only 1% of position updates to avoid log flooding
-        if random.random() < 0.01:
-            logger.debug(f"UDP from {addr}: {message}")
-    else:
-        logger.info(f"UDP from {addr}: {message}")
-    
-    # Extract player prefix if present
-    player_prefix = ""
-    if message.startswith("player1:") or message.startswith("player2:"):
-        parts = message.split(":", 1)
-        if len(parts) > 1:
-            player_prefix = parts[0]
-            message = parts[1]
-    
-    # Process standard message format
-    if ":" in message:
-        command, params = message.split(":", 1)
-        
-        # Handle position data sent via UDP
-        if command == "POS" and "," in params:
-            try:
-                x, y = params.split(",", 1)
-                handle_touchpad_input(x, y)
-            except Exception as e:
-                logger.error(f"Error handling UDP position: {str(e)}")
-        
-        # Handle stick data sent via UDP
-        elif command.startswith("STICK_") and "," in params:
-            try:
-                stick_name = command.replace("STICK_", "")
-                x, y = params.split(",", 1)
-                
-                if stick_name.upper() in ["L", "LEFT", "LSTICK"]:
-                    handle_stick_input(x, y, "LEFT")
-                elif stick_name.upper() in ["R", "RIGHT", "RSTICK"]:
-                    handle_stick_input(x, y, "RIGHT")
-                else:
-                    logger.warning(f"Unknown stick name from UDP: {stick_name}")
-            except Exception as e:
-                logger.error(f"Error handling UDP stick position: {str(e)}")
-        else:
-            # For other commands, use the standard processor
-            process_command(message)
-    else:
-        # For simple commands, use the standard processor
-        process_command(message)
-
 def client_handler(conn, addr):
-    """Handle TCP client connection"""
-    logger.info(f"TCP client connected: {addr}")
+    """Handle client connection"""
+    logger.info(f"Connected by {addr}")
     
     try:
         # Read commands from the client
@@ -447,24 +391,24 @@ def client_handler(conn, addr):
     except ConnectionResetError:
         logger.warning(f"Connection reset by {addr}")
     except Exception as e:
-        logger.error(f"Error handling TCP client {addr}: {str(e)}")
+        logger.error(f"Error handling client {addr}: {str(e)}")
     finally:
         # Clean up
         try:
             conn.close()
         except:
             pass
-        logger.info(f"TCP connection from {addr} closed")
+        logger.info(f"Connection from {addr} closed")
 
-def start_tcp_server():
+def start_server():
     """Start the TCP server to receive commands"""
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
     try:
-        server_socket.bind((HOST, TCP_PORT))
+        server_socket.bind((HOST, PORT))
         server_socket.listen(5)
-        logger.info(f"TCP server started on {HOST}:{TCP_PORT}")
+        logger.info(f"Server started on {HOST}:{PORT}")
         
         while True:
             conn, addr = server_socket.accept()
@@ -472,56 +416,23 @@ def start_tcp_server():
             client_thread.daemon = True
             client_thread.start()
     except Exception as e:
-        logger.error(f"TCP server error: {str(e)}")
+        logger.error(f"Server error: {str(e)}")
     finally:
         try:
             server_socket.close()
         except:
             pass
-        logger.info("TCP server stopped")
-
-def start_udp_server():
-    """Start the UDP server for receiving high-frequency position updates"""
-    import random  # Import here to prevent potential issues
-    
-    udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    udp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    
-    try:
-        udp_socket.bind((HOST, UDP_PORT))
-        logger.info(f"UDP server started on {HOST}:{UDP_PORT}")
-        
-        while True:
-            try:
-                data, addr = udp_socket.recvfrom(1024)
-                # Process the UDP message in the same thread
-                # UDP messages should be fast to process (mostly stick positions)
-                process_udp_message(data, addr)
-            except Exception as e:
-                logger.error(f"Error processing UDP message: {str(e)}")
-    except Exception as e:
-        logger.error(f"UDP server error: {str(e)}")
-    finally:
-        try:
-            udp_socket.close()
-        except:
-            pass
-        logger.info("UDP server stopped")
+        logger.info("Server stopped")
 
 if __name__ == "__main__":
     logger.info("Simple Controller Server starting up...")
     logger.info("Press Ctrl+C to exit")
     
     try:
-        # Start the TCP server in a separate thread
-        tcp_thread = threading.Thread(target=start_tcp_server)
-        tcp_thread.daemon = True
-        tcp_thread.start()
-        
-        # Start the UDP server in a separate thread
-        udp_thread = threading.Thread(target=start_udp_server)
-        udp_thread.daemon = True
-        udp_thread.start()
+        # Start the server in a separate thread
+        server_thread = threading.Thread(target=start_server)
+        server_thread.daemon = True
+        server_thread.start()
         
         # Keep the main thread alive
         while True:
