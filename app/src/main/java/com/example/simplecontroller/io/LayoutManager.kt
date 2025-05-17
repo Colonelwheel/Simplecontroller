@@ -61,6 +61,16 @@ class LayoutManager(
         }
     }
 
+
+    /**
+     * Update the controls list
+     */
+    fun updateControls(newControls: MutableList<Control>) {
+        controls.clear()
+        controls.addAll(newControls)
+    }
+
+
     /**
      * Create a new control of the specified type
      */

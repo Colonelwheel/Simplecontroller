@@ -41,15 +41,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /* ---------- network settings prefs ---------- */
     private val networkPrefs by lazy { getSharedPreferences("network", MODE_PRIVATE) }
 
-    /* ---------- underlying data model ---------- */
-    private val controls: MutableList<Control> by lazy {
-        loadControls(this, layoutName)?.toMutableList()
-            ?: layoutManager.defaultLayout().toMutableList()
-    }
-
     /* ---------- helper classes ---------- */
     private lateinit var uiBuilder: UIComponentBuilder
     private lateinit var layoutManager: LayoutManager
+
+    /* ---------- underlying data model ---------- */
+    // Changed from lazy delegate to lateinit to avoid initialization order issues
+    private lateinit var controls: MutableList<Control>
 
     /* ---------- edit-only widgets we show/hide ---------- */
     private lateinit var btnSave: View
@@ -97,10 +95,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Initialize helpers
         uiBuilder = UIComponentBuilder(this, canvas)
-        layoutManager = LayoutManager(this, canvas, controls) { control ->
+        layoutManager = LayoutManager(this, canvas, mutableListOf()) { control ->
             ControlView(this, control)
         }
         layoutManager.setCallback(this)
+
+        // Initialize controls AFTER layoutManager is initialized
+        controls = loadControls(this, layoutName)?.toMutableList()
+            ?: layoutManager.defaultLayout().toMutableList()
+
+        // Update layoutManager with controls
+        layoutManager.updateControls(controls)
 
         // Create UI
         setupUI()
