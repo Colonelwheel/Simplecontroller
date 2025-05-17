@@ -34,15 +34,25 @@ class DirectionalStickHandler(
     // Store the last stick position for continuous sending
     private var lastStickX = 0f
     private var lastStickY = 0f
+    
+    // Store last sent raw position to avoid redundant sends
+    private var lastSentRawX = 0f
+    private var lastSentRawY = 0f
+    private val positionThreshold = 0.03f  // Minimum movement threshold
+    
+    // Throttle raw position updates
+    private var lastRawUpdateTimeMs = 0L
+    private val rawUpdateThrottleMs = 12L // Throttle raw position updates
 
     // Use UDP for analog position updates (not directional commands)
     private var useUdp = true
 
-    // Faster continuous sending interval
-    private val continuousSendIntervalMs = 50L // 50ms ~20Hz (was 100ms)
+    // Optimized continuous sending interval
+    private val continuousSendIntervalMs = 45L // 45ms ~22Hz (reduced from 50ms for better responsiveness)
 
     /**
      * Handle directional stick inputs, sending button commands instead of analog values
+     * Optimized for reduced network traffic and better responsiveness
      * @param x Normalized X position (-1 to 1)
      * @param y Normalized Y position (-1 to 1)
      * @param action The motion event action (e.g., ACTION_UP, ACTION_MOVE)
@@ -53,9 +63,20 @@ class DirectionalStickHandler(
         lastStickY = y
 
         // For move events with significant motion, also send raw position via UDP
-        // This helps with smoother transitions between directional zones
+        // But throttle updates to reduce network traffic
         if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
-            UdpClient.sendStickPosition("DIR_${model.id}", x, y)
+            val currentTimeMs = System.currentTimeMillis()
+            
+            // Only send if position changed significantly or enough time passed
+            if ((abs(x - lastSentRawX) > positionThreshold || abs(y - lastSentRawY) > positionThreshold) &&
+                currentTimeMs - lastRawUpdateTimeMs >= rawUpdateThrottleMs) {
+                
+                lastSentRawX = x
+                lastSentRawY = y
+                lastRawUpdateTimeMs = currentTimeMs
+                
+                UdpClient.sendStickPosition("DIR_${model.id}", x, y)
+            }
         }
 
         // Track whether we've sent commands for each direction this frame
@@ -238,7 +259,14 @@ class DirectionalStickHandler(
                             }
                     }
 
-                    uiHandler.postDelayed(this, continuousSendIntervalMs) // Send at faster rate
+                    // Use adaptive timing - if moving diagonally, slow down sending to avoid network congestion
+                    val sendDelay = if (sendingUp && sendingRight || sendingUp && sendingLeft || 
+                                      sendingDown && sendingRight || sendingDown && sendingLeft) {
+                        continuousSendIntervalMs + 5L
+                    } else {
+                        continuousSendIntervalMs
+                    }
+                    uiHandler.postDelayed(this, sendDelay)
                 }
             }
 
