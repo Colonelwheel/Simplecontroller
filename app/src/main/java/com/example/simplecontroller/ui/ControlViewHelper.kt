@@ -16,6 +16,7 @@ import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 
 /**
  * Helper class for creating and managing ControlView UI elements and behavior.
@@ -153,6 +154,9 @@ class ControlViewHelper(
             .show()
     }
 
+    // Flag to control whether to use UDP for buttons
+    private var useUdp = true
+    
     /**
      * Send the control's payload
      */
@@ -170,12 +174,26 @@ class ControlViewHelper(
                     }
                 }
 
-            commands.forEach { NetworkClient.send(it.trim()) }
+            commands.forEach { sendCommand(it.trim()) }
         } else {
             // Regular version with auto-release for normal presses
             model.payload.split(',', ' ')
                 .filter { it.isNotBlank() }
-                .forEach { NetworkClient.send(it.trim()) }
+                .forEach { sendCommand(it.trim()) }
+        }
+    }
+    
+    /**
+     * Send a command through UDP if available, otherwise fallback to TCP
+     */
+    private fun sendCommand(command: String) {
+        // Try UDP first for buttons if initialized
+        if (useUdp && UdpClient.isInitialized()) {
+            // Use UDP for lowest latency
+            UdpClient.sendButtonPress(command)
+        } else {
+            // Fallback to TCP
+            NetworkClient.send(command)
         }
     }
 
@@ -193,7 +211,7 @@ class ControlViewHelper(
                     } else {
                         "${cmd}_RELEASE"
                     }
-                    NetworkClient.send(releaseCmd.trim())
+                    sendCommand(releaseCmd.trim())
                 }
         }
     }
@@ -257,6 +275,14 @@ object GlobalSettings {
             }
             field = value
         }
+        
+    // Whether to use UDP for communication when available
+    var useUdpForAll = true
+        set(value) {
+            field = value
+            // Update all continuous senders to use new UDP setting
+            SwipeManager.updateUdpSettingForAll(value)
+        }
 
     // Speed of turbo/rapid-fire in milliseconds
     var turboSpeed = 16L // Default 16ms (≈60 Hz)
@@ -284,6 +310,9 @@ object SwipeManager {
     
     // All registered control views
     private val allViews = mutableSetOf<ControlView>()
+    
+    // All continuous senders (for UDP updates)
+    private val allContinuousSenders = mutableSetOf<ContinuousSender>()
     
     /**
      * Register a control view with the manager
@@ -369,9 +398,51 @@ object SwipeManager {
                     // For directional sticks, we just stop any active commands
                 } else {
                     // For analog sticks, send center position (0,0)
-                    NetworkClient.send("${view.model.payload}:0.00,0.00")
+                    if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                        // Get stick name from payload for UDP
+                        val isStick = view.model.payload.contains("STICK") || 
+                                      view.model.payload.contains("LS") || 
+                                      view.model.payload.contains("RS")
+                        
+                        if (isStick) {
+                            val stickName = when {
+                                view.model.payload.contains("STICK_L") -> "L"
+                                view.model.payload.contains("LS") -> "L"
+                                view.model.payload.contains("STICK_R") -> "R"
+                                view.model.payload.contains("RS") -> "R"
+                                else -> "L" // Default to left stick
+                            }
+                            UdpClient.sendStickPosition(stickName, 0f, 0f)
+                        } else {
+                            UdpClient.sendPosition(0f, 0f)
+                        }
+                    } else {
+                        // Fallback to TCP
+                        NetworkClient.send("${view.model.payload}:0.00,0.00")
+                    }
                 }
             }
         }
+    }
+    
+    /**
+     * Register a continuous sender for UDP updates
+     */
+    fun registerContinuousSender(sender: ContinuousSender) {
+        allContinuousSenders.add(sender)
+    }
+    
+    /**
+     * Unregister a continuous sender
+     */
+    fun unregisterContinuousSender(sender: ContinuousSender) {
+        allContinuousSenders.remove(sender)
+    }
+    
+    /**
+     * Update UDP setting for all registered continuous senders
+     */
+    fun updateUdpSettingForAll(useUdp: Boolean) {
+        allContinuousSenders.forEach { it.setUseUdp(useUdp) }
     }
 }

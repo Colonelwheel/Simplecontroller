@@ -15,6 +15,7 @@ import com.example.simplecontroller.R
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -96,7 +97,11 @@ class ControlView(
     override fun onDetachedFromWindow() {
         // Release mouse button if needed for touchpad
         if (model.type == ControlType.TOUCHPAD && leftHeld) {
-            NetworkClient.send("MOUSE_LEFT_UP")
+            if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                UdpClient.sendButtonPress("MOUSE_LEFT_UP")
+            } else {
+                NetworkClient.send("MOUSE_LEFT_UP")
+            }
             leftHeld = false
         }
 
@@ -104,6 +109,9 @@ class ControlView(
         stopRepeat()
         stopContinuousSending()
         stopDirectionalCommands()
+        
+        // Clean up resources
+        continuousSender.dispose()
 
         // Unregister from SwipeManager
         SwipeManager.unregisterControl(this)
@@ -286,13 +294,25 @@ class ControlView(
 
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
-                                NetworkClient.send("MOUSE_LEFT_DOWN")
+                                if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                                    UdpClient.sendButtonPress("MOUSE_LEFT_DOWN")
+                                } else {
+                                    NetworkClient.send("MOUSE_LEFT_DOWN")
+                                }
                             } else {
-                                NetworkClient.send("MOUSE_LEFT_UP")
+                                if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                                    UdpClient.sendButtonPress("MOUSE_LEFT_UP")
+                                } else {
+                                    NetworkClient.send("MOUSE_LEFT_UP")
+                                }
                             }
                         } else if (model.holdLeftWhileTouch) {
                             // Standard hold mode
-                            NetworkClient.send("MOUSE_LEFT_DOWN")
+                            if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                                UdpClient.sendButtonPress("MOUSE_LEFT_DOWN")
+                            } else {
+                                NetworkClient.send("MOUSE_LEFT_DOWN")
+                            }
                             leftHeld = true
                         }
                     }
@@ -305,7 +325,11 @@ class ControlView(
                         if (!model.toggleLeftClick &&
                             (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
                             leftHeld && model.holdLeftWhileTouch) {
-                            NetworkClient.send("MOUSE_LEFT_UP")
+                            if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                                UdpClient.sendButtonPress("MOUSE_LEFT_UP")
+                            } else {
+                                NetworkClient.send("MOUSE_LEFT_UP")
+                            }
                             leftHeld = false
                         }
                     }
@@ -343,7 +367,29 @@ class ControlView(
             directionalHandler.handleDirectionalStick(sx, sy, e.actionMasked)
         } else {
             // Regular analog stick/pad mode
-            NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+            if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                // Check if this is a stick
+                val isStick = model.payload.contains("STICK") || 
+                              model.payload.contains("LS") || 
+                              model.payload.contains("RS")
+                              
+                if (isStick) {
+                    val stickName = when {
+                        model.payload.contains("STICK_L") -> "L"
+                        model.payload.contains("LS") -> "L"
+                        model.payload.contains("STICK_R") -> "R"
+                        model.payload.contains("RS") -> "R"
+                        else -> "L" // Default to left stick
+                    }
+                    UdpClient.sendStickPosition(stickName, sx, sy)
+                } else {
+                    // Touchpad or other position control
+                    UdpClient.sendPosition(sx, sy)
+                }
+            } else {
+                // Fallback to TCP
+                NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+            }
         }
 
         // If this is an UP or CANCEL event and we shouldn't snap,

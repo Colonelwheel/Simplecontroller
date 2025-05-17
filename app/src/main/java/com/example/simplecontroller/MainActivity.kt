@@ -21,6 +21,7 @@ import com.example.simplecontroller.io.saveControls
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
@@ -58,6 +59,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var switchSnap: Switch
     private lateinit var switchHold: Switch
     private lateinit var switchTurbo: Switch
+    private lateinit var switchUdp: Switch
     private lateinit var switchSwipe: Switch
 
     /* ---------- connection UI ---------- */
@@ -160,6 +162,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Only disconnect if auto-reconnect is disabled
         if (!networkPrefs.getBoolean("autoReconnect", false)) {
             NetworkClient.close()
+            UdpClient.close()
         }
     }
 
@@ -212,6 +215,19 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         switchHold = uiBuilder.createSwitch("Hold", false) { on ->
             GlobalSettings.globalHold = on
         }
+        
+        // Add UDP switch
+        switchUdp = uiBuilder.createSwitch("UDP", true) { on ->
+            GlobalSettings.useUdpForAll = on
+            // Update UDP client based on setting
+            if (on) {
+                val host = networkPrefs.getString("serverHost", "10.0.2.2") ?: "10.0.2.2"
+                val port = networkPrefs.getInt("serverPort", 9001)
+                UdpClient.initialize(host, port)
+            } else {
+                UdpClient.close()
+            }
+        }
 
         switchTurbo = uiBuilder.createSwitch("Turbo", false) { on ->
             GlobalSettings.globalTurbo = on
@@ -232,7 +248,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Add all switches to canvas
         uiBuilder.addVerticalSwitches(
-            listOf(switchSnap, switchHold, switchTurbo, switchSwipe),
+            listOf(switchSnap, switchHold, switchUdp, switchTurbo, switchSwipe),
             Gravity.TOP or Gravity.START,  // TOP instead of CENTER_VERTICAL
             16, 16, 48
         )
@@ -364,6 +380,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val host = networkPrefs.getString("serverHost", "10.0.2.2") ?: "10.0.2.2"
         val port = networkPrefs.getInt("serverPort", 9001)
         val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
+        val useUdp = networkPrefs.getBoolean("useUdp", true)  // Default to true for UDP
 
         // Load player role
         val savedPlayerRole =
@@ -377,6 +394,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Set player role and update connection settings
         NetworkClient.setPlayerRole(playerRole)
         NetworkClient.updateSettings(host, port, autoReconnect)
+        
+        // Initialize UDP client with same settings
+        if (useUdp) {
+            UdpClient.initialize(host, port)
+        }
     }
 
     /**
@@ -394,6 +416,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Add radio buttons for player selection
         val radioPlayer1 = dialogView.findViewById<RadioButton>(R.id.radioPlayer1)
         val radioPlayer2 = dialogView.findViewById<RadioButton>(R.id.radioPlayer2)
+        
+        // Add UDP checkbox
+        val checkUseUdp = dialogView.findViewById<CheckBox>(R.id.checkboxUseUdp)
 
         // Set default selected player based on current setting
         if (NetworkClient.getPlayerRole() == NetworkClient.PlayerRole.PLAYER1) {
@@ -406,6 +431,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         editHost.setText(networkPrefs.getString("serverHost", "10.0.2.2"))
         editPort.setText(networkPrefs.getInt("serverPort", 9001).toString())
         checkAutoReconnect.isChecked = networkPrefs.getBoolean("autoReconnect", false)
+        checkUseUdp.isChecked = networkPrefs.getBoolean("useUdp", true)
 
         // Apply theme to dialog elements
         editHost.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
@@ -413,6 +439,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         editPort.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
         editPort.setHintTextColor(ContextCompat.getColor(this, R.color.dark_text_secondary))
         checkAutoReconnect.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
+        checkUseUdp.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
         radioPlayer1.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
         radioPlayer2.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
@@ -428,6 +455,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 val host = editHost.text.toString()
                 val port = editPort.text.toString().toIntOrNull() ?: 9001
                 val autoReconnect = checkAutoReconnect.isChecked
+                val useUdp = checkUseUdp.isChecked
 
                 // Set player role
                 val playerRole = if (radioPlayer1.isChecked)
@@ -441,12 +469,20 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     .putInt("serverPort", port)
                     .putBoolean("autoReconnect", autoReconnect)
                     .putString("playerRole", playerRole.name)
+                    .putBoolean("useUdp", useUdp)
                     .apply()
 
                 // Update client and connect
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
                 NetworkClient.start()
+                
+                // Update UDP client
+                if (useUdp) {
+                    UdpClient.initialize(host, port)
+                } else {
+                    UdpClient.close()
+                }
 
                 // Update UI to reflect player role
                 updatePlayerRoleIndicator()

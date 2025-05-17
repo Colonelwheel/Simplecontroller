@@ -5,6 +5,7 @@ import android.os.Looper
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
 /**
@@ -33,6 +34,23 @@ class DirectionalStickHandler(
     // Store the last stick position for continuous sending
     private var lastStickX = 0f
     private var lastStickY = 0f
+    
+    /**
+     * Helper function to send a command via UDP if available, or TCP fallback
+     */
+    private fun sendCommand(command: String) {
+        val commands = command.split(',', ' ')
+            .filter { it.isNotBlank() }
+            .map { it.trim() }
+        
+        commands.forEach { cmd ->
+            if (GlobalSettings.useUdpForAll && UdpClient.isInitialized()) {
+                UdpClient.sendButtonPress(cmd)
+            } else {
+                NetworkClient.send(cmd)
+            }
+        }
+    }
     
     /**
      * Handle directional stick inputs, sending button commands instead of analog values
@@ -65,51 +83,49 @@ class DirectionalStickHandler(
         }
 
         // Helper function to send a command and update tracking
-        fun sendCommand(command: String, update: () -> Unit) {
-            command.split(',', ' ')
-                .filter { it.isNotBlank() }
-                .forEach { NetworkClient.send(it.trim()) }
+        fun sendDirectionalCommand(command: String, update: () -> Unit) {
+            sendCommand(command)
             update()
         }
 
         // Send commands based on direction and intensity
         if (y < -0.1f) { // Up direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.upSuperBoostCommand) { sentUp = true }
+                sendDirectionalCommand(model.upSuperBoostCommand) { sentUp = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.upBoostCommand) { sentUp = true }
+                sendDirectionalCommand(model.upBoostCommand) { sentUp = true }
             } else {
-                sendCommand(model.upCommand) { sentUp = true }
+                sendDirectionalCommand(model.upCommand) { sentUp = true }
             }
         }
 
         if (y > 0.1f) { // Down direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.downSuperBoostCommand) { sentDown = true }
+                sendDirectionalCommand(model.downSuperBoostCommand) { sentDown = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.downBoostCommand) { sentDown = true }
+                sendDirectionalCommand(model.downBoostCommand) { sentDown = true }
             } else {
-                sendCommand(model.downCommand) { sentDown = true }
+                sendDirectionalCommand(model.downCommand) { sentDown = true }
             }
         }
 
         if (x < -0.1f) { // Left direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.leftSuperBoostCommand) { sentLeft = true }
+                sendDirectionalCommand(model.leftSuperBoostCommand) { sentLeft = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.leftBoostCommand) { sentLeft = true }
+                sendDirectionalCommand(model.leftBoostCommand) { sentLeft = true }
             } else {
-                sendCommand(model.leftCommand) { sentLeft = true }
+                sendDirectionalCommand(model.leftCommand) { sentLeft = true }
             }
         }
 
         if (x > 0.1f) { // Right direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.rightSuperBoostCommand) { sentRight = true }
+                sendDirectionalCommand(model.rightSuperBoostCommand) { sentRight = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.rightBoostCommand) { sentRight = true }
+                sendDirectionalCommand(model.rightBoostCommand) { sentRight = true }
             } else {
-                sendCommand(model.rightCommand) { sentRight = true }
+                sendDirectionalCommand(model.rightCommand) { sentRight = true }
             }
         }
 
@@ -157,36 +173,28 @@ class DirectionalStickHandler(
                         val command = if (sendingUpSuperBoost) model.upSuperBoostCommand
                         else if (sendingUpBoost) model.upBoostCommand
                         else model.upCommand
-                        command.split(',', ' ')
-                            .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                        sendCommand(command)
                     }
 
                     if (sendingDown) {
                         val command = if (sendingDownSuperBoost) model.downSuperBoostCommand
                         else if (sendingDownBoost) model.downBoostCommand
                         else model.downCommand
-                        command.split(',', ' ')
-                            .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                        sendCommand(command)
                     }
 
                     if (sendingLeft) {
                         val command = if (sendingLeftSuperBoost) model.leftSuperBoostCommand
                         else if (sendingLeftBoost) model.leftBoostCommand
                         else model.leftCommand
-                        command.split(',', ' ')
-                            .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                        sendCommand(command)
                     }
 
                     if (sendingRight) {
                         val command = if (sendingRightSuperBoost) model.rightSuperBoostCommand
                         else if (sendingRightBoost) model.rightBoostCommand
                         else model.rightCommand
-                        command.split(',', ' ')
-                            .filter { it.isNotBlank() }
-                            .forEach { NetworkClient.send(it.trim()) }
+                        sendCommand(command)
                     }
 
                     uiHandler.postDelayed(this, 100L) // Send every 100ms
