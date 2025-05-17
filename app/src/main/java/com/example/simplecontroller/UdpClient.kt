@@ -142,7 +142,6 @@ object UdpClient {
             }
         }
     }
-    }
 
     /**
      * Send a touchpad position update
@@ -178,7 +177,6 @@ object UdpClient {
                 }
             }
         }
-    }
     }
 
     /**
@@ -216,7 +214,6 @@ object UdpClient {
                 }
             }
         }
-    }
     }
 
     /**
