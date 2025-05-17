@@ -3,6 +3,7 @@ package com.example.simplecontroller.ui
 import android.os.Handler
 import android.os.Looper
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
@@ -46,10 +47,15 @@ class ContinuousSender(
                 val curvedY = applyResponseCurve(y)
 
                 if (useUdp) {
-                    // Use UDP for faster transmission
-                    UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
+                    if (model.type == ControlType.TOUCHPAD) {
+                        // For touchpads, use the touchpad-specific sender
+                        UdpClient.sendTouchpadPosition(curvedX, curvedY)
+                    } else {
+                        // For sticks, use the stick position sender with the model's payload
+                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
+                    }
                 } else {
-                    // Fallback to TCP
+                    // Fallback to TCP - format remains the same for both types
                     NetworkClient.send("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
                 }
                 lastSendTimeMs = currentTimeMs
@@ -127,7 +133,14 @@ class ContinuousSender(
         // Send a final zero position to ensure controls stop
         if (abs(lastStickX) > 0.01f || abs(lastStickY) > 0.01f) {
             if (useUdp) {
-                UdpClient.sendStickPosition(model.payload, 0f, 0f)
+                if (model.type == ControlType.TOUCHPAD) {
+                    // For touchpads, use touchpad-specific sender
+                    UdpClient.sendTouchpadPosition(0f, 0f)
+                } else {
+                    // For sticks, use stick-specific sender
+                    UdpClient.sendStickPosition(model.payload, 0f, 0f)
+                }
+
                 // Also send via TCP for reliability
                 NetworkClient.send("${model.payload}:0.00,0.00")
             } else {
