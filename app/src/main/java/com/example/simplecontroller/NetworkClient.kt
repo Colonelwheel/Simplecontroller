@@ -1,5 +1,6 @@
 package com.example.simplecontroller.net
 
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -65,6 +66,26 @@ object NetworkClient {
     private var socket: DatagramSocket? = null
     private var serverAddress: InetAddress? = null
 
+    /**
+     * Configure socket for minimal latency
+     */
+    private fun setupLowLatencySocket(socket: DatagramSocket) {
+        try {
+            // Set minimal buffer sizes
+            socket.sendBufferSize = 1024
+            socket.receiveBufferSize = 1024
+
+            // Set traffic class for low latency if on newer Android versions
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                socket.trafficClass = 0x10  // IPTOS_LOWDELAY
+            }
+
+            Log.d("NetworkClient", "Applied low-latency socket configuration")
+        } catch (e: Exception) {
+            Log.e("NetworkClient", "Failed to apply low-latency socket config: ${e.message}")
+        }
+    }
+
     /** Update connection settings */
     fun updateSettings(host: String, port: Int, autoReconnectEnabled: Boolean) {
         this.hostAddress = host
@@ -112,6 +133,10 @@ object NetworkClient {
 
                 // Create a new UDP socket
                 socket = DatagramSocket()
+
+                // Apply low-latency optimizations
+                socket?.let { setupLowLatencySocket(it) }
+
                 serverAddress = InetAddress.getByName(hostAddress)
 
                 // Send an initial connection message to establish communication

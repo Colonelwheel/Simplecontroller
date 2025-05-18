@@ -1,5 +1,6 @@
 package com.example.simplecontroller.net
 
+import android.os.Build
 import android.util.Log
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -33,6 +34,26 @@ object UdpClient {
     private var isInitialized = false
 
     /**
+     * Configure socket for minimal latency
+     */
+    private fun setupLowLatencySocket(socket: DatagramSocket) {
+        try {
+            // Set minimal buffer sizes
+            socket.sendBufferSize = 1024
+            socket.receiveBufferSize = 1024
+
+            // Set traffic class for low latency if on newer Android versions
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                socket.trafficClass = 0x10  // IPTOS_LOWDELAY
+            }
+
+            Log.d(TAG, "Applied low-latency socket configuration")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to apply low-latency socket config: ${e.message}")
+        }
+    }
+
+    /**
      * Initialize the UDP client with server details
      */
     fun initialize(host: String, port: Int = DEFAULT_PORT) {
@@ -47,6 +68,10 @@ object UdpClient {
                 serverAddress = InetAddress.getByName(host)
                 serverPort = port
                 socket = DatagramSocket()
+
+                // Apply low-latency optimizations
+                socket?.let { setupLowLatencySocket(it) }
+
                 socket?.soTimeout = 1000  // 1 second timeout
 
                 isInitialized = true
@@ -57,7 +82,6 @@ object UdpClient {
             }
         }
     }
-
 
     /**
      * Send a command via UDP
@@ -89,6 +113,7 @@ object UdpClient {
             }
         }
     }
+
     /**
      * Send position data via UDP for lowest latency
      */
