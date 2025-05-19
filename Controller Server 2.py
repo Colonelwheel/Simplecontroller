@@ -198,15 +198,20 @@ def handle_touchpad_input(x, y, player_id='player1'):
     if abs(dx_raw) < 0.001 and abs(dy_raw) < 0.001:
         return
     
-    # Much higher sensitivity for small movements (65-75 range works well)
-    base_sensitivity = 70
+    # Very high sensitivity to allow for large movements (100-130 range)
+    base_sensitivity = 130
     
-    # Boost very small movements to make them more responsive
-    # This creates a non-linear curve that amplifies tiny movements
+    # Dynamic scaling to make movement more natural across all ranges
+    # Small movements get precision boost, medium movements are linear, large movements get extra distance
     if abs(dx_raw) < 0.02:
         dx_raw *= 1.5  # 50% boost for very small x movements
+    elif abs(dx_raw) > 0.1:
+        dx_raw *= 1.8  # 80% boost for large movements
+        
     if abs(dy_raw) < 0.02:
         dy_raw *= 1.5  # 50% boost for very small y movements
+    elif abs(dy_raw) > 0.1:
+        dy_raw *= 1.8  # 80% boost for large movements
     
     # Calculate pixel movement with high sensitivity
     dx = int(dx_raw * base_sensitivity)
