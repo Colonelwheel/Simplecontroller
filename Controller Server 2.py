@@ -151,30 +151,18 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
 
 def handle_touchpad_input(x, y, player_id='player1'):
     """
-    Handle touchpad input for mouse movement with momentum-based edge handling.
+    Handle touchpad input for mouse movement with enhanced relative tracking.
     
-    Key features:
-    1. Uses relative movement tracking with edge detection
-    2. Adds momentum when at edges to continue movement beyond boundaries
-    3. Prevents cursor "snapping" when lifting/placing finger
-    4. Preserves movement intent across touches
-    5. Handles jitter and improves precision
+    Key points:
+    1. Uses relative movement with high sensitivity
+    2. Dynamic sensitivity scaling for tiny movements
+    3. Jitter reduction with minimal impact on responsiveness
+    4. Amplifies small movements to improve precision
+    5. Detects touch down/up to maintain position between touches
     """
     if player_id not in mouse_states:
-        # Initialize player state if doesn't exist
         logger.error(f"Unknown player ID: {player_id}")
-        mouse_states[player_id] = {
-            'total_dx': 0,           # Track total distance moved
-            'total_dy': 0,           # Track total distance moved
-            'momentum_x': 0,         # Store movement momentum for edges
-            'momentum_y': 0,         # Store movement momentum for edges
-            'is_touchpad_active': False,
-            'touch_active': False,   # Is a touch currently in progress
-            'edge_active_x': False,  # Are we in edge-momentum mode for X
-            'edge_active_y': False,  # Are we in edge-momentum mode for Y
-            'last_time': time.time(),
-            'last_sent_time': time.time()
-        }
+        return
         
     mouse_state = mouse_states[player_id]
     
@@ -182,175 +170,108 @@ def handle_touchpad_input(x, y, player_id='player1'):
     x = normalize_value(x)
     y = normalize_value(y)
     
-    # Calculate timing info
+    # Check if this is a new touch sequence
+    new_touch = False
+    if 'prev_x' not in mouse_state:
+        new_touch = True
+        # Initialize all tracking variables
+        mouse_state['prev_x'] = x
+        mouse_state['prev_y'] = y
+        mouse_state['is_touchpad_active'] = False
+        mouse_state['last_time'] = time.time()
+        mouse_state['last_dx'] = 0
+        mouse_state['last_dy'] = 0
+        mouse_state['last_sent_time'] = time.time()
+        mouse_state['finger_down'] = True
+    elif 'finger_down' not in mouse_state or not mouse_state['finger_down']:
+        # Previous touch ended, this is a new touch
+        new_touch = True
+        mouse_state['finger_down'] = True
+        # Don't reset position on new touches - this allows continued movement
+        # Just store current position as the reference point
+        mouse_state['prev_x'] = x
+        mouse_state['prev_y'] = y
+    
+    # Calculate time delta - used for timing and performance tuning
     now = time.time()
     dt = now - mouse_state.get('last_time', now)
     mouse_state['last_time'] = now
     
-    # Touch lifecycle handling
-    if not mouse_state.get('touch_active', False) or mouse_state.get('first_input', True):
-        # New touch starting - record position but don't move yet
-        mouse_state['first_input'] = False
-        mouse_state['touch_active'] = True
-        mouse_state['start_x'] = x
-        mouse_state['start_y'] = y
-        mouse_state['prev_x'] = x
-        mouse_state['prev_y'] = y
-        
-        # Don't clear momentum immediately - this preserves direction
-        # between touches for better continuous movement
-        logger.info(f"{player_id} Touchpad: New touch at ({x:.2f}, {y:.2f})")
+    # For brand new touches, just establish baseline - no movement
+    if new_touch:
         return
     
-    # Calculate CHANGE in position from previous touch position
-    dx_raw = x - mouse_state['prev_x']
+    # Calculate CHANGE in position (relative movement)
+    dx_raw = x - mouse_state['prev_x']  
     dy_raw = y - mouse_state['prev_y']
     
-    # Update tracking for next time
+    # Update for next time
     mouse_state['prev_x'] = x
     mouse_state['prev_y'] = y
     
-    # Skip if the change is negligible (reduces jitter)
-    if abs(dx_raw) < 0.0008 and abs(dy_raw) < 0.0008:
-        # Preserve any existing edge momentum even when no movement
-        if mouse_state.get('edge_active_x', False) or mouse_state.get('edge_active_y', False):
-            _handle_edge_momentum(mouse_state, player_id)
+    # Skip if the change is too small (tiny deadzone)
+    if abs(dx_raw) < 0.001 and abs(dy_raw) < 0.001:
         return
     
-    # Very high sensitivity with dynamic scaling
-    base_sensitivity = 150
+    # Very high sensitivity to allow for large movements (100-130 range)
+    base_sensitivity = 130
     
-    # Apply dynamic scaling for different movement sizes
-    if abs(dx_raw) < 0.01:  # Very small movements (precision)
-        dx_raw *= 1.5
-    elif abs(dx_raw) > 0.08:  # Large movements
-        dx_raw *= 2.2
+    # Dynamic scaling to make movement more natural across all ranges
+    # Small movements get precision boost, medium movements are linear, large movements get extra distance
+    if abs(dx_raw) < 0.02:
+        dx_raw *= 1.5  # 50% boost for very small x movements
+    elif abs(dx_raw) > 0.1:
+        dx_raw *= 1.8  # 80% boost for large movements
+        
+    if abs(dy_raw) < 0.02:
+        dy_raw *= 1.5  # 50% boost for very small y movements
+    elif abs(dy_raw) > 0.1:
+        dy_raw *= 1.8  # 80% boost for large movements
     
-    if abs(dy_raw) < 0.01:  # Very small movements (precision)
-        dy_raw *= 1.5
-    elif abs(dy_raw) > 0.08:  # Large movements
-        dy_raw *= 2.2
-    
-    # Calculate pixel movement
+    # Calculate pixel movement with high sensitivity
     dx = int(dx_raw * base_sensitivity)
     dy = int(dy_raw * base_sensitivity)
     
-    # Always ensure small intentional movements register
+    # Rate limiting/jitter handling - don't send updates too frequently
+    # and don't let packet loss create jerky movement
+    time_since_last_send = now - mouse_state.get('last_sent_time', 0)
+    
+    # Apply jitter reduction only if packets are coming in unusually fast 
+    # or unusually slow (potential packet loss or backup)
+    if time_since_last_send < 0.008 or time_since_last_send > 0.05:
+        # For potential jitter situations, blend with previous movement
+        # Use 60% current + 40% previous for more responsiveness
+        dx = int(dx * 0.6 + mouse_state.get('last_dx', 0) * 0.4)
+        dy = int(dy * 0.6 + mouse_state.get('last_dy', 0) * 0.4)
+    
+    # Don't skip very small movements - make sure they register
+    # This helps with precision
     if dx == 0 and abs(dx_raw) > 0.002:
         dx = 1 if dx_raw > 0 else -1
     if dy == 0 and abs(dy_raw) > 0.002:
         dy = 1 if dy_raw > 0 else -1
     
-    # Edge detection - critical for continuous movement beyond boundaries
-    # Detect when we're at edges of the touchpad
-    edge_x = abs(x) > 0.9  # Near horizontal edge
-    edge_y = abs(y) > 0.9  # Near vertical edge
-    
-    # Store momentum when we detect movement near the edges
-    if edge_x and abs(dx) > 2:
-        mouse_state['momentum_x'] = dx
-        mouse_state['edge_active_x'] = True
-        
-    if edge_y and abs(dy) > 2:
-        mouse_state['momentum_y'] = dy
-        mouse_state['edge_active_y'] = True
-    
-    # Apply both regular movement and edge momentum
-    final_dx = dx
-    final_dy = dy
-    
-    # Track total movement (useful for debugging)
-    mouse_state['total_dx'] += final_dx
-    mouse_state['total_dy'] += final_dy
-    
-    # Store movement for next cycle
-    mouse_state['last_dx'] = final_dx
-    mouse_state['last_dy'] = final_dy
+    # Store for next calculation
+    mouse_state['last_dx'] = dx
+    mouse_state['last_dy'] = dy
     mouse_state['last_sent_time'] = now
     
-    # Ensure touchpad is marked active if we have movement
-    if not mouse_state['is_touchpad_active'] and (abs(final_dx) > 0 or abs(final_dy) > 0):
+    # Track if touchpad is active
+    if not mouse_state['is_touchpad_active'] and (abs(dx) > 0 or abs(dy) > 0):
         mouse_state['is_touchpad_active'] = True
-        
-    # Apply the movement
+    
     if mouse_state['is_touchpad_active']:
         try:
-            # Only player1 controls the mouse
+            # For now, only player1 controls the mouse to avoid conflicts
             if player_id == 'player1':
                 # Move mouse relative to current position
-                mouse.move(final_dx, final_dy, absolute=False)
+                mouse.move(dx, dy, absolute=False)
                 
-                # Log occasionally
-                if random.random() < 0.005:  # Log 0.5% of movements
-                    logger.info(f"{player_id} Mouse: dx={final_dx}, dy={final_dy}, " + 
-                               f"at_edge=({edge_x}, {edge_y})")
+                # Only log occasional movements to avoid flooding logs
+                if random.random() < 0.01:  # Log only 1% of movements 
+                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}, dt={dt*1000:.1f}ms")
         except Exception as e:
             logger.error(f"Mouse movement error for {player_id}: {str(e)}")
-            
-    # After regular movement, handle edge momentum - this allows continued 
-    # movement even when at the edges of the touchpad
-    if edge_x or edge_y:
-        _handle_edge_momentum(mouse_state, player_id)
-
-# Helper function to handle edge momentum
-def _handle_edge_momentum(mouse_state, player_id):
-    """Process edge momentum to allow movement beyond touchpad boundaries"""
-    momentum_x = 0
-    momentum_y = 0
-    momentum_active = False
-    
-    # Apply momentum with decay for X axis
-    if mouse_state.get('edge_active_x', False):
-        # Get current momentum with decay factor
-        decay = 0.95  # Gradual decrease in momentum (95% of previous value)
-        momentum_x = int(mouse_state['momentum_x'] * decay)
-        
-        # Stop if momentum is too small
-        if abs(momentum_x) < 2:
-            mouse_state['edge_active_x'] = False
-            momentum_x = 0
-        else:
-            mouse_state['momentum_x'] = momentum_x
-            momentum_active = True
-    
-    # Apply momentum with decay for Y axis
-    if mouse_state.get('edge_active_y', False):
-        # Get current momentum with decay factor
-        decay = 0.95  # Gradual decrease in momentum
-        momentum_y = int(mouse_state['momentum_y'] * decay)
-        
-        # Stop if momentum is too small
-        if abs(momentum_y) < 2:
-            mouse_state['edge_active_y'] = False
-            momentum_y = 0
-        else:
-            mouse_state['momentum_y'] = momentum_y
-            momentum_active = True
-    
-    # Apply momentum if active
-    if momentum_active and (momentum_x != 0 or momentum_y != 0):
-        # Track total movement
-        mouse_state['total_dx'] += momentum_x
-        mouse_state['total_dy'] += momentum_y
-        
-        try:
-            # Only player1 controls the mouse
-            if player_id == 'player1':
-                # Move mouse based on momentum
-                mouse.move(momentum_x, momentum_y, absolute=False)
-                
-                # Log occasionally
-                if random.random() < 0.02:  # Log 2% of momentum movements
-                    logger.info(f"{player_id} Momentum: dx={momentum_x}, dy={momentum_y}")
-        except Exception as e:
-            logger.error(f"Mouse momentum error for {player_id}: {str(e)}")
-            
-        # Schedule next momentum update after a very short delay
-        if momentum_active:
-            threading.Timer(
-                0.02,  # 20ms delay between momentum updates
-                lambda: _handle_edge_momentum(mouse_state, player_id)
-            ).start()
 
 def handle_wait_command(command, player_id='player1'):
     """Handle a wait command"""
@@ -613,17 +534,13 @@ def process_command(data, addr, player_id='player1'):
     # Handle touchpad touch up/down events
     if data == "TOUCHPAD_DOWN":
         if player_id in mouse_states:
-            # Mark the touch as active but preserve momentum
-            mouse_states[player_id]['touch_active'] = True
-            # Set first_input flag to trigger initialization on next position update
-            mouse_states[player_id]['first_input'] = True
+            mouse_states[player_id]['finger_down'] = True
             logger.info(f"{player_id} Touchpad: finger down")
         return None
         
     if data == "TOUCHPAD_UP":
         if player_id in mouse_states:
-            # Mark touch as inactive but preserve momentum and direction
-            mouse_states[player_id]['touch_active'] = False
+            mouse_states[player_id]['finger_down'] = False
             logger.info(f"{player_id} Touchpad: finger up")
         return None
     
