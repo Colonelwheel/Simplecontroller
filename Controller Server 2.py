@@ -158,7 +158,6 @@ def handle_touchpad_input(x, y, player_id='player1'):
     2. Dynamic sensitivity scaling for tiny movements
     3. Jitter reduction with minimal impact on responsiveness
     4. Amplifies small movements to improve precision
-    5. Detects touch down/up to maintain position between touches
     """
     if player_id not in mouse_states:
         logger.error(f"Unknown player ID: {player_id}")
@@ -170,11 +169,8 @@ def handle_touchpad_input(x, y, player_id='player1'):
     x = normalize_value(x)
     y = normalize_value(y)
     
-    # Check if this is a new touch sequence
-    new_touch = False
+    # Initialize tracking data if needed
     if 'prev_x' not in mouse_state:
-        new_touch = True
-        # Initialize all tracking variables
         mouse_state['prev_x'] = x
         mouse_state['prev_y'] = y
         mouse_state['is_touchpad_active'] = False
@@ -182,24 +178,13 @@ def handle_touchpad_input(x, y, player_id='player1'):
         mouse_state['last_dx'] = 0
         mouse_state['last_dy'] = 0
         mouse_state['last_sent_time'] = time.time()
-        mouse_state['finger_down'] = True
-    elif 'finger_down' not in mouse_state or not mouse_state['finger_down']:
-        # Previous touch ended, this is a new touch
-        new_touch = True
-        mouse_state['finger_down'] = True
-        # Don't reset position on new touches - this allows continued movement
-        # Just store current position as the reference point
-        mouse_state['prev_x'] = x
-        mouse_state['prev_y'] = y
+        # No movement on first touch
+        return
     
     # Calculate time delta - used for timing and performance tuning
     now = time.time()
     dt = now - mouse_state.get('last_time', now)
     mouse_state['last_time'] = now
-    
-    # For brand new touches, just establish baseline - no movement
-    if new_touch:
-        return
     
     # Calculate CHANGE in position (relative movement)
     dx_raw = x - mouse_state['prev_x']  
@@ -508,13 +493,7 @@ def process_timed_sequence(commands, player_id='player1'):
 def process_command(data, addr, player_id='player1'):
     """Process incoming command from the Android app"""
     data = data.strip()
-    log_data = data
-    
-    # Reduce log noise by not logging every touchpad movement
-    if "TOUCHPAD:" in data or "POS:" in data:
-        log_data = f"{data.split(':')[0]}:coordinate_data"
-    
-    logger.info(f"Received from {addr} ({player_id}): {log_data}")
+    logger.info(f"Received from {addr} ({player_id}): {data}")
     
     # Create or update connection record
     addr_key = f"{addr[0]}:{addr[1]}"
@@ -530,19 +509,6 @@ def process_command(data, addr, player_id='player1'):
     # Handle heartbeat messages
     if data == "PING":
         return "PONG"
-        
-    # Handle touchpad touch up/down events
-    if data == "TOUCHPAD_DOWN":
-        if player_id in mouse_states:
-            mouse_states[player_id]['finger_down'] = True
-            logger.info(f"{player_id} Touchpad: finger down")
-        return None
-        
-    if data == "TOUCHPAD_UP":
-        if player_id in mouse_states:
-            mouse_states[player_id]['finger_down'] = False
-            logger.info(f"{player_id} Touchpad: finger up")
-        return None
     
     try:
         # Handle connection and registration messages
