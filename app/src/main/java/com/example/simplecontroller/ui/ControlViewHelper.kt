@@ -195,6 +195,13 @@ class ControlViewHelper(
             !command.startsWith("RT:")) {
             
             // This looks like a keyboard key - use the KEY_DOWN protocol
+            // NOTE: When a button is latched, this will repeatedly send KEY_DOWN commands
+            // for the same key due to UdpClient's key state tracking system.
+            // This is not strictly necessary but shouldn't cause issues and helps 
+            // ensure reliable key state transmission. However, if you observe rapid
+            // repeated keypresses instead of a continuous press in some games,
+            // you may want to modify UdpClient.sendKeyCommand to avoid sending
+            // duplicate KEY_DOWN commands for keys already in the activeKeys map.
             com.example.simplecontroller.net.UdpClient.sendKeyCommand(command, true)
             
             // For non-latched buttons, schedule release after a short delay
