@@ -151,13 +151,13 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
 
 def handle_touchpad_input(x, y, player_id='player1'):
     """
-    Handle touchpad input for mouse movement with direct 1:1 mapping similar to Unified Remote.
+    Handle touchpad input for mouse movement with relative movement tracking like Unified Remote.
     
-    This implementation focuses on:
-    1. Direct response without acceleration or complex processing
-    2. No smoothing for immediate feedback
-    3. Simple sensitivity multiplier
-    4. Minimal deadzone
+    Key points:
+    1. Uses relative movement only (tracks previous position)
+    2. Minimal smoothing to reduce jitter from packet loss
+    3. Ignores absolute position - only cares about changes in position
+    4. Light packet loss detection/correction
     """
     if player_id not in mouse_states:
         logger.error(f"Unknown player ID: {player_id}")
@@ -169,25 +169,57 @@ def handle_touchpad_input(x, y, player_id='player1'):
     x = normalize_value(x)
     y = normalize_value(y)
     
-    # Initialize tracking if needed (minimal state tracking)
-    if 'is_touchpad_active' not in mouse_state:
+    # Initialize tracking data if needed
+    if 'prev_x' not in mouse_state:
+        mouse_state['prev_x'] = x
+        mouse_state['prev_y'] = y
         mouse_state['is_touchpad_active'] = False
-    
-    # Skip processing if values are extremely small (minimal deadzone)
-    if abs(x) < 0.01 and abs(y) < 0.01:
+        mouse_state['last_time'] = time.time()
+        mouse_state['last_dx'] = 0
+        mouse_state['last_dy'] = 0
+        # No movement on first touch
         return
     
-    # Simple fixed sensitivity - no smoothing, no acceleration
-    # Unified Remote typically uses a sensitivity around 25-30
-    sensitivity = 25
+    # Calculate time delta - used to detect packet loss
+    now = time.time()
+    dt = now - mouse_state.get('last_time', now)
+    mouse_state['last_time'] = now
     
-    # Calculate movement directly
-    dx = int(x * sensitivity)
-    dy = int(y * sensitivity)
+    # Calculate CHANGE in position (not absolute position)
+    # This is the key difference - Unified Remote uses relative movement
+    dx_raw = x - mouse_state['prev_x']
+    dy_raw = y - mouse_state['prev_y']
     
-    # Skip if movement is too small
+    # Update for next time
+    mouse_state['prev_x'] = x
+    mouse_state['prev_y'] = y
+    
+    # Skip if the change is too small
+    if abs(dx_raw) < 0.005 and abs(dy_raw) < 0.005:
+        return
+    
+    # Unified Remote uses a sensitivity around 30-35 for delta movements
+    sensitivity = 32
+    
+    # Calculate pixel movement with sensitivity
+    dx = int(dx_raw * sensitivity)
+    dy = int(dy_raw * sensitivity)
+    
+    # Basic jitter/packet loss reduction
+    # If time between packets is too high, potentially smooth the movement
+    if dt > 0.05:  # More than 50ms between packets
+        # Light packet loss handling - use 80% of new movement + 20% of last movement
+        # This helps make jerky movements smoother during packet loss
+        dx = int(dx * 0.8 + mouse_state.get('last_dx', 0) * 0.2)
+        dy = int(dy * 0.8 + mouse_state.get('last_dy', 0) * 0.2)
+    
+    # Skip if resulting movement is too small
     if dx == 0 and dy == 0:
         return
+    
+    # Store for next calculation
+    mouse_state['last_dx'] = dx
+    mouse_state['last_dy'] = dy
     
     # Track if touchpad is active
     if not mouse_state['is_touchpad_active'] and (abs(dx) > 0 or abs(dy) > 0):
@@ -202,7 +234,7 @@ def handle_touchpad_input(x, y, player_id='player1'):
                 
                 # Only log occasional movements to avoid flooding logs
                 if random.random() < 0.01:  # Log only 1% of movements to reduce overhead
-                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}")
+                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}, dt={dt*1000:.0f}ms")
         except Exception as e:
             logger.error(f"Mouse movement error for {player_id}: {str(e)}")
 
