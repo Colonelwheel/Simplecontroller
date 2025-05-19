@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -15,6 +16,7 @@ import com.example.simplecontroller.R
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -284,6 +286,10 @@ class ControlView(
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
 
+                        // When finger first touches down, reset tracking on server
+                        // This will make the server reset its relative tracking
+                        NetworkClient.send("TOUCHPAD:0.0,0.0")
+
                         if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
@@ -301,20 +307,20 @@ class ControlView(
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        // Calculate absolute position in the touchpad
+                        // Calculate normalized position in the touchpad (-1 to 1 range)
                         val cx = width/2f
                         val cy = height/2f
                         val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f) * model.sensitivity
                         val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f) * model.sensitivity
 
-                        // Send absolute position to server with TOUCHPAD prefix
-                        // The server will calculate relative movement from these absolute positions
+                        // Send normalized position with high precision
+                        // Log for debugging
+                        Log.d("Touchpad", "Sending position: x=$nx, y=$ny")
                         NetworkClient.send("TOUCHPAD:${"%.2f".format(nx)},${"%.2f".format(ny)}")
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
-                            (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
                             leftHeld && model.holdLeftWhileTouch) {
                             NetworkClient.send("MOUSE_LEFT_UP")
                             leftHeld = false
