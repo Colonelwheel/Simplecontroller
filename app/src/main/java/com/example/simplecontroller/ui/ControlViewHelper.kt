@@ -16,6 +16,7 @@ import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.UdpClient
 
 /**
  * Helper class for creating and managing ControlView UI elements and behavior.
@@ -171,32 +172,69 @@ class ControlViewHelper(
                     }
                 }
 
-            commands.forEach { NetworkClient.send(it.trim()) }
+            commands.forEach { sendCommand(it.trim()) }
         } else {
             // Regular version with auto-release for normal presses
             model.payload.split(',', ' ')
                 .filter { it.isNotBlank() }
-                .forEach { NetworkClient.send(it.trim()) }
+                .forEach { sendCommand(it.trim()) }
+        }
+    }
+    
+    /**
+     * Send a command using the appropriate protocol based on command type
+     */
+    private fun sendCommand(command: String) {
+        // Check if this is a keyboard key (not an Xbox button or special command)
+        if (!command.startsWith("X360") && 
+            !command.startsWith("MOUSE_") && 
+            !command.startsWith("TOUCHPAD:") && 
+            !command.startsWith("STICK") && 
+            !command.startsWith("TRIGGER") && 
+            !command.startsWith("LT:") && 
+            !command.startsWith("RT:")) {
+            
+            // This looks like a keyboard key - use the KEY_DOWN protocol
+            com.example.simplecontroller.net.UdpClient.sendKeyCommand(command, true)
+            
+            // For non-latched buttons, schedule release after a short delay
+            if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
+                val handler = Handler(Looper.getMainLooper())
+                handler.postDelayed({
+                    com.example.simplecontroller.net.UdpClient.sendKeyCommand(command, false)
+                }, 100) // 100ms delay to match server auto-release
+            }
+        } else {
+            // For Xbox buttons and other special commands, use regular send
+            com.example.simplecontroller.net.NetworkClient.send(command)
         }
     }
 
     // Improved function to handle releasing held buttons
     fun releaseLatched() {
-        if (model.payload.contains("X360")) {
-            // For each Xbox button in the payload, send a proper release command
-            model.payload.split(',', ' ')
-                .filter { it.isNotBlank() && it.startsWith("X360") }
-                .forEach { cmd ->
-                    // If the command already has _HOLD, replace it with _RELEASE
-                    // Otherwise, just append _RELEASE
+        // Process all commands in the payload
+        model.payload.split(',', ' ')
+            .filter { it.isNotBlank() }
+            .forEach { cmd ->
+                if (cmd.startsWith("X360")) {
+                    // For Xbox buttons, send release commands
                     val releaseCmd = if (cmd.endsWith("_HOLD")) {
                         cmd.replace("_HOLD", "_RELEASE")
                     } else {
                         "${cmd}_RELEASE"
                     }
                     NetworkClient.send(releaseCmd.trim())
+                } else if (!cmd.startsWith("MOUSE_") && 
+                    !cmd.startsWith("TOUCHPAD:") && 
+                    !cmd.startsWith("STICK") && 
+                    !cmd.startsWith("TRIGGER") && 
+                    !cmd.startsWith("LT:") && 
+                    !cmd.startsWith("RT:")) {
+                    
+                    // For keyboard keys, use KEY_UP protocol
+                    com.example.simplecontroller.net.UdpClient.sendKeyCommand(cmd.trim(), false)
                 }
-        }
+            }
     }
 
     /**
