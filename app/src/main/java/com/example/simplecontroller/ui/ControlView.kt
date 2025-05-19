@@ -210,6 +210,15 @@ class ControlView(
                         if (GlobalSettings.globalTurbo) {
                             uiHelper.startRepeat()
                         } else {
+                            // First check for global hold mode
+                            if (GlobalSettings.globalHold && !model.holdToggle) {
+                                // Set latched immediately before sending payload
+                                isLatched = true
+                                isPressed = true
+                                invalidate() // Redraw to show the latched state
+                            }
+                            
+                            // Now fire payload (will use the updated isLatched state)
                             uiHelper.firePayload()
 
                             // Start long press detection for hold toggle
@@ -219,6 +228,8 @@ class ControlView(
                                     isLatched = true
                                     isPressed = true
                                     invalidate() // Redraw to show the latched state
+                                    // We need to fire payload again after latching to ensure proper state
+                                    uiHelper.firePayload()
                                 }, model.holdDurationMs)
                             }
                         }
@@ -228,18 +239,11 @@ class ControlView(
                     stopRepeat()
 
                     // Handle latch toggling on short tap for unlatched buttons only
-                    // (We already handled unlatching on ACTION_DOWN if button was latched)
-                    if (!isLatched) {
-                        // Only toggle latch state if we're using global hold OR
-                        // using model.holdToggle but the long press didn't happen
-                        if (GlobalSettings.globalHold && !model.holdToggle) {
-                            isLatched = true
-                            isPressed = true
-                            invalidate() // Redraw to show the latched state
-                        } else if (model.holdToggle) {
-                            // Cancel pending hold toggle if finger is lifted before holdDurationMs
-                            holdHandler.removeCallbacksAndMessages(null)
-                        }
+                    // (We already handled unlatching on ACTION_DOWN if button was latched,
+                    // and we handled global hold mode on ACTION_DOWN as well)
+                    if (!isLatched && model.holdToggle) {
+                        // Cancel pending hold toggle if finger is lifted before holdDurationMs
+                        holdHandler.removeCallbacksAndMessages(null)
                     }
                 }
             }
