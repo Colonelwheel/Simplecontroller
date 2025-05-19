@@ -151,13 +151,13 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
 
 def handle_touchpad_input(x, y, player_id='player1'):
     """
-    Handle touchpad input for mouse movement with a simple, linear response similar to Unified Remote.
+    Handle touchpad input for mouse movement with direct 1:1 mapping similar to Unified Remote.
     
-    This implementation prioritizes natural feel over complex adjustments:
-    1. Simple linear response with minimal acceleration
-    2. Light smoothing to remove jitter
-    3. Fixed sensitivity to ensure predictable movement
-    4. Small threshold for noise reduction
+    This implementation focuses on:
+    1. Direct response without acceleration or complex processing
+    2. No smoothing for immediate feedback
+    3. Simple sensitivity multiplier
+    4. Minimal deadzone
     """
     if player_id not in mouse_states:
         logger.error(f"Unknown player ID: {player_id}")
@@ -169,41 +169,24 @@ def handle_touchpad_input(x, y, player_id='player1'):
     x = normalize_value(x)
     y = normalize_value(y)
     
-    # Initialize touch tracking data if needed
-    if 'prev_x' not in mouse_state:
-        mouse_state['prev_x'] = 0.0
-        mouse_state['prev_y'] = 0.0
-        mouse_state['smooth_x'] = 0.0
-        mouse_state['smooth_y'] = 0.0
-        mouse_state['last_time'] = time.time()
+    # Initialize tracking if needed (minimal state tracking)
+    if 'is_touchpad_active' not in mouse_state:
+        mouse_state['is_touchpad_active'] = False
     
-    # Apply a very small deadzone to ignore negligible movements
-    if abs(x) < 0.03 and abs(y) < 0.03:
-        x, y = 0, 0
+    # Skip processing if values are extremely small (minimal deadzone)
+    if abs(x) < 0.01 and abs(y) < 0.01:
+        return
     
-    # Update time tracking
-    now = time.time()
-    mouse_state['last_time'] = now
+    # Simple fixed sensitivity - no smoothing, no acceleration
+    # Unified Remote typically uses a sensitivity around 25-30
+    sensitivity = 25
     
-    # Update previous position for next calculation
-    mouse_state['prev_x'] = x
-    mouse_state['prev_y'] = y
+    # Calculate movement directly
+    dx = int(x * sensitivity)
+    dy = int(y * sensitivity)
     
-    # Fixed sensitivity (higher than before for more responsive feel)
-    sensitivity = 18
-    
-    # Very light smoothing - 70% new input, 30% previous value
-    # This gives a more direct feel while still removing some jitter
-    smoothing_factor = 0.7
-    mouse_state['smooth_x'] = (x * smoothing_factor) + (mouse_state['smooth_x'] * (1 - smoothing_factor))
-    mouse_state['smooth_y'] = (y * smoothing_factor) + (mouse_state['smooth_y'] * (1 - smoothing_factor))
-    
-    # Calculate final pixel movement with minimal processing
-    dx = int(mouse_state['smooth_x'] * sensitivity)
-    dy = int(mouse_state['smooth_y'] * sensitivity)
-    
-    # Skip tiny movements
-    if abs(dx) < 1 and abs(dy) < 1:
+    # Skip if movement is too small
+    if dx == 0 and dy == 0:
         return
     
     # Track if touchpad is active
@@ -218,7 +201,7 @@ def handle_touchpad_input(x, y, player_id='player1'):
                 mouse.move(dx, dy, absolute=False)
                 
                 # Only log occasional movements to avoid flooding logs
-                if random.random() < 0.05:  # Log approximately 5% of movements
+                if random.random() < 0.01:  # Log only 1% of movements to reduce overhead
                     logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}")
         except Exception as e:
             logger.error(f"Mouse movement error for {player_id}: {str(e)}")
