@@ -151,13 +151,13 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
 
 def handle_touchpad_input(x, y, player_id='player1'):
     """
-    Handle touchpad input for mouse movement with relative movement tracking like Unified Remote.
+    Handle touchpad input for mouse movement with enhanced relative tracking.
     
     Key points:
-    1. Uses relative movement only (tracks previous position)
-    2. Minimal smoothing to reduce jitter from packet loss
-    3. Ignores absolute position - only cares about changes in position
-    4. Light packet loss detection/correction
+    1. Uses relative movement with high sensitivity
+    2. Dynamic sensitivity scaling for tiny movements
+    3. Jitter reduction with minimal impact on responsiveness
+    4. Amplifies small movements to improve precision
     """
     if player_id not in mouse_states:
         logger.error(f"Unknown player ID: {player_id}")
@@ -177,49 +177,64 @@ def handle_touchpad_input(x, y, player_id='player1'):
         mouse_state['last_time'] = time.time()
         mouse_state['last_dx'] = 0
         mouse_state['last_dy'] = 0
+        mouse_state['last_sent_time'] = time.time()
         # No movement on first touch
         return
     
-    # Calculate time delta - used to detect packet loss
+    # Calculate time delta - used for timing and performance tuning
     now = time.time()
     dt = now - mouse_state.get('last_time', now)
     mouse_state['last_time'] = now
     
-    # Calculate CHANGE in position (not absolute position)
-    # This is the key difference - Unified Remote uses relative movement
-    dx_raw = x - mouse_state['prev_x']
+    # Calculate CHANGE in position (relative movement)
+    dx_raw = x - mouse_state['prev_x']  
     dy_raw = y - mouse_state['prev_y']
     
     # Update for next time
     mouse_state['prev_x'] = x
     mouse_state['prev_y'] = y
     
-    # Skip if the change is too small
-    if abs(dx_raw) < 0.005 and abs(dy_raw) < 0.005:
+    # Skip if the change is too small (tiny deadzone)
+    if abs(dx_raw) < 0.001 and abs(dy_raw) < 0.001:
         return
     
-    # Unified Remote uses a sensitivity around 30-35 for delta movements
-    sensitivity = 32
+    # Much higher sensitivity for small movements (65-75 range works well)
+    base_sensitivity = 70
     
-    # Calculate pixel movement with sensitivity
-    dx = int(dx_raw * sensitivity)
-    dy = int(dy_raw * sensitivity)
+    # Boost very small movements to make them more responsive
+    # This creates a non-linear curve that amplifies tiny movements
+    if abs(dx_raw) < 0.02:
+        dx_raw *= 1.5  # 50% boost for very small x movements
+    if abs(dy_raw) < 0.02:
+        dy_raw *= 1.5  # 50% boost for very small y movements
     
-    # Basic jitter/packet loss reduction
-    # If time between packets is too high, potentially smooth the movement
-    if dt > 0.05:  # More than 50ms between packets
-        # Light packet loss handling - use 80% of new movement + 20% of last movement
-        # This helps make jerky movements smoother during packet loss
-        dx = int(dx * 0.8 + mouse_state.get('last_dx', 0) * 0.2)
-        dy = int(dy * 0.8 + mouse_state.get('last_dy', 0) * 0.2)
+    # Calculate pixel movement with high sensitivity
+    dx = int(dx_raw * base_sensitivity)
+    dy = int(dy_raw * base_sensitivity)
     
-    # Skip if resulting movement is too small
-    if dx == 0 and dy == 0:
-        return
+    # Rate limiting/jitter handling - don't send updates too frequently
+    # and don't let packet loss create jerky movement
+    time_since_last_send = now - mouse_state.get('last_sent_time', 0)
+    
+    # Apply jitter reduction only if packets are coming in unusually fast 
+    # or unusually slow (potential packet loss or backup)
+    if time_since_last_send < 0.008 or time_since_last_send > 0.05:
+        # For potential jitter situations, blend with previous movement
+        # Use 60% current + 40% previous for more responsiveness
+        dx = int(dx * 0.6 + mouse_state.get('last_dx', 0) * 0.4)
+        dy = int(dy * 0.6 + mouse_state.get('last_dy', 0) * 0.4)
+    
+    # Don't skip very small movements - make sure they register
+    # This helps with precision
+    if dx == 0 and abs(dx_raw) > 0.002:
+        dx = 1 if dx_raw > 0 else -1
+    if dy == 0 and abs(dy_raw) > 0.002:
+        dy = 1 if dy_raw > 0 else -1
     
     # Store for next calculation
     mouse_state['last_dx'] = dx
     mouse_state['last_dy'] = dy
+    mouse_state['last_sent_time'] = now
     
     # Track if touchpad is active
     if not mouse_state['is_touchpad_active'] and (abs(dx) > 0 or abs(dy) > 0):
@@ -233,8 +248,8 @@ def handle_touchpad_input(x, y, player_id='player1'):
                 mouse.move(dx, dy, absolute=False)
                 
                 # Only log occasional movements to avoid flooding logs
-                if random.random() < 0.01:  # Log only 1% of movements to reduce overhead
-                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}, dt={dt*1000:.0f}ms")
+                if random.random() < 0.01:  # Log only 1% of movements 
+                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}, dt={dt*1000:.1f}ms")
         except Exception as e:
             logger.error(f"Mouse movement error for {player_id}: {str(e)}")
 
