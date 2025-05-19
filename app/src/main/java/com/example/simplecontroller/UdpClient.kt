@@ -1,13 +1,18 @@
 package com.example.simplecontroller.net
 
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -27,11 +32,20 @@ object UdpClient {
     // Coroutine scope for background operations
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // UI thread handler for key state management
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     // Player role from NetworkClient
     private val playerRole get() = NetworkClient.getPlayerRole()
 
     // Connection status
     private var isInitialized = false
+
+    // Key state tracking for reliable directional commands
+    private val activeKeys = ConcurrentHashMap<String, Boolean>()
+    private var keyResendRunnable: Runnable? = null
+    private val keyResendInterval = 100L // milliseconds
+    private var isKeySyncActive = false
 
     /**
      * Configure socket for minimal latency
@@ -76,6 +90,9 @@ object UdpClient {
 
                 isInitialized = true
                 Log.d(TAG, "UDP client initialized successfully")
+
+                // Start key state sync when initialized
+                startKeyStateSync()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize UDP client: ${e.message}", e)
                 isInitialized = false
@@ -112,6 +129,85 @@ object UdpClient {
                 NetworkClient.send(command)
             }
         }
+    }
+
+    /**
+     * Send a directional key command with reliable delivery
+     * Use this for WASD or similar directional controls
+     */
+    fun sendKeyCommand(key: String, isPressed: Boolean) {
+        if (isPressed) {
+            // Add to active keys
+            activeKeys[key] = true
+
+            // Send immediately (normal way)
+            val command = "KEY_DOWN:$key"
+            sendCommand(command)
+
+            // Ensure key state sync is running
+            ensureKeyStateSyncActive()
+        } else {
+            // Remove from active keys
+            activeKeys.remove(key)
+
+            // Send key up command
+            val command = "KEY_UP:$key"
+            sendCommand(command)
+        }
+    }
+
+    /**
+     * Ensures the key state sync mechanism is active if needed
+     */
+    private fun ensureKeyStateSyncActive() {
+        if (!isKeySyncActive && activeKeys.isNotEmpty()) {
+            startKeyStateSync()
+        }
+    }
+
+    /**
+     * Start periodic sync of active keys to ensure they stay pressed
+     */
+    private fun startKeyStateSync() {
+        // Clear any existing runnable
+        stopKeyStateSync()
+
+        // Mark as active
+        isKeySyncActive = true
+
+        // Create new key sync runnable
+        keyResendRunnable = object : Runnable {
+            override fun run() {
+                // Only continue if we have active keys and are initialized
+                if (activeKeys.isNotEmpty() && isInitialized) {
+                    // Resend all active keys
+                    for (key in activeKeys.keys) {
+                        val syncCommand = "KEY_SYNC:$key"
+                        sendCommand(syncCommand)
+                    }
+
+                    // Schedule next sync
+                    mainHandler.postDelayed(this, keyResendInterval)
+                } else {
+                    // No active keys, can stop syncing
+                    isKeySyncActive = false
+                }
+            }
+        }
+
+        // Start the sync cycle
+        keyResendRunnable?.let { mainHandler.post(it) }
+
+        Log.d(TAG, "Key state sync started")
+    }
+
+    /**
+     * Stop key state sync mechanism
+     */
+    private fun stopKeyStateSync() {
+        keyResendRunnable?.let { mainHandler.removeCallbacks(it) }
+        keyResendRunnable = null
+        isKeySyncActive = false
     }
 
     /**
@@ -204,6 +300,13 @@ object UdpClient {
      * Close the UDP socket
      */
     fun close() {
+        // Stop key state sync
+        stopKeyStateSync()
+
+        // Clear active keys
+        activeKeys.clear()
+
+        // Close socket
         socket?.close()
         socket = null
         isInitialized = false
