@@ -55,6 +55,12 @@ class ControlView(
         }
     private var leftHeld = false           // for one-finger drag or toggle
 
+    // For touchpad tracking
+    private var lastTouchX = 0f
+    private var lastTouchY = 0f
+    private var touchInitialized = false
+    private var touchpadSensitivity = 1.0f // Adjust this if needed
+
     // Handler for UI updates
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -286,10 +292,15 @@ class ControlView(
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
 
-                        // When finger first touches down, reset tracking on server
-                        // This will make the server reset its relative tracking
-                        NetworkClient.send("TOUCHPAD:0.0,0.0")
+                        // Initialize touchpad tracking
+                        lastTouchX = e.x
+                        lastTouchY = e.y
+                        touchInitialized = false  // Mark as not initialized until first move
 
+                        // Reset mouse tracking on server side - use a special command
+                        NetworkClient.send("MOUSE_RESET")
+
+                        // Handle mouse button states
                         if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
@@ -307,18 +318,40 @@ class ControlView(
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        // Calculate normalized position in the touchpad (-1 to 1 range)
-                        val cx = width/2f
-                        val cy = height/2f
-                        val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f) * model.sensitivity
-                        val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f) * model.sensitivity
+                        if (!touchInitialized) {
+                            // Skip first move to establish baseline
+                            touchInitialized = true
+                            lastTouchX = e.x
+                            lastTouchY = e.y
+                            return
+                        }
 
-                        // Send normalized position with high precision
-                        // Log for debugging
-                        Log.d("Touchpad", "Sending position: x=$nx, y=$ny")
-                        NetworkClient.send("TOUCHPAD:${"%.2f".format(nx)},${"%.2f".format(ny)}")
+                        // Calculate movement delta
+                        val dx = (e.x - lastTouchX) * model.sensitivity * touchpadSensitivity
+                        val dy = (e.y - lastTouchY) * model.sensitivity * touchpadSensitivity
+
+                        // Skip too small movements
+                        if (abs(dx) < 0.1f && abs(dy) < 0.1f) {
+                            return
+                        }
+
+                        // Update for next calculation
+                        lastTouchX = e.x
+                        lastTouchY = e.y
+
+                        // Limit values to appropriate range
+                        val cappedDx = dx.coerceIn(-1f, 1f)
+                        val cappedDy = dy.coerceIn(-1f, 1f)
+
+                        Log.d("Touchpad", "Sending delta: dx=$cappedDx, dy=$cappedDy")
+
+                        // Use UDP for better throughput
+                        UdpClient.sendTouchpadPosition(cappedDx, cappedDy)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        // Reset tracking
+                        touchInitialized = false
+
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
                             leftHeld && model.holdLeftWhileTouch) {
