@@ -7,6 +7,7 @@ import mouse
 import vgamepad
 import math
 import logging
+import random
 from datetime import datetime
 
 # Set up logging
@@ -149,21 +150,110 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
         logger.error(f"Error handling trigger input for {player_id}: {str(e)}")
 
 def handle_touchpad_input(x, y, player_id='player1'):
-    """Handle touchpad input for mouse movement"""
+    """
+    Handle touchpad input for mouse movement with improved acceleration curve.
+    
+    This advanced implementation adds several features to make the touchpad feel more natural:
+    1. Adaptive acceleration: Faster movements get higher sensitivity
+    2. Position-based scaling: Further from center = more movement
+    3. Smoothing: Reduces jitter while maintaining responsiveness
+    4. Speed-aware processing: Adjusts based on real time between updates
+    5. Minimum threshold: Prevents tiny jittery movements
+    
+    IMPLEMENTATION NOTES FOR FUTURE CLAUDE INSTANCES:
+    - The mouse_state dict stores state between calls for smooth transitions
+    - We use relative movement speed + absolute position for acceleration
+    - Smoothing creates a weighted average between current and previous positions
+    - The base sensitivity is intentionally lower to allow for finer control
+    - Acceleration provides the "ramp up" for faster/larger movements
+    """
     if player_id not in mouse_states:
         logger.error(f"Unknown player ID: {player_id}")
         return
         
     mouse_state = mouse_states[player_id]
     
+    # Normalize input values to -1.0 to 1.0 range
     x = normalize_value(x)
     y = normalize_value(y)
     
-    # Scale the input to pixels (adjust sensitivity here)
-    sensitivity = 15
-    dx = int(x * sensitivity)
-    dy = int(y * sensitivity)
+    # Initialize touch tracking data if needed
+    if 'prev_x' not in mouse_state:
+        # These values track previous state for calculating movement delta
+        mouse_state['prev_x'] = 0.0
+        mouse_state['prev_y'] = 0.0
+        # These values store smoothed position for reducing jitter
+        mouse_state['smooth_x'] = 0.0
+        mouse_state['smooth_y'] = 0.0
+        # Timestamp for calculating movement speed
+        mouse_state['last_time'] = time.time()
     
+    # Calculate movement metrics
+    # --------------------------
+    # Raw change in position since last update
+    dx_raw = x - mouse_state['prev_x']
+    dy_raw = y - mouse_state['prev_y']
+    
+    # Distance from center (0,0) - used for position-based acceleration
+    movement_magnitude = math.sqrt(x*x + y*y)
+    
+    # Speed of movement (how fast the finger is moving)
+    speed_magnitude = math.sqrt(dx_raw*dx_raw + dy_raw*dy_raw)
+    
+    # Calculate time delta for speed scaling
+    now = time.time()
+    dt = now - mouse_state.get('last_time', now)
+    mouse_state['last_time'] = now
+    
+    # Normalize speed based on time elapsed (important for consistent feel)
+    speed_normalized = speed_magnitude / max(dt, 0.001)  # Avoid division by zero
+    
+    # Update previous position for next calculation
+    mouse_state['prev_x'] = x
+    mouse_state['prev_y'] = y
+    
+    # Apply Acceleration Curve
+    # -----------------------
+    # Base sensitivity (intentionally lower than the original 15)
+    base_sensitivity = 12  # This gives better precision for small movements
+    
+    # Start with no acceleration
+    accel_factor = 1.0
+    
+    # Position-based acceleration (further from center = faster)
+    # These thresholds create a multi-tier acceleration curve
+    if movement_magnitude > 0.3:  # 30% from center
+        accel_factor *= 1.2       # 20% speed increase
+    if movement_magnitude > 0.6:  # 60% from center
+        accel_factor *= 1.5       # 50% additional speed increase
+    if movement_magnitude > 0.8:  # 80% from center
+        accel_factor *= 1.8       # 80% additional speed increase
+    
+    # Speed-based acceleration (faster movement = higher sensitivity)
+    # This helps rapid movements feel more responsive
+    if speed_normalized > 0.5:    # Moderate speed
+        accel_factor *= 1.3       # 30% speed increase
+    if speed_normalized > 1.0:    # Fast movement
+        accel_factor *= 1.5       # 50% additional speed increase
+    
+    # Apply Smoothing
+    # --------------
+    # Smoothing reduces jitter while maintaining responsiveness
+    smoothing_factor = 0.3  # Lower = more smoothing, higher = more responsive
+    # Weighted average: new position gets 30% weight, previous smoothed position gets 70%
+    mouse_state['smooth_x'] = (x * smoothing_factor) + (mouse_state['smooth_x'] * (1 - smoothing_factor))
+    mouse_state['smooth_y'] = (y * smoothing_factor) + (mouse_state['smooth_y'] * (1 - smoothing_factor))
+    
+    # Calculate final pixel movement with acceleration
+    dx = int(mouse_state['smooth_x'] * base_sensitivity * accel_factor)
+    dy = int(mouse_state['smooth_y'] * base_sensitivity * accel_factor)
+    
+    # Apply minimum movement threshold to avoid jitter
+    if abs(dx) < 1 and abs(dy) < 1:
+        if movement_magnitude < 0.1:  # Only cancel if magnitude is also small
+            return  # Skip tiny movements to reduce jitter
+    
+    # Track if touchpad is active
     if not mouse_state['is_touchpad_active'] and (abs(dx) > 0 or abs(dy) > 0):
         mouse_state['is_touchpad_active'] = True
     
@@ -173,7 +263,10 @@ def handle_touchpad_input(x, y, player_id='player1'):
             if player_id == 'player1':
                 # Move mouse relative to current position
                 mouse.move(dx, dy, absolute=False)
-                logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}")
+                
+                # Only log occasional movements to avoid flooding logs
+                if random.random() < 0.05:  # Log approximately 5% of movements
+                    logger.info(f"{player_id} Mouse move: dx={dx}, dy={dy}, accel={accel_factor:.2f}")
         except Exception as e:
             logger.error(f"Mouse movement error for {player_id}: {str(e)}")
 
