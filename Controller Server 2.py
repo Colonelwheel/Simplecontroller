@@ -160,23 +160,40 @@ def handle_touchpad_input(x, y, player_id='player1'):
     4. Preserves movement intent across touches
     5. Handles jitter and improves precision
     """
+    # Ensure the player state exists and is fully initialized
     if player_id not in mouse_states:
         # Initialize player state if doesn't exist
-        logger.error(f"Unknown player ID: {player_id}")
-        mouse_states[player_id] = {
-            'total_dx': 0,           # Track total distance moved
-            'total_dy': 0,           # Track total distance moved
-            'momentum_x': 0,         # Store movement momentum for edges
-            'momentum_y': 0,         # Store movement momentum for edges
-            'is_touchpad_active': False,
-            'touch_active': False,   # Is a touch currently in progress
-            'edge_active_x': False,  # Are we in edge-momentum mode for X
-            'edge_active_y': False,  # Are we in edge-momentum mode for Y
-            'last_time': time.time(),
-            'last_sent_time': time.time()
-        }
+        logger.info(f"Creating new state for player ID: {player_id}")
+        mouse_states[player_id] = {}
         
+    # Get the player's state
     mouse_state = mouse_states[player_id]
+    
+    # Make sure all required state fields are initialized
+    if 'total_dx' not in mouse_state:
+        mouse_state['total_dx'] = 0           # Track total distance moved
+    if 'total_dy' not in mouse_state:
+        mouse_state['total_dy'] = 0           # Track total distance moved
+    if 'momentum_x' not in mouse_state:
+        mouse_state['momentum_x'] = 0         # Store movement momentum for edges
+    if 'momentum_y' not in mouse_state:
+        mouse_state['momentum_y'] = 0         # Store movement momentum for edges
+    if 'is_touchpad_active' not in mouse_state:
+        mouse_state['is_touchpad_active'] = False
+    if 'touch_active' not in mouse_state:
+        mouse_state['touch_active'] = False   # Is a touch currently in progress
+    if 'edge_active_x' not in mouse_state:
+        mouse_state['edge_active_x'] = False  # Are we in edge-momentum mode for X
+    if 'edge_active_y' not in mouse_state:
+        mouse_state['edge_active_y'] = False  # Are we in edge-momentum mode for Y
+    if 'last_time' not in mouse_state:
+        mouse_state['last_time'] = time.time()
+    if 'last_sent_time' not in mouse_state:
+        mouse_state['last_sent_time'] = time.time()
+    if 'last_dx' not in mouse_state:
+        mouse_state['last_dx'] = 0
+    if 'last_dy' not in mouse_state:
+        mouse_state['last_dy'] = 0
     
     # Normalize input values to -1.0 to 1.0 range
     x = normalize_value(x)
@@ -744,10 +761,16 @@ def process_command(data, addr, player_id='player1'):
                 elif command == "STICK_R" or command == "RS":
                     handle_stick_input(x, y, "RIGHT", player_id)
                 elif command == "TOUCHPAD":
-                    handle_touchpad_input(x, y, player_id)
+                    try:
+                        handle_touchpad_input(x, y, player_id)
+                    except Exception as e:
+                        logger.error(f"Error in touchpad handling: {str(e)}")
                 elif command == "POS":  # Position data coming through UDP
                     # Handle generic position data (used by optimized clients)
-                    handle_touchpad_input(x, y, player_id)
+                    try:
+                        handle_touchpad_input(x, y, player_id)
+                    except Exception as e:
+                        logger.error(f"Error in position handling: {str(e)}")
                 else:
                     logger.warning(f"Unknown coordinate command from {player_id}: {command}")
                 return None
