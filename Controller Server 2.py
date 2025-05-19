@@ -204,33 +204,19 @@ def handle_touchpad_input(x, y, player_id='player1'):
     dt = now - mouse_state.get('last_time', now)
     mouse_state['last_time'] = now
     
-    # Check if this is an initial touch or we need to establish a new reference point
-    new_touch = not mouse_state.get('touch_active', False) or mouse_state.get('first_input', True)
-    
-    if new_touch:
-        # Initialize tracking variables for this touch sequence
+    # Touch lifecycle handling
+    if not mouse_state.get('touch_active', False) or mouse_state.get('first_input', True):
+        # New touch starting - record position but don't move yet
         mouse_state['first_input'] = False
         mouse_state['touch_active'] = True
-        
-        # Don't touch momentum variables - preserve those for continuous movement
-        
-        # Store absolute position for this touch
         mouse_state['start_x'] = x
         mouse_state['start_y'] = y
         mouse_state['prev_x'] = x
         mouse_state['prev_y'] = y
         
-        # For absolute touch mode (not using virtual touchpad):
-        # If we have momentum active when a new touch occurs, continue the momentum
-        # instead of starting from zero. This helps with the "snapping back" issue.
-        if mouse_state.get('momentum_x', 0) != 0 or mouse_state.get('momentum_y', 0) != 0:
-            # Continue previous movement momentum, but allow new movement to redirect it
-            _handle_edge_momentum(mouse_state, player_id)
-            logger.info(f"{player_id} Touchpad: New touch at ({x:.2f}, {y:.2f}) with active momentum")
-        else:
-            logger.info(f"{player_id} Touchpad: New touch at ({x:.2f}, {y:.2f})")
-        
-        # Return after establishing initial position, but don't move cursor yet
+        # Don't clear momentum immediately - this preserves direction
+        # between touches for better continuous movement
+        logger.info(f"{player_id} Touchpad: New touch at ({x:.2f}, {y:.2f})")
         return
     
     # Calculate CHANGE in position from previous touch position
@@ -330,48 +316,39 @@ def _handle_edge_momentum(mouse_state, player_id):
     momentum_y = 0
     momentum_active = False
     
-    # Check if this is a new touch while momentum is active
-    # If so, don't decay momentum immediately to avoid "snap back" effect
-    new_touch = mouse_state.get('first_input', False)
-    decay = 0.97 if new_touch else 0.95
-    
     # Apply momentum with decay for X axis
-    if mouse_state.get('edge_active_x', False) or abs(mouse_state.get('momentum_x', 0)) > 0:
-        # Get current momentum with decay factor        
-        momentum_x = int(mouse_state.get('momentum_x', 0) * decay)
+    if mouse_state.get('edge_active_x', False):
+        # Get current momentum with decay factor
+        decay = 0.95  # Gradual decrease in momentum (95% of previous value)
+        momentum_x = int(mouse_state['momentum_x'] * decay)
         
-        # Only stop momentum if it's very small and not a new touch
-        if abs(momentum_x) < 2 and not new_touch:
+        # Stop if momentum is too small
+        if abs(momentum_x) < 2:
             mouse_state['edge_active_x'] = False
             momentum_x = 0
         else:
-            # Keep momentum alive
             mouse_state['momentum_x'] = momentum_x
-            mouse_state['edge_active_x'] = True
             momentum_active = True
     
     # Apply momentum with decay for Y axis
-    if mouse_state.get('edge_active_y', False) or abs(mouse_state.get('momentum_y', 0)) > 0:
+    if mouse_state.get('edge_active_y', False):
         # Get current momentum with decay factor
-        momentum_y = int(mouse_state.get('momentum_y', 0) * decay)
+        decay = 0.95  # Gradual decrease in momentum
+        momentum_y = int(mouse_state['momentum_y'] * decay)
         
-        # Only stop momentum if it's very small and not a new touch
-        if abs(momentum_y) < 2 and not new_touch:
+        # Stop if momentum is too small
+        if abs(momentum_y) < 2:
             mouse_state['edge_active_y'] = False
             momentum_y = 0
         else:
-            # Keep momentum alive
             mouse_state['momentum_y'] = momentum_y
-            mouse_state['edge_active_y'] = True
             momentum_active = True
     
-    # Apply momentum if active and large enough
-    if momentum_active and (abs(momentum_x) > 0 or abs(momentum_y) > 0):
+    # Apply momentum if active
+    if momentum_active and (momentum_x != 0 or momentum_y != 0):
         # Track total movement
-        if 'total_dx' in mouse_state:
-            mouse_state['total_dx'] += momentum_x
-        if 'total_dy' in mouse_state:
-            mouse_state['total_dy'] += momentum_y
+        mouse_state['total_dx'] += momentum_x
+        mouse_state['total_dy'] += momentum_y
         
         try:
             # Only player1 controls the mouse
@@ -379,19 +356,13 @@ def _handle_edge_momentum(mouse_state, player_id):
                 # Move mouse based on momentum
                 mouse.move(momentum_x, momentum_y, absolute=False)
                 
-                # Log occasionally (but avoid excessive logging)
-                if random.random() < 0.01:  # Log 1% of momentum movements
-                    if new_touch:
-                        log_prefix = "Continuing momentum with new touch"
-                    else:
-                        log_prefix = "Momentum"
-                    logger.info(f"{player_id} {log_prefix}: dx={momentum_x}, dy={momentum_y}")
+                # Log occasionally
+                if random.random() < 0.02:  # Log 2% of momentum movements
+                    logger.info(f"{player_id} Momentum: dx={momentum_x}, dy={momentum_y}")
         except Exception as e:
             logger.error(f"Mouse momentum error for {player_id}: {str(e)}")
             
         # Schedule next momentum update after a very short delay
-        # Important: We need to pass a COPY of the current mouse_state to the lambda
-        # to prevent the thread from accessing a potentially modified state later
         if momentum_active:
             threading.Timer(
                 0.02,  # 20ms delay between momentum updates
