@@ -53,12 +53,6 @@ class ControlView(
         }
     private var leftHeld = false           // for one-finger drag or toggle
 
-    // For touchpad relative movement tracking
-    private var touchTrackingInitialized = false
-    private var prevTouchX = 0f
-    private var prevTouchY = 0f
-    private var touchpadSensitivity = 5f   // Scale factor for touchpad movement
-
     // Handler for UI updates
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -290,11 +284,6 @@ class ControlView(
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
 
-                        // Initialize tracking for relative movement
-                        touchTrackingInitialized = false
-                        prevTouchX = e.x
-                        prevTouchY = e.y
-
                         if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
@@ -312,15 +301,20 @@ class ControlView(
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        // Handle touchpad movement using relative positioning
-                        handleTouchpadMovement(e)
+                        // Calculate absolute position in the touchpad
+                        val cx = width/2f
+                        val cy = height/2f
+                        val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f) * model.sensitivity
+                        val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f) * model.sensitivity
+
+                        // Send absolute position to server with TOUCHPAD prefix
+                        // The server will calculate relative movement from these absolute positions
+                        NetworkClient.send("TOUCHPAD:${"%.2f".format(nx)},${"%.2f".format(ny)}")
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        // Reset touchpad tracking
-                        touchTrackingInitialized = false
-
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
+                            (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
                             leftHeld && model.holdLeftWhileTouch) {
                             NetworkClient.send("MOUSE_LEFT_UP")
                             leftHeld = false
@@ -329,43 +323,6 @@ class ControlView(
                 }
             }
         }
-    }
-
-    /**
-     * Handle touchpad movement using relative positioning
-     * This prevents the cursor from jumping to absolute positions
-     */
-    private fun handleTouchpadMovement(e: MotionEvent) {
-        if (!touchTrackingInitialized) {
-            // Skip the first movement event to establish a baseline
-            touchTrackingInitialized = true
-            prevTouchX = e.x
-            prevTouchY = e.y
-            return
-        }
-
-        // Calculate the movement delta since last position
-        val dx = (e.x - prevTouchX) * model.sensitivity * touchpadSensitivity
-        val dy = (e.y - prevTouchY) * model.sensitivity * touchpadSensitivity
-
-        // Skip if movement is too small
-        if (abs(dx) < 0.1f && abs(dy) < 0.1f) {
-            prevTouchX = e.x
-            prevTouchY = e.y
-            return
-        }
-
-        // Save current position for next calculation
-        prevTouchX = e.x
-        prevTouchY = e.y
-
-        // Send relative movement to server
-        // The server expects relative movement values in the range -1 to 1
-        val normalizedDx = dx.coerceIn(-1f, 1f)
-        val normalizedDy = dy.coerceIn(-1f, 1f)
-
-        // Send through UdpClient for lower latency
-        com.example.simplecontroller.net.UdpClient.sendTouchpadPosition(normalizedDx, normalizedDy)
     }
 
     /**
