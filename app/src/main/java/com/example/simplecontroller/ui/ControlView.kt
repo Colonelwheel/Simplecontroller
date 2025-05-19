@@ -283,6 +283,10 @@ class ControlView(
                     MotionEvent.ACTION_DOWN -> {
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
+                        
+                        // Send touchpad down event to let server know a new touch is starting
+                        // This helps with continuous motion when lifting and placing finger
+                        NetworkClient.send("TOUCHPAD_DOWN")
 
                         if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
@@ -300,10 +304,16 @@ class ControlView(
                             leftHeld = true
                         }
                     }
-                    MotionEvent.ACTION_MOVE,
+                    MotionEvent.ACTION_MOVE -> {
+                        handleStickOrPad(e)
+                    }
                     MotionEvent.ACTION_UP,
                     MotionEvent.ACTION_CANCEL -> {
                         handleStickOrPad(e)
+                        
+                        // Send touchpad up event to let server know touch has ended
+                        // This helps maintain state between touches
+                        NetworkClient.send("TOUCHPAD_UP")
 
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
