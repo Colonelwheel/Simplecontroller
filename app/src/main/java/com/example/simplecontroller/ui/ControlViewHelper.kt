@@ -157,6 +157,7 @@ class ControlViewHelper(
      * Send the control's payload
      */
     fun firePayload() {
+        android.util.Log.d("ControlView", "Firing payload for ${model.id}, type=${model.type}, payload=${model.payload}")
         // If the button is latched, send _HOLD version to prevent auto-release
         if (parentView is ControlView && (parentView as ControlView).isLatched) {
             // For Xbox controller buttons, use the _HOLD suffix

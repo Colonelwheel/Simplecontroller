@@ -275,6 +275,7 @@ object NetworkClient {
      * Non‑blocking, thread‑safe.
      */
     fun send(message: String) {
+        android.util.Log.d("NetworkClient", "Sending: $message")
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             scope.launch {
                 try {

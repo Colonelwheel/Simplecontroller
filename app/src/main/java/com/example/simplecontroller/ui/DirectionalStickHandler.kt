@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
@@ -55,7 +56,10 @@ class DirectionalStickHandler(
         // For move events with significant motion, also send raw position via UDP
         // This helps with smoother transitions between directional zones
         if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
-            UdpClient.sendStickPosition("DIR_${model.id}", x, y)
+            // Only send this for actual STICK type controls, not buttons
+            if (model.type == ControlType.STICK) {
+                UdpClient.sendStickPosition(model.id, x, y)
+            }
         }
 
         // Track whether we've sent commands for each direction this frame
@@ -266,12 +270,17 @@ class DirectionalStickHandler(
         sendingLeftSuperBoost = false
         sendingRightSuperBoost = false
 
-        // Also send a final zero position via UDP to ensure server knows we've stopped
-        UdpClient.sendStickPosition("DIR_${model.id}", 0f, 0f)
+        // Only send stop command for actual stick controls
+        if (model.type == ControlType.STICK) {
+            // Also send a final zero position via UDP to ensure server knows we've stopped
+            UdpClient.sendStickPosition(model.id, 0f, 0f)
+        }
     }
 
+    // Note: We're keeping this method even though it's unused
+    // It may be useful in the future or for testing
     /**
-     * Set whether to use UDP for commands (default is true)
+     * Set whether to use UDP for commands
      */
     fun setUseUdp(enabled: Boolean) {
         useUdp = enabled

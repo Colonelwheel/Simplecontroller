@@ -273,15 +273,19 @@ object UdpClient {
     fun sendStickPosition(stickName: String, x: Float, y: Float) {
         if (!isInitialized || socket == null || serverAddress == null) {
             // If not initialized, try to use NetworkClient directly
-            NetworkClient.send("STICK_${stickName}:${"%.2f".format(x)},${"%.2f".format(y)}")
+            NetworkClient.send("${stickName}:${"%.2f".format(x)},${"%.2f".format(y)}")
             return
         }
 
         scope.launch {
             try {
-                // Create message with player prefix and stick identifier
+                // Create message with player prefix and proper identifier
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                val message = "${playerPrefix}STICK_${stickName}:${"%.1f".format(x)},${"%.1f".format(y)}"
+
+                // Check if stickName already includes STICK_ prefix
+                val stickPrefix = if (stickName.startsWith("STICK_") || stickName.startsWith("DIR_")) "" else "STICK_"
+                val message = "${playerPrefix}${stickPrefix}${stickName}:${"%.1f".format(x)},${"%.1f".format(y)}"
+
                 val buffer = message.toByteArray()
 
                 // Create and send packet
@@ -295,6 +299,7 @@ object UdpClient {
             }
         }
     }
+
 
     /**
      * Close the UDP socket
