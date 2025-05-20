@@ -55,11 +55,22 @@ class ControlView(
         }
     private var leftHeld = false           // for one-finger drag or toggle
 
-    // For touchpad tracking
+    // For touchpad tracking - improved touchpad handling
     private var lastTouchX = 0f
     private var lastTouchY = 0f
+    private var touchPreviousDx = 0f  // Store previous movement for smoothing
+    private var touchPreviousDy = 0f  // Store previous movement for smoothing
     private var touchInitialized = false
-    private var touchpadSensitivity = 1.0f // Adjust this if needed
+    private var touchpadSensitivity = 1.0f
+
+    // Touchpad smoothing factors
+    private val touchSmoothingFactor = 0.5f  // 0.0 = no smoothing, 1.0 = maximum smoothing
+    private val touchMinMovement = 0.05f     // Minimum movement threshold
+    private val touchDeadzone = 0.02f        // Ignore tiny movements below this value
+
+    // Timestamp for rate limiting
+    private var lastTouchpadSendTime = 0L
+    private val touchpadSendIntervalMs = 8   // Limit send rate to reduce network spam
 
     // Handler for UI updates
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -295,10 +306,12 @@ class ControlView(
                         // Initialize touchpad tracking
                         lastTouchX = e.x
                         lastTouchY = e.y
-                        touchInitialized = false  // Mark as not initialized until first move
+                        touchPreviousDx = 0f
+                        touchPreviousDy = 0f
+                        touchInitialized = true // Set to true immediately - don't skip first move
 
-                        // Reset mouse tracking on server side - use a special command
-                        NetworkClient.send("MOUSE_RESET")
+                        // Don't use MOUSE_RESET as it causes position jumps
+                        // NetworkClient.send("MOUSE_RESET")
 
                         // Handle mouse button states
                         if (model.toggleLeftClick) {
@@ -318,39 +331,52 @@ class ControlView(
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        if (!touchInitialized) {
-                            // Skip first move to establish baseline
-                            touchInitialized = true
-                            lastTouchX = e.x
-                            lastTouchY = e.y
-                            return
-                        }
-
-                        // Calculate movement delta
-                        val dx = (e.x - lastTouchX) * model.sensitivity * touchpadSensitivity
-                        val dy = (e.y - lastTouchY) * model.sensitivity * touchpadSensitivity
-
-                        // Skip too small movements
-                        if (abs(dx) < 0.1f && abs(dy) < 0.1f) {
-                            return
-                        }
+                        // Calculate raw movement delta
+                        val dx = (e.x - lastTouchX) * model.sensitivity
+                        val dy = (e.y - lastTouchY) * model.sensitivity
 
                         // Update for next calculation
                         lastTouchX = e.x
                         lastTouchY = e.y
 
-                        // Limit values to appropriate range
-                        val cappedDx = dx.coerceIn(-1f, 1f)
-                        val cappedDy = dy.coerceIn(-1f, 1f)
+                        // Skip if movement is within the deadzone
+                        if (abs(dx) < touchDeadzone && abs(dy) < touchDeadzone) {
+                            return
+                        }
 
-                        Log.d("Touchpad", "Sending delta: dx=$cappedDx, dy=$cappedDy")
+                        // Apply smoothing to reduce jitter
+                        // Blend previous movement with current movement
+                        val smoothedDx = dx * (1 - touchSmoothingFactor) +
+                                touchPreviousDx * touchSmoothingFactor
+                        val smoothedDy = dy * (1 - touchSmoothingFactor) +
+                                touchPreviousDy * touchSmoothingFactor
 
-                        // Use UDP for better throughput
-                        UdpClient.sendTouchpadPosition(cappedDx, cappedDy)
+                        // Store for next smoothing calculation
+                        touchPreviousDx = smoothedDx
+                        touchPreviousDy = smoothedDy
+
+                        // Apply non-linear scaling for better precision
+                        // Small movements get boosted, large movements capped
+                        val scaledDx = applyTouchpadScaling(smoothedDx)
+                        val scaledDy = applyTouchpadScaling(smoothedDy)
+
+                        // Rate limit sending to avoid overwhelming the server
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastTouchpadSendTime < touchpadSendIntervalMs) {
+                            return
+                        }
+                        lastTouchpadSendTime = currentTime
+
+                        // Send via UDP for lower latency - use consistent protocol
+                        UdpClient.sendTouchpadPosition(scaledDx, scaledDy)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         // Reset tracking
-                        touchInitialized = false
+                        touchPreviousDx = 0f
+                        touchPreviousDy = 0f
+
+                        // Send a final zero movement to ensure mouse stops
+                        UdpClient.sendTouchpadPosition(0f, 0f)
 
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
@@ -362,6 +388,25 @@ class ControlView(
                 }
             }
         }
+    }
+
+    /**
+     * Apply non-linear scaling to touchpad movement for better control
+     * - Boost small movements for precision
+     * - Cap large movements to prevent jerky motion
+     */
+    private fun applyTouchpadScaling(value: Float): Float {
+        val absValue = abs(value)
+        val sign = if (value >= 0) 1f else -1f
+
+        return when {
+            // Tiny movements get precision boost
+            absValue < 0.2f -> sign * (absValue * 1.5f)
+            // Medium movements pass through mostly unchanged
+            absValue < 0.6f -> sign * absValue
+            // Large movements get slightly reduced
+            else -> sign * (0.6f + (absValue - 0.6f) * 0.8f)
+        }.coerceIn(-1f, 1f)
     }
 
     /**
