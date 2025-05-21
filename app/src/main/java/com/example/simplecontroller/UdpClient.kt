@@ -139,14 +139,21 @@ object UdpClient {
      * absolute positions to eliminate drift & bounding‑box issues.
      */
     fun sendTouchpadDelta(dx: Float, dy: Float) {
+        // ----- build the common player prefix -----
+        val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1)
+            "player1:" else "player2:"
+
+        // ----- if UDP not ready, fall back to TCP -----
         if (!isInitialized || socket == null || serverAddress == null) {
-            NetworkClient.send("DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
+            NetworkClient.send("${playerPrefix}DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
             return
         }
+
+        // ----- normal UDP path -----
         scope.launch {
             try {
-                val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                val msg = "${playerRole}DELTA}:${"%.2f".format(dx)},${"%.2f".format(dy)}".toByteArray()
+                val msgStr = "${playerPrefix}DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}"
+                val msg = msgStr.toByteArray()
                 socket?.send(DatagramPacket(msg, msg.size, serverAddress, serverPort))
             } catch (e: Exception) {
                 if (Math.random() < 0.01) Log.e(TAG, "UDP delta error: ${e.message}")
