@@ -218,6 +218,9 @@ class ControlView(
                     // Cancel any pending long press action from before
                     holdHandler.removeCallbacksAndMessages(null)
 
+                    // DEBUG ↓  — fires the moment your finger goes down
+                    Log.d("DEBUG_BTN", "DOWN  firing ${model.payload}")
+
                     // If the button is already latched, a tap should unlatch it immediately
                     if (isLatched) {
                         // We'll toggle the latch state on button down for already latched buttons
@@ -256,6 +259,9 @@ class ControlView(
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
+
+                    // DEBUG ↓  — fires when you lift your finger
+                    Log.d("DEBUG_BTN", "UP    firing ${model.payload}")
 
                     // Handle latch toggling on short tap for unlatched buttons only
                     // (We already handled unlatching on ACTION_DOWN if button was latched,
