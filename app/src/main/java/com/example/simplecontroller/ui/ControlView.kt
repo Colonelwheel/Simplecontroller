@@ -115,7 +115,7 @@ class ControlView(
     override fun onDetachedFromWindow() {
         // Release mouse button if needed for touchpad
         if (model.type == ControlType.TOUCHPAD && leftHeld) {
-            NetworkClient.send("MOUSE_LEFT_UP")
+            UdpClient.sendCommand("MOUSE_LEFT_UP")
             leftHeld = false
         }
 
@@ -320,13 +320,13 @@ class ControlView(
 
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
-                                NetworkClient.send("MOUSE_LEFT_DOWN")
+                                UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                             } else {
-                                NetworkClient.send("MOUSE_LEFT_UP")
+                                UdpClient.sendCommand("MOUSE_LEFT_UP")
                             }
                         } else if (model.holdLeftWhileTouch) {
                             // Standard hold mode
-                            NetworkClient.send("MOUSE_LEFT_DOWN")
+                            UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                             leftHeld = true
                         }
                     }
@@ -381,7 +381,7 @@ class ControlView(
                         // Only release mouse button on up/cancel if using standard hold mode
                         if (!model.toggleLeftClick &&
                             leftHeld && model.holdLeftWhileTouch) {
-                            NetworkClient.send("MOUSE_LEFT_UP")
+                            UdpClient.sendCommand("MOUSE_LEFT_UP")
                             leftHeld = false
                         }
                     }
