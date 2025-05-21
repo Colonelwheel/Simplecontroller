@@ -406,7 +406,7 @@ class ControlView(
             absValue < 0.6f -> sign * absValue
             // Large movements get slightly reduced
             else -> sign * (0.6f + (absValue - 0.6f) * 0.8f)
-        }.coerceIn(-1f, 1f)
+        }
     }
 
     /**
