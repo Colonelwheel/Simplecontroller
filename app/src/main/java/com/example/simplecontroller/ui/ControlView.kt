@@ -368,7 +368,7 @@ class ControlView(
                         lastTouchpadSendTime = currentTime
 
                         // Send via UDP for lower latency - use consistent protocol
-                        UdpClient.sendTouchpadPosition(scaledDx, scaledDy)
+                        UdpClient.sendTouchpadDelta(scaledDx, scaledDy)
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         // Reset tracking

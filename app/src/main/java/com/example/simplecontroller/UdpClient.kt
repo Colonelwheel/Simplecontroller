@@ -131,6 +131,29 @@ object UdpClient {
         }
     }
 
+    // -------------------------------------------------------------------
+    //   TOUCHPAD (NEW ‑ relative Δ packets)
+    // -------------------------------------------------------------------
+    /**
+     * Primary method used by the revamped touchpad: send *deltas* instead of
+     * absolute positions to eliminate drift & bounding‑box issues.
+     */
+    fun sendTouchpadDelta(dx: Float, dy: Float) {
+        if (!isInitialized || socket == null || serverAddress == null) {
+            NetworkClient.send("DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
+            return
+        }
+        scope.launch {
+            try {
+                val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+                val msg = "${playerRole}DELTA}:${"%.2f".format(dx)},${"%.2f".format(dy)}".toByteArray()
+                socket?.send(DatagramPacket(msg, msg.size, serverAddress, serverPort))
+            } catch (e: Exception) {
+                if (Math.random() < 0.01) Log.e(TAG, "UDP delta error: ${e.message}")
+            }
+        }
+    }
+
     /**
      * Send a directional key command with reliable delivery
      * Use this for WASD or similar directional controls
