@@ -70,59 +70,54 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     // =============== life-cycle ======================================
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Initialize ThemeManager before setting content view
+        // 0. Theme first
         ThemeManager.init(this)
 
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // 1. Grab views
         canvas = findViewById(R.id.canvas)
         connectionStatusText = findViewById(R.id.connectionStatus)
 
-        // Apply dark theme background to canvas
+        // 2. Apply theme colours
         canvas.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_background))
-
-        // Apply text color to connection status
         connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
-        // Set the saved player role
-        val savedPlayerRole =
-            networkPrefs.getString("playerRole", NetworkClient.PlayerRole.PLAYER1.name)
-        val playerRole = try {
+        // 3. Network / player-role state
+        val savedPlayerRole = networkPrefs.getString(
+            "playerRole",
+            NetworkClient.PlayerRole.PLAYER1.name
+        )
+        val playerRole = runCatching {
             NetworkClient.PlayerRole.valueOf(savedPlayerRole ?: "PLAYER1")
-        } catch (e: Exception) {
-            NetworkClient.PlayerRole.PLAYER1
-        }
+        }.getOrDefault(NetworkClient.PlayerRole.PLAYER1)
         NetworkClient.setPlayerRole(playerRole)
 
-        // Initialize helpers
+        // 4. ----------  ONE  shared controls list  ----------
+        controls = loadControls(this, layoutName)?.toMutableList() ?: mutableListOf()
+
+        // 5. Helpers that all point at *that* list
         uiBuilder = UIComponentBuilder(this, canvas)
-        layoutManager = LayoutManager(this, canvas, mutableListOf()) { control ->
-            ControlView(this, control)
-        }
-        layoutManager.setCallback(this)
+        layoutManager = LayoutManager(this, canvas, controls) { ctrl ->
+            ControlView(this, ctrl)
+        }.apply { setCallback(this@MainActivity) }
 
-        // Initialize controls AFTER layoutManager is initialized
-        controls = loadControls(this, layoutName)?.toMutableList()
-            ?: layoutManager.defaultLayout().toMutableList()
+        // If this is a first run (or the file was missing) seed it with the default template
+        if (controls.isEmpty()) controls += layoutManager.defaultLayout()
 
-        // Update layoutManager with controls
-        layoutManager.updateControls(controls)
-
-        // Create UI
+        // 6. Build the UI & observers
         setupUI()
-
-        // Setup connection status observer
         observeConnectionStatus()
 
-        // Load controls
+        // 7. Render current layout
         layoutManager.spawnControlViews()
 
-        // Load network settings
+        // 8. Misc startup
         loadNetworkSettings()
-
-        // Update player role indicator
         updatePlayerRoleIndicator()
     }
+
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
