@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -158,7 +159,13 @@ class ControlViewHelper(
      * Send the control's payload
      */
     fun firePayload() {
-        android.util.Log.d("ControlView", "Firing payload for ${model.id}, type=${model.type}, payload=${model.payload}")
+        Log.d("ControlViewHelper", "=== PAYLOAD DEBUG START ===")
+        Log.d("ControlViewHelper", "Control ID: ${model.id}")
+        Log.d("ControlViewHelper", "Control Type: ${model.type}")
+        Log.d("ControlViewHelper", "Raw Payload: '${model.payload}'")
+        Log.d("ControlViewHelper", "Is Latched: ${(parentView as? ControlView)?.isLatched ?: false}")
+        Log.d("ControlViewHelper", "Connection Status: ${NetworkClient.connectionStatus.value}")
+
         // If the button is latched, send _HOLD version to prevent auto-release
         if (parentView is ControlView && (parentView as ControlView).isLatched) {
             // For Xbox controller buttons, use the _HOLD suffix
@@ -172,74 +179,94 @@ class ControlViewHelper(
                     }
                 }
 
-            commands.forEach { sendCommand(it.trim()) }
+            Log.d("ControlViewHelper", "Latched Mode - Commands to send: $commands")
+            commands.forEach {
+                Log.d("ControlViewHelper", "Sending latched command: '$it'")
+                sendCommand(it.trim())
+            }
         } else {
             // Regular version with auto-release for normal presses
-            model.payload.split(',', ' ')
-                .filter { it.isNotBlank() }
-                .forEach { sendCommand(it.trim()) }
+            val commands = model.payload.split(',', ' ').filter { it.isNotBlank() }
+            Log.d("ControlViewHelper", "Normal Mode - Commands to send: $commands")
+            commands.forEach {
+                Log.d("ControlViewHelper", "Sending normal command: '$it'")
+                sendCommand(it.trim())
+            }
         }
+        Log.d("ControlViewHelper", "=== PAYLOAD DEBUG END ===")
     }
-    
+
     /**
      * Send a command using the appropriate protocol based on command type
      */
     private fun sendCommand(command: String) {
+        Log.d("ControlViewHelper", "sendCommand() called with: '$command'")
+
         // Check if this is a keyboard key (not an Xbox button or special command)
-        if (!command.startsWith("X360") && 
-            !command.startsWith("MOUSE_") && 
-            !command.startsWith("TOUCHPAD:") && 
-            !command.startsWith("STICK") && 
-            !command.startsWith("TRIGGER") && 
-            !command.startsWith("LT:") && 
-            !command.startsWith("RT:")) {
-            
+        val isXboxCommand = command.startsWith("X360")
+        val isMouseCommand = command.startsWith("MOUSE_")
+        val isTouchpadCommand = command.startsWith("TOUCHPAD:")
+        val isStickCommand = command.startsWith("STICK")
+        val isTriggerCommand = command.startsWith("TRIGGER") || command.startsWith("LT:") || command.startsWith("RT:")
+
+        Log.d("ControlViewHelper", "Command type analysis:")
+        Log.d("ControlViewHelper", "  - isXboxCommand: $isXboxCommand")
+        Log.d("ControlViewHelper", "  - isMouseCommand: $isMouseCommand")
+        Log.d("ControlViewHelper", "  - isTouchpadCommand: $isTouchpadCommand")
+        Log.d("ControlViewHelper", "  - isStickCommand: $isStickCommand")
+        Log.d("ControlViewHelper", "  - isTriggerCommand: $isTriggerCommand")
+
+        if (isXboxCommand) {
+            Log.d("ControlViewHelper", "Treating as Xbox command, using UdpClient.sendCommand")
+            // Xbox commands now use UdpClient for consistency with other working commands
+            UdpClient.sendCommand(command)
+        } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand && !isTriggerCommand) {
+            Log.d("ControlViewHelper", "Treating as keyboard command, using UdpClient.sendKeyCommand")
             // This looks like a keyboard key - use the KEY_DOWN protocol
-            // NOTE: When a button is latched, this will repeatedly send KEY_DOWN commands
-            // for the same key due to UdpClient's key state tracking system.
-            // This is not strictly necessary but shouldn't cause issues and helps 
-            // ensure reliable key state transmission. However, if you observe rapid
-            // repeated keypresses instead of a continuous press in some games,
-            // you may want to modify UdpClient.sendKeyCommand to avoid sending
-            // duplicate KEY_DOWN commands for keys already in the activeKeys map.
-            com.example.simplecontroller.net.UdpClient.sendKeyCommand(command, true)
-            
+            UdpClient.sendKeyCommand(command, true)
+
             // For non-latched buttons, schedule release after a short delay
             if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
                 val handler = Handler(Looper.getMainLooper())
                 handler.postDelayed({
-                    com.example.simplecontroller.net.UdpClient.sendKeyCommand(command, false)
+                    Log.d("ControlViewHelper", "Sending delayed key release for: '$command'")
+                    UdpClient.sendKeyCommand(command, false)
                 }, 100) // 100ms delay to match server auto-release
             }
         } else {
-            // For Xbox buttons and other special commands, use regular send
-            com.example.simplecontroller.net.NetworkClient.send(command)
+            Log.d("ControlViewHelper", "Treating as special command, using NetworkClient.send")
+            // For mouse, touchpad, stick, and trigger commands, use NetworkClient
+            NetworkClient.send(command)
         }
     }
 
     // Improved function to handle releasing held buttons
     fun releaseLatched() {
+        Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
         // Process all commands in the payload
         model.payload.split(',', ' ')
             .filter { it.isNotBlank() }
             .forEach { cmd ->
+                Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
                 if (cmd.startsWith("X360")) {
-                    // For Xbox buttons, send release commands
+                    // For Xbox buttons, send release commands via UdpClient
                     val releaseCmd = if (cmd.endsWith("_HOLD")) {
                         cmd.replace("_HOLD", "_RELEASE")
                     } else {
                         "${cmd}_RELEASE"
                     }
-                    NetworkClient.send(releaseCmd.trim())
-                } else if (!cmd.startsWith("MOUSE_") && 
-                    !cmd.startsWith("TOUCHPAD:") && 
-                    !cmd.startsWith("STICK") && 
-                    !cmd.startsWith("TRIGGER") && 
-                    !cmd.startsWith("LT:") && 
+                    Log.d("ControlViewHelper", "Sending Xbox release command via UdpClient: '$releaseCmd'")
+                    UdpClient.sendCommand(releaseCmd.trim())
+                } else if (!cmd.startsWith("MOUSE_") &&
+                    !cmd.startsWith("TOUCHPAD:") &&
+                    !cmd.startsWith("STICK") &&
+                    !cmd.startsWith("TRIGGER") &&
+                    !cmd.startsWith("LT:") &&
                     !cmd.startsWith("RT:")) {
-                    
+
                     // For keyboard keys, use KEY_UP protocol
-                    com.example.simplecontroller.net.UdpClient.sendKeyCommand(cmd.trim(), false)
+                    Log.d("ControlViewHelper", "Sending keyboard release command: '$cmd'")
+                    UdpClient.sendKeyCommand(cmd.trim(), false)
                 }
             }
     }
@@ -269,7 +296,7 @@ class ControlViewHelper(
 
 /**
  * Global settings for all control views.
- * 
+ *
  * This replaces the static variables in the ControlView companion object.
  */
 object GlobalSettings {
@@ -280,7 +307,7 @@ object GlobalSettings {
             // Update all controls when edit mode changes
             SwipeManager.notifyEditModeChanged(v)
         }
-    
+
     // Whether auto-center is enabled for sticks/pads
     var snapEnabled = true
         set(value) {
@@ -290,10 +317,10 @@ object GlobalSettings {
                 SwipeManager.stopAllContinuousSending()
             }
         }
-    
+
     // Whether all buttons should use hold/latch behavior
     var globalHold = false
-    
+
     // Whether all buttons should use turbo/rapid-fire
     var globalTurbo = false
         set(value) {
@@ -308,7 +335,7 @@ object GlobalSettings {
     var turboSpeed = 16L // Default 16ms (≈60 Hz)
 
 
-    
+
     // Whether swipe mode is active
     var globalSwipe = false
         set(value) {
@@ -327,10 +354,10 @@ object GlobalSettings {
 object SwipeManager {
     // Reference to swipe handler that manages actual touch handling
     private val swipeHandler = SwipeHandler()
-    
+
     // All registered control views
     private val allViews = mutableSetOf<ControlView>()
-    
+
     /**
      * Register a control view with the manager
      */
@@ -338,7 +365,7 @@ object SwipeManager {
         allViews.add(view)
         swipeHandler.registerView(view)
     }
-    
+
     /**
      * Unregister a control view
      */
@@ -346,21 +373,21 @@ object SwipeManager {
         allViews.remove(view)
         swipeHandler.unregisterView(view)
     }
-    
+
     /**
      * Process a touch event through the swipe handler
      */
     fun processTouchEvent(e: android.view.MotionEvent): Boolean {
         return swipeHandler.processTouchEvent(e)
     }
-    
+
     /**
      * Set whether swipe mode is enabled
      */
     fun setSwipeEnabled(enabled: Boolean) {
         swipeHandler.setSwipeEnabled(enabled)
     }
-    
+
     /**
      * Notify all controls that edit mode has changed
      */
@@ -374,7 +401,7 @@ object SwipeManager {
             }
         }
     }
-    
+
     /**
      * Stop all continuous sending when needed
      */
@@ -384,21 +411,21 @@ object SwipeManager {
             it.stopDirectionalCommands()
         }
     }
-    
+
     /**
      * Stop all repeating (for turbo mode)
      */
     fun stopAllRepeating() {
         allViews.forEach { it.stopRepeat() }
     }
-    
+
     /**
      * Clean up any active touch state when swipe is disabled
      */
     fun cleanupActiveTouch() {
         swipeHandler.setSwipeEnabled(false)
     }
-    
+
     /**
      * Re-center all stick controls
      * This is triggered by the Re-center button
@@ -409,7 +436,7 @@ object SwipeManager {
                 // Stop any continuous sending or directional commands
                 view.stopContinuousSending()
                 view.stopDirectionalCommands()
-                
+
                 // Send zero values to center the stick
                 if (view.model.directionalMode) {
                     // For directional sticks, we just stop any active commands
