@@ -8,7 +8,13 @@ import kotlinx.serialization.json.Json
 
 private const val TAG = "LayoutStorage"
 private const val EXT = ".json"
-private val json = Json { prettyPrint = true }
+// LayoutStorage.kt
+private val json = Json {
+    prettyPrint     = true
+    ignoreUnknownKeys = true    // ← load files created by older versions
+    encodeDefaults  = true      // ← write *all* default-valued fields
+}
+
 
 /* ---------- helpers ---------- */
 private fun fileFor(ctx: Context, name: String) =

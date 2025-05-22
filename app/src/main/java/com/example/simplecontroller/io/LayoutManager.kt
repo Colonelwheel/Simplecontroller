@@ -101,7 +101,7 @@ class LayoutManager(
         controls.add(c)
 
         // Create and add view
-        val view = controlCreator(c)
+        val view = createControlView(c)   // already sets tag = "control"
         canvas.addView(view)
 
         // Show properties dialog
