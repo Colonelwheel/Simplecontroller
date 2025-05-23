@@ -187,6 +187,7 @@ class ControlView(
         // Normal game mode
         if (GlobalSettings.globalSwipe) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                // Avoid rapid repeat unless turbo is on — handled inside playTouch now
                 playTouch(e)
                 return true
             }
@@ -227,15 +228,15 @@ class ControlView(
                     // Cancel any pending long press action from before
                     holdHandler.removeCallbacksAndMessages(null)
 
-                    // DEBUG ↓  — fires the moment your finger goes down
+                    // DEBUG ↓ — fires the moment your finger goes down
                     Log.d("DEBUG_BTN", "DOWN  firing ${model.payload}")
 
                     // If the button is already latched, a tap should unlatch it immediately
                     if (isLatched) {
-                        // We'll toggle the latch state on button down for already latched buttons
                         isLatched = false
                         isPressed = false
                         invalidate() // Redraw to show the unlatched state
+
                     } else {
                         // Button is not latched, normal behavior
                         if (GlobalSettings.globalTurbo) {
@@ -243,24 +244,23 @@ class ControlView(
                         } else {
                             // First check for global hold mode
                             if (GlobalSettings.globalHold && !model.holdToggle) {
-                                // Set latched immediately before sending payload
                                 isLatched = true
                                 isPressed = true
-                                invalidate() // Redraw to show the latched state
+                                invalidate()
                             }
 
-                            // Now fire payload (will use the updated isLatched state)
-                            uiHelper.firePayload()
+                            // Allow 1 payload fire per ACTION_DOWN even in swipe mode
+                            if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                                uiHelper.firePayload()
+                            }
 
                             // Start long press detection for hold toggle
                             if (model.holdToggle) {
                                 holdHandler.postDelayed({
-                                    // This executes after holdDurationMs
                                     isLatched = true
                                     isPressed = true
-                                    invalidate() // Redraw to show the latched state
-                                    // We need to fire payload again after latching to ensure proper state
-                                    uiHelper.firePayload()
+                                    invalidate()
+                                    uiHelper.firePayload() // Fire again after latching
                                 }, model.holdDurationMs)
                             }
                         }

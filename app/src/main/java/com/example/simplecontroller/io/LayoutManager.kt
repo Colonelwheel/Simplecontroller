@@ -86,7 +86,7 @@ class LayoutManager(
 
         // Create control model with default payload
         val payload = when(type) {
-            ControlType.BUTTON -> "BUTTON_PRESSED"
+            ControlType.BUTTON -> "X360"
             ControlType.STICK -> "STICK"
             ControlType.TOUCHPAD -> "TOUCHPAD"
             ControlType.RECENTER -> "RECENTER"

@@ -14,6 +14,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.MainActivity
+import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient

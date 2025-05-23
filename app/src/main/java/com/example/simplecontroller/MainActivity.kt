@@ -136,6 +136,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         }
     }
 
+    fun createControlFrom(src: Control) {
+        layoutManager.createControlFrom(src)
+    }
+
+
     override fun onStart() {
         super.onStart()
 
