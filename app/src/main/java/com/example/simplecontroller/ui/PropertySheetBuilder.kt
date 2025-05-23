@@ -13,6 +13,8 @@ import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import kotlin.math.roundToInt
 import androidx.core.content.ContextCompat
+import androidx.core.view.children
+import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.R
 
 /**
@@ -655,6 +657,21 @@ class PropertySheetBuilder(
         
         // Notify that properties have been updated
         onPropertiesUpdated()
+
+        // Ensure both width and height are updated on the actual view
+        val parentView = (context as? MainActivity)
+            ?.findViewById<FrameLayout>(R.id.canvas)
+            ?.children
+            ?.filterIsInstance<ControlView>()
+            ?.find { it.model.id == model.id }
+
+        parentView?.let {
+            val lp = it.layoutParams as ViewGroup.MarginLayoutParams
+            lp.width = model.w.toInt()
+            lp.height = model.h.toInt()
+            it.layoutParams = lp
+            it.invalidate()
+        }
     }
     
     /**
