@@ -140,7 +140,8 @@ class ControlView(
                     ContextCompat.getColor(context, R.color.button_pressed_blue)
                 else
                     ContextCompat.getColor(context, R.color.button_blue)
-                c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
+                val cornerRadius = min(width, height) / 3f
+                c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
             }
             ControlType.RECENTER -> {
                 // Re-center button uses a distinctive orange color with theme colors

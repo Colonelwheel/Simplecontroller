@@ -18,6 +18,8 @@ import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
+import kotlin.math.min
+
 
 /**
  * Helper class for creating and managing ControlView UI elements and behavior.
@@ -68,29 +70,46 @@ class ControlViewHelper(
             Gravity.TOP or Gravity.CENTER_HORIZONTAL
         ) { if (GlobalSettings.editMode) confirmDelete() }
 
-        // Add to parent view
-        parentView.addView(label)
-        parentView.addView(gear)
-        parentView.addView(dup)
-        parentView.addView(del)
+
     }
 
     /**
      * Create an icon button with specified appearance and click handler
      */
-    private fun makeIcon(resId: Int, g: Int, onClick: () -> Unit) =
-        ImageButton(context).apply {
+    private fun makeIcon(resId: Int, g: Int, onClick: () -> Unit): ImageButton {
+        val minSize = 48
+        val iconSize = min(model.w.toInt(), model.h.toInt()).coerceAtLeast(minSize)
+
+        val icon = ImageButton(context).apply {
             setImageResource(resId)
             background = null
-            alpha = .8f
+            alpha = 0.8f
             setPadding(8)
-            layoutParams = FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                g
-            )
             setOnClickListener { onClick() }
+            tag = resId  // we'll use this below to offset them differently
         }
+
+        // Default layout: original gravity
+        val params = FrameLayout.LayoutParams(iconSize, iconSize, g)
+
+        if (model.w < 100f) {
+            // For narrow buttons, use START alignment and vertically stack them
+            params.gravity = Gravity.START
+            params.leftMargin = 4
+
+            // Stack them by identifying which one this is
+            when (resId) {
+                android.R.drawable.ic_menu_manage -> params.topMargin = 0
+                android.R.drawable.ic_menu_add -> params.topMargin = iconSize + 4
+                android.R.drawable.ic_menu_delete -> params.topMargin = (iconSize * 2) + 8
+            }
+        }
+
+        icon.layoutParams = params
+        return icon
+    }
+
+
 
     /**
      * Update the label text based on the model name
