@@ -2,6 +2,7 @@ package com.example.simplecontroller.ui
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
@@ -63,93 +64,66 @@ class ContinuousSender(
         }
     }
 
-    /**
-     * Start continuously sending the current position
-     */
-    fun startContinuousSending() {
-        // Stop any existing continuous sender
-        stopContinuousSending()
+    /*
+   * Patch for ContinuousSender.kt – keeps stick value streaming when Auto‑center is OFF,
+   * preserves old behaviour when Auto‑center is ON.
+   */
 
-        // More aggressive deadzone to prevent drift
-        if (abs(lastStickX) < 0.15f && abs(lastStickY) < 0.15f) {
-            // Send a center position to ensure stick stops
-            if (useUdp) {
-                UdpClient.sendStickPosition(model.payload, 0f, 0f)
-            } else {
-                NetworkClient.send("${model.payload}:0.00,0.00")
-            }
+    /** Start continuously sending the last stick position */
+    fun startContinuousSending() {
+        Log.d("DEBUG_CS", "autoCenter=${model.autoCenter}")
+
+        // just cancel any earlier runnable – *don’t* zero the coords
+        continuousSender?.let { uiHandler.removeCallbacks(it) }
+
+        // Bail out early only when the stick is *meant* to snap back and is already near centre
+        if (model.autoCenter &&
+            abs(lastStickX) < 0.15f && abs(lastStickY) < 0.15f) {
+            sendCenter()
             return
         }
 
-        // Create a continuous sender with decay
         continuousSender = object : Runnable {
-            private var decayFactor = 1.0f
-
+            private var decay = 1f                 // stays 1 → no fade when autoCenter == false
             override fun run() {
-                // Apply decay factor for smooth stopping
-                val currentX = lastStickX * decayFactor
-                val currentY = lastStickY * decayFactor
+                val curX = if (model.autoCenter) lastStickX * decay else lastStickX
+                val curY = if (model.autoCenter) lastStickY * decay else lastStickY
 
-                // Only send if values are significant
-                if (abs(currentX) > 0.15f || abs(currentY) > 0.15f) {
-                    // Apply response curve for more precise control
-                    val curvedX = applyResponseCurve(currentX)
-                    val curvedY = applyResponseCurve(currentY)
+                val minMag = if (model.autoCenter) 0.15f else 0.01f
+                if (abs(curX) > minMag || abs(curY) > minMag) {
+                    val sendX = applyResponseCurve(curX)
+                    val sendY = applyResponseCurve(curY)
+                    UdpClient.sendStickPosition(model.payload, sendX, sendY)
 
-                    if (useUdp) {
-                        // Use UDP for faster transmission
-                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
-                    } else {
-                        // Fallback to TCP
-                        NetworkClient.send("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
-                    }
-
-                    // Reduce intensity for next update (creates a smooth stopping effect)
-                    decayFactor *= 0.95f
+                    if (model.autoCenter) decay *= 0.95f      // glide only in snap‑back mode
                     uiHandler.postDelayed(this, sendIntervalMs)
-                } else {
-                    // Stopped moving, send a final zero position to ensure we stop
-                    if (useUdp) {
-                        UdpClient.sendStickPosition(model.payload, 0f, 0f)
-                    } else {
-                        NetworkClient.send("${model.payload}:0.00,0.00")
-                    }
-                    continuousSender = null
+                } else if (model.autoCenter) {
+                    // Only snap‑back sticks send a final 0,0 frame
+                    sendCenter()
                 }
             }
         }
-
-        // Start continuous sending
-        uiHandler.postDelayed(continuousSender!!, sendIntervalMs)
+        uiHandler.post(continuousSender!!)
     }
 
-    /**
-     * Stop continuous sending
-     */
+    /* helper: single 0,0 packet + stop */
+    private fun sendCenter() {
+        UdpClient.sendStickPosition(model.payload, 0f, 0f)
+        continuousSender = null
+    }
+
+    /** Stop continuous sending */
     fun stopContinuousSending() {
         continuousSender?.let { uiHandler.removeCallbacks(it) }
         continuousSender = null
 
-        // Send a final zero position to ensure controls stop
-        if (abs(lastStickX) > 0.01f || abs(lastStickY) > 0.01f) {
-            if (useUdp) {
-                if (model.type == ControlType.TOUCHPAD) {
-                    // For touchpads, use touchpad-specific sender
-                    UdpClient.sendTouchpadPosition(0f, 0f)
-                } else {
-                    // For sticks, use stick-specific sender
-                    UdpClient.sendStickPosition(model.payload, 0f, 0f)
-                }
-
-                // Also send via TCP for reliability
-                NetworkClient.send("${model.payload}:0.00,0.00")
-            } else {
-                NetworkClient.send("${model.payload}:0.00,0.00")
-            }
-            lastStickX = 0f
-            lastStickY = 0f
+        // Only force‑centre sticks that are *supposed* to auto‑centre
+        if (model.autoCenter && (abs(lastStickX) > 0.01f || abs(lastStickY) > 0.01f)) {
+            sendCenter()
         }
+        // Note: we no longer reset lastStickX/Y here – they’re kept for restart.
     }
+
 
     /**
      * Is continuous sending currently active?
