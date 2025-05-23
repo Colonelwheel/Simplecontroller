@@ -19,6 +19,9 @@ import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
+import android.view.GestureDetector
+import android.view.GestureDetector.SimpleOnGestureListener
+
 
 /**
  * ControlView is the primary UI component for interactive controls.
@@ -107,7 +110,6 @@ class ControlView(
         SwipeManager.registerControl(this)
 
         // Initial UI updates
-        updateOverlay()
         uiHelper.updateLabel()
     }
 
@@ -168,24 +170,30 @@ class ControlView(
         }
     }
 
-    /* ───────── touch handling ────────── */
+    private val gestureDetector = GestureDetector(context, object : SimpleOnGestureListener() {
+        override fun onLongPress(e: MotionEvent) {
+            if (GlobalSettings.editMode) {
+                showProps()
+            }
+        }
+    })
+
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (GlobalSettings.editMode) {
-            return editDrag(e)
-        } else {
-            // If global swipe is active, let the SwipeManager handle this
-            if (GlobalSettings.globalSwipe) {
-                // Still handle direct touches on this view
-                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
-                    playTouch(e)
-                    return true
-                }
-                // But delegate swipe handling to SwipeManager
-                return false
-            } else {
+            gestureDetector.onTouchEvent(e)  // ✅ long-press to show props
+            return editDrag(e)               // ✅ still allows drag
+        }
+
+        // Normal game mode
+        if (GlobalSettings.globalSwipe) {
+            if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                 playTouch(e)
                 return true
             }
+            return false
+        } else {
+            playTouch(e)
+            return true
         }
     }
 
@@ -494,13 +502,6 @@ class ControlView(
      */
     fun stopRepeat() {
         uiHelper.stopRepeat()
-    }
-
-    /**
-     * Update overlay visibility
-     */
-    fun updateOverlay() {
-        uiHelper.updateOverlay()
     }
 
     /**

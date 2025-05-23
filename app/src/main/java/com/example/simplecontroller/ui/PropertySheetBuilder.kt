@@ -62,6 +62,39 @@ class PropertySheetBuilder(
         // Build all UI components
         val components = buildUIComponents(container)
 
+        // Add a horizontal row of buttons for Delete and Duplicate
+        val buttonRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+        }
+
+        // Duplicate button
+        val btnDuplicate = Button(context).apply {
+            text = "Duplicate"
+            setTextColor(ContextCompat.getColor(context, R.color.primary_blue))
+            setOnClickListener {
+                val copy = model.copy(
+                    id = "${model.id}_copy_${System.currentTimeMillis()}",
+                    x = model.x + 40f,
+                    y = model.y + 40f
+                )
+                (context as? MainActivity)?.createControlFrom(copy)
+            }
+        }
+
+        // Delete button
+        val btnDelete = Button(context).apply {
+            text = "Delete"
+            setTextColor(ContextCompat.getColor(context, android.R.color.holo_red_light))
+            setOnClickListener {
+                (context as? MainActivity)?.removeControl(model)
+            }
+        }
+
+        buttonRow.addView(btnDuplicate)
+        buttonRow.addView(btnDelete)
+        container.addView(buttonRow)
+
         // Create and show the dialog
         val alertDialog = AlertDialog.Builder(context)
             .setTitle("Properties")

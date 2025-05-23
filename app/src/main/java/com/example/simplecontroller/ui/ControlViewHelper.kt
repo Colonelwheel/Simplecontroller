@@ -49,67 +49,12 @@ class ControlViewHelper(
         gravity = Gravity.CENTER
     }
 
-    private val gear: ImageButton
-    private val dup: ImageButton
-    private val del: ImageButton
-
     init {
         // Initialize UI elements
-        gear = makeIcon(
-            android.R.drawable.ic_menu_manage,
-            Gravity.TOP or Gravity.END
-        ) { showProperties() }
-
-        dup = makeIcon(
-            android.R.drawable.ic_menu_add,
-            Gravity.TOP or Gravity.START
-        ) { if (GlobalSettings.editMode) duplicateSelf() }
-
-        del = makeIcon(
-            android.R.drawable.ic_menu_delete,
-            Gravity.TOP or Gravity.CENTER_HORIZONTAL
-        ) { if (GlobalSettings.editMode) confirmDelete() }
+        parentView.addView(label)
 
 
     }
-
-    /**
-     * Create an icon button with specified appearance and click handler
-     */
-    private fun makeIcon(resId: Int, g: Int, onClick: () -> Unit): ImageButton {
-        val minSize = 48
-        val iconSize = min(model.w.toInt(), model.h.toInt()).coerceAtLeast(minSize)
-
-        val icon = ImageButton(context).apply {
-            setImageResource(resId)
-            background = null
-            alpha = 0.8f
-            setPadding(8)
-            setOnClickListener { onClick() }
-            tag = resId  // we'll use this below to offset them differently
-        }
-
-        // Default layout: original gravity
-        val params = FrameLayout.LayoutParams(iconSize, iconSize, g)
-
-        if (model.w < 100f) {
-            // For narrow buttons, use START alignment and vertically stack them
-            params.gravity = Gravity.START
-            params.leftMargin = 4
-
-            // Stack them by identifying which one this is
-            when (resId) {
-                android.R.drawable.ic_menu_manage -> params.topMargin = 0
-                android.R.drawable.ic_menu_add -> params.topMargin = iconSize + 4
-                android.R.drawable.ic_menu_delete -> params.topMargin = (iconSize * 2) + 8
-            }
-        }
-
-        icon.layoutParams = params
-        return icon
-    }
-
-
 
     /**
      * Update the label text based on the model name
@@ -117,16 +62,6 @@ class ControlViewHelper(
     fun updateLabel() {
         label.text = model.name
         label.visibility = if (model.name.isNotEmpty()) View.VISIBLE else View.GONE
-    }
-
-    /**
-     * Update overlay visibility based on edit mode
-     */
-    fun updateOverlay() {
-        val vis = if (GlobalSettings.editMode) View.VISIBLE else View.GONE
-        gear.visibility = vis
-        dup.visibility = vis
-        del.visibility = vis
     }
 
     /**
@@ -413,7 +348,6 @@ object SwipeManager {
     fun notifyEditModeChanged(editMode: Boolean) {
         swipeHandler.setEditMode(editMode)
         allViews.forEach {
-            it.updateOverlay()
             if (editMode) {
                 it.stopContinuousSending()
                 it.stopDirectionalCommands()

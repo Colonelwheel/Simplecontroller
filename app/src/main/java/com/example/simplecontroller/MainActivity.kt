@@ -554,17 +554,18 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     /**
-     * Create a control from a model (used for duplication)
-     */
-    fun createControlFrom(src: Control) {
-        layoutManager.createControlFrom(src)
-    }
-
-    /**
      * Remove a control from the layout
      */
     fun removeControl(c: Control) {
-        layoutManager.removeControl(c)
+        controls.remove(c)
+
+        val viewToRemove = canvas.children.firstOrNull {
+            it is ControlView && it.model.id == c.id
+        }
+
+        if (viewToRemove != null) {
+            canvas.removeView(viewToRemove)
+        }
     }
 
     // === LayoutManager.LayoutCallback implementation ===
