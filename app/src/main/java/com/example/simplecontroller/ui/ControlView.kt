@@ -283,7 +283,7 @@ class ControlView(
                     if (!isLatched &&
                         !model.payload.contains("RT:1.0P", ignoreCase = true) &&
                         !model.payload.contains("LT:1.0P", ignoreCase = true)) {
-                        uiHelper.releaseLatched()
+                        uiHelper.releaseLatched()  // ✅ Only release if NOT latched and not pulse-based
                     }
 
                     // DEBUG ↓  — fires when you lift your finger

@@ -37,6 +37,10 @@ class ControlViewHelper(
     private val onDeleteRequested: (Control) -> Unit
 ) {
     private var pulseRepeater: Runnable? = null
+    var pulseAlreadyFired = false
+    private var isPulseLoopActive = false
+
+
     // UI Handler for callbacks
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -163,6 +167,7 @@ class ControlViewHelper(
 
         // ───── Pulse support: LT:1.0P0.3 or RT:1.0P0.6 ─────
         val pulseMatch = Regex("""(LT|RT):([01](?:\.\d+)?)[Pp]([0-9.]+)""").matchEntire(command)
+        Log.d("DEBUG_PULSE", "LOOP CHECK → latched=${(parentView as? ControlView)?.isLatched}, allowed=$allowPulseLoop, alreadyFired=$pulseAlreadyFired, active=$isPulseLoopActive")
         if (pulseMatch != null) {
             Log.d("DEBUG_PULSE", "Pulse match detected. isLatched=${(parentView as? ControlView)?.isLatched}")
 
@@ -180,7 +185,12 @@ class ControlViewHelper(
             pulseRepeater?.let { handler.removeCallbacks(it) }
 
             // 🔁 If latched, keep repeating
-            if ((parentView as? ControlView)?.isLatched == true && allowPulseLoop) {
+            if ((parentView as? ControlView)?.isLatched == true &&
+                allowPulseLoop && !isPulseLoopActive && !pulseAlreadyFired) {
+
+                pulseAlreadyFired = true   // ✅ SET IMMEDIATELY before posting the loop
+                isPulseLoopActive = true   // ✅ Guard from further restarts
+
                 pulseRepeater = object : Runnable {
                     override fun run() {
                         Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
@@ -194,6 +204,8 @@ class ControlViewHelper(
                     }
                 }
                 handler.post(pulseRepeater!!)
+
+
             } else {
                 // 🔂 Not latched → send once
                 Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
@@ -255,13 +267,17 @@ class ControlViewHelper(
         Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
 
+        // Cancel any repeating pulse trigger
         pulseRepeater?.let {
             Handler(Looper.getMainLooper()).removeCallbacks(it)
             pulseRepeater = null
             Log.d("DEBUG_PULSE", "pulseRepeater CANCELLED")
         }
 
-        allowPulseLoop = false  // ✅ block it from restarting after unlatch
+        // 🔒 Absolute state reset
+        isPulseLoopActive = false
+        allowPulseLoop = false
+
 
         // Process all commands in the payload
         model.payload.split(',', ' ')
