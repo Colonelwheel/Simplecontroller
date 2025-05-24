@@ -162,7 +162,8 @@ class ControlViewHelper(
         val isMouseCommand = command.startsWith("MOUSE_")
         val isTouchpadCommand = command.startsWith("TOUCHPAD:")
         val isStickCommand = command.startsWith("STICK")
-        val isTriggerCommand = command.startsWith("TRIGGER") || command.startsWith("LT:") || command.startsWith("RT:")
+        val isTriggerCommand = command.startsWith("LT:") || command.startsWith("RT:")
+
 
         Log.d("ControlViewHelper", "Command type analysis:")
         Log.d("ControlViewHelper", "  - isXboxCommand: $isXboxCommand")
@@ -173,29 +174,39 @@ class ControlViewHelper(
 
         if (isXboxCommand) {
             Log.d("ControlViewHelper", "Treating as Xbox command, using UdpClient.sendCommand")
-            // Xbox commands now use UdpClient for consistency with other working commands
             UdpClient.sendCommand(command)
-        } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand && !isTriggerCommand) {
+
+        } else if (isTriggerCommand) {
+            Log.d("ControlViewHelper", "Sending analog trigger command via UdpClient: $command")
+            UdpClient.sendCommand(command)
+
+            if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
+                val releaseCmd = if (command.startsWith("LT:")) "LT:0.0" else "RT:0.0"
+                Handler(Looper.getMainLooper()).postDelayed({
+                    Log.d("ControlViewHelper", "Auto-releasing analog trigger with: $releaseCmd")
+                    UdpClient.sendCommand(releaseCmd)
+                }, 100)
+            }
+
+        } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand) {
             Log.d("ControlViewHelper", "Treating as keyboard command, using UdpClient.sendKeyCommand")
-            // This looks like a keyboard key - use the KEY_DOWN protocol
             UdpClient.sendKeyCommand(command, true)
 
-            // For non-latched buttons, schedule release after a short delay
             if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
-                val handler = Handler(Looper.getMainLooper())
-                handler.postDelayed({
+                Handler(Looper.getMainLooper()).postDelayed({
                     Log.d("ControlViewHelper", "Sending delayed key release for: '$command'")
                     UdpClient.sendKeyCommand(command, false)
-                }, 100) // 100ms delay to match server auto-release
+                }, 100)
             }
+
         } else {
-            Log.d("ControlViewHelper", "Treating as special command, using NetworkClient.send")
-            // For mouse, touchpad, stick, and trigger commands, use NetworkClient
-            NetworkClient.send(command)
+            Log.d("ControlViewHelper", "Treating as special command, using UdpClient.sendCommand")
+            UdpClient.sendCommand(command)
         }
     }
 
-    // Improved function to handle releasing held buttons
+
+        // Improved function to handle releasing held buttons
     fun releaseLatched() {
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
         // Process all commands in the payload
