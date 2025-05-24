@@ -372,36 +372,35 @@ class ControlView(
                         lastTouchX = e.x
                         lastTouchY = e.y
 
-                        // Skip if movement is within the deadzone
-                        if (abs(dx) < touchDeadzone && abs(dy) < touchDeadzone) {
-                            return
-                        }
+                        // Skip if movement is within the dead-zone
+                        if (abs(dx) < touchDeadzone && abs(dy) < touchDeadzone) return
 
-                        // Apply smoothing to reduce jitter
-                        // Blend previous movement with current movement
+                        // ───── smoothing ───────────────────────────────
                         val smoothedDx = dx * (1 - touchSmoothingFactor) +
                                 touchPreviousDx * touchSmoothingFactor
                         val smoothedDy = dy * (1 - touchSmoothingFactor) +
                                 touchPreviousDy * touchSmoothingFactor
-
-                        // Store for next smoothing calculation
                         touchPreviousDx = smoothedDx
                         touchPreviousDy = smoothedDy
 
-                        // Apply non-linear scaling for better precision
-                        // Small movements get boosted, large movements capped
+                        // ───── non-linear scaling ──────────────────────
                         val scaledDx = applyTouchpadScaling(smoothedDx)
                         val scaledDy = applyTouchpadScaling(smoothedDy)
 
-                        // Rate limit sending to avoid overwhelming the server
-                        val currentTime = System.currentTimeMillis()
-                        if (currentTime - lastTouchpadSendTime < touchpadSendIntervalMs) {
-                            return
-                        }
-                        lastTouchpadSendTime = currentTime
+                        // ───── rate-limit traffic ──────────────────────
+                        val now = System.currentTimeMillis()
+                        if (now - lastTouchpadSendTime < touchpadSendIntervalMs) return
+                        lastTouchpadSendTime = now
 
-                        // Send via UDP for lower latency - use consistent protocol
-                        UdpClient.sendTouchpadDelta(scaledDx, scaledDy)
+                        // ───── send to server ──────────────────────────
+                        if (GlobalSettings.scrollMode) {
+                            // Scroll mode ON → use vertical delta only
+                            // (flip sign here if you want “natural” scrolling)
+                            UdpClient.sendScroll(-scaledDy)
+                        } else {
+                            // Normal touch-pad cursor movement
+                            UdpClient.sendTouchpadDelta(scaledDx, scaledDy)
+                        }
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                         // Reset tracking

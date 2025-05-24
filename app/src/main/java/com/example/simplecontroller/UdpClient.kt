@@ -100,6 +100,19 @@ object UdpClient {
         }
     }
 
+    fun sendScroll(deltaY: Float) {
+        if (!isInitialized || socket == null || serverAddress == null) {
+            NetworkClient.send("SCROLL:${"%.2f".format(deltaY)}")
+            return
+        }
+
+        scope.launch {
+            val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+            val msgStr = "${prefix}SCROLL:${"%.2f".format(deltaY)}"
+            socket?.send(DatagramPacket(msgStr.toByteArray(), msgStr.length, serverAddress, serverPort))
+        }
+    }
+
     /**
      * Send a command via UDP
      */

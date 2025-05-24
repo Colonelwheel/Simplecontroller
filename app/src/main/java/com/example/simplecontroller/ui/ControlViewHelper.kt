@@ -11,6 +11,7 @@ import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.MainActivity
@@ -165,6 +166,17 @@ class ControlViewHelper(
      */
     private fun sendCommand(command: String) {
         Log.d("ControlViewHelper", "sendCommand() called with: '$command'")
+
+        // ───────────────── Scroll-mode toggle ─────────────────
+        if (command == "SCROLL_MODE_TOGGLE") {
+            GlobalSettings.scrollMode = !GlobalSettings.scrollMode
+            Toast.makeText(
+                context,
+                if (GlobalSettings.scrollMode) "Scroll mode ON" else "Scroll mode OFF",
+                Toast.LENGTH_SHORT
+            ).show()
+            return                                 // do not forward toggle to PC
+        }
 
         // ───── Pulse support: LT:1.0P0.3 or RT:1.0P0.6 ─────
         val pulseMatch = Regex("""(LT|RT):([01](?:\.\d+)?)[Pp]([0-9.]+)""").matchEntire(command)
@@ -365,6 +377,8 @@ object GlobalSettings {
 
     // Whether all buttons should use hold/latch behavior
     var globalHold = false
+
+    var scrollMode = false        // ← false = normal mouse, true = scroll
 
     // Whether all buttons should use turbo/rapid-fire
     var globalTurbo = false
