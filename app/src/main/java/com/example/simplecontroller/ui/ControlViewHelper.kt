@@ -39,7 +39,8 @@ class ControlViewHelper(
     private var pulseRepeater: Runnable? = null
     var pulseAlreadyFired = false
     private var isPulseLoopActive = false
-
+    // Handler specifically for pulse feature to ensure we're using the same instance
+    private val pulseHandler = Handler(Looper.getMainLooper())
 
     // UI Handler for callbacks
     private val uiHandler = Handler(Looper.getMainLooper())
@@ -179,10 +180,9 @@ class ControlViewHelper(
             val upCmd = "$trigger:0.0"
 
             val delayMs = (holdTime * 1000).toLong()
-            val handler = Handler(Looper.getMainLooper())
-
-            // Stop any previous repeater
-            pulseRepeater?.let { handler.removeCallbacks(it) }
+            
+            // Stop any previous repeater using our dedicated handler
+            pulseRepeater?.let { pulseHandler.removeCallbacks(it) }
 
             // 🔁 If latched, keep repeating
             if ((parentView as? ControlView)?.isLatched == true &&
@@ -195,22 +195,22 @@ class ControlViewHelper(
                     override fun run() {
                         Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
                         UdpClient.sendCommand(downCmd)
-                        handler.postDelayed({
+                        pulseHandler.postDelayed({
                             UdpClient.sendCommand(upCmd)
                             Log.d("ControlViewHelper", "Pulse (latched) released: $upCmd")
                         }, delayMs / 2)
 
-                        handler.postDelayed(this, delayMs)
+                        pulseHandler.postDelayed(this, delayMs)
                     }
                 }
-                handler.post(pulseRepeater!!)
+                pulseHandler.post(pulseRepeater!!)
 
 
             } else {
                 // 🔂 Not latched → send once
                 Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
                 UdpClient.sendCommand(downCmd)
-                handler.postDelayed({
+                pulseHandler.postDelayed({
                     UdpClient.sendCommand(upCmd)
                     Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
                 }, delayMs)
@@ -267,16 +267,20 @@ class ControlViewHelper(
         Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
 
-        // Cancel any repeating pulse trigger
+        // Cancel any repeating pulse trigger using the same handler that created it
         pulseRepeater?.let {
-            Handler(Looper.getMainLooper()).removeCallbacks(it)
+            pulseHandler.removeCallbacks(it)
             pulseRepeater = null
             Log.d("DEBUG_PULSE", "pulseRepeater CANCELLED")
         }
 
-        // 🔒 Absolute state reset
+        // 🔒 Absolute state reset - ensure all pulse-related state is completely reset
         isPulseLoopActive = false
         allowPulseLoop = false
+        pulseAlreadyFired = false
+        
+        // Cancel any pending pulse tasks to be absolutely sure
+        pulseHandler.removeCallbacksAndMessages(null)
 
 
         // Process all commands in the payload

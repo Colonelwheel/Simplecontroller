@@ -56,7 +56,10 @@ class ControlView(
 
             // If we're turning off latched mode, release any held buttons
             if (oldValue && !value) {
+                Log.d("DEBUG_PULSE", "isLatched setter: unlatching and calling releaseLatched()")
                 uiHelper.releaseLatched()
+                // Double-check that pulse state is reset
+                uiHelper.allowPulseLoop = false
             }
         }
     private var leftHeld = false           // for one-finger drag or toggle
