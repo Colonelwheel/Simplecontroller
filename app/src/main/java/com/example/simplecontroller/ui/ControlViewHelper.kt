@@ -36,6 +36,7 @@ class ControlViewHelper(
     private val parentView: ControlView,
     private val onDeleteRequested: (Control) -> Unit
 ) {
+    private var pulseRepeater: Runnable? = null
     // UI Handler for callbacks
     private val uiHandler = Handler(Looper.getMainLooper())
 
@@ -167,19 +168,40 @@ class ControlViewHelper(
             val downCmd = "$trigger:$pressVal"
             val upCmd = "$trigger:0.0"
 
-            Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
+            val delayMs = (holdTime * 1000).toLong()
+            val handler = Handler(Looper.getMainLooper())
 
-            UdpClient.sendCommand(downCmd)
+            // Stop any previous repeater
+            pulseRepeater?.let { handler.removeCallbacks(it) }
 
-            Handler(Looper.getMainLooper()).postDelayed({
-                UdpClient.sendCommand(upCmd)
-                Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
-            }, (holdTime * 1000).toLong())
+            // 🔁 If latched, keep repeating
+            if ((parentView as? ControlView)?.isLatched == true) {
+                pulseRepeater = object : Runnable {
+                    override fun run() {
+                        Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
+                        UdpClient.sendCommand(downCmd)
+                        handler.postDelayed({
+                            UdpClient.sendCommand(upCmd)
+                            Log.d("ControlViewHelper", "Pulse (latched) released: $upCmd")
+                        }, delayMs / 2)
 
-            return // stop here — don’t send again below
+                        handler.postDelayed(this, delayMs)
+                    }
+                }
+                handler.post(pulseRepeater!!)
+            } else {
+                // 🔂 Not latched → send once
+                Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
+                UdpClient.sendCommand(downCmd)
+                handler.postDelayed({
+                    UdpClient.sendCommand(upCmd)
+                    Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
+                }, delayMs)
+            }
+
+            return // skip rest of sendCommand
         }
-
-        // ──────────────────────────────────────────────
+// ──────────────────────────────────────────────
 
         val isXboxCommand = command.startsWith("X360")
         val isMouseCommand = command.startsWith("MOUSE_")
@@ -226,6 +248,13 @@ class ControlViewHelper(
     // Improved function to handle releasing held buttons
     fun releaseLatched() {
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
+
+        // Cancel any repeating pulse trigger
+        pulseRepeater?.let {
+            Handler(Looper.getMainLooper()).removeCallbacks(it)
+            pulseRepeater = null
+            Log.d("ControlViewHelper", "Cancelled pulse repeater on release")
+        }
 
         // Process all commands in the payload
         model.payload.split(',', ' ')
