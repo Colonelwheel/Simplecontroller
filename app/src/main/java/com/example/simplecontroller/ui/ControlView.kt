@@ -40,6 +40,9 @@ class ControlView(
     /*hold*/
     private val holdHandler = Handler(Looper.getMainLooper())
 
+    private var wasJustUnlatched = false
+
+
     /* ───────── member variables ────────── */
     // For dragging in edit mode
     private var dX = 0f
@@ -225,6 +228,7 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    wasJustUnlatched = false  // reset at the top of ACTION_DOWN
                     // Cancel any pending long press action from before
                     holdHandler.removeCallbacksAndMessages(null)
 
@@ -235,53 +239,56 @@ class ControlView(
                     if (isLatched) {
                         isLatched = false
                         isPressed = false
-                        invalidate() // Redraw to show the unlatched state
+                        wasJustUnlatched = true  // ✅ track that we just unlatched
+                        uiHelper.releaseLatched()
+                        invalidate()
+                        return
+                    }
 
+                    // Normal press path (not latched)
+                    isPressed = true  // ✅ This tracks "I'm still pressing"
+                    if (GlobalSettings.globalTurbo) {
+                        uiHelper.startRepeat()
                     } else {
-                        // Button is not latched, normal behavior
-                        if (GlobalSettings.globalTurbo) {
-                            uiHelper.startRepeat()
-                        } else {
-                            // First check for global hold mode
-                            if (GlobalSettings.globalHold && !model.holdToggle) {
-                                isLatched = true
-                                isPressed = true
-                                invalidate()
-                            }
+                        // Handle global hold mode (instant latch)
+                        if (GlobalSettings.globalHold && !model.holdToggle) {
+                            isLatched = true
+                            invalidate()
+                        }
 
-                            // Allow 1 payload fire per ACTION_DOWN even in swipe mode
-                            if (e.actionMasked == MotionEvent.ACTION_DOWN) {
-                                uiHelper.firePayload()
-                            }
+                        // ✅ Fire payload (once) — only if not latched and not holding to latch
+                        if (!model.holdToggle && !isLatched) {
+                            uiHelper.firePayload()
+                        }
 
-                            // Start long press detection for hold toggle
-                            if (model.holdToggle) {
-                                holdHandler.postDelayed({
+                        // Long press → enable toggle latch and refire payload
+                        if (model.holdToggle) {
+                            uiHelper.firePayload() // Fire immediately even if holding
+                            holdHandler.postDelayed({
+                                if (isPressed && !wasJustUnlatched) {
                                     isLatched = true
-                                    isPressed = true
                                     invalidate()
                                     uiHelper.firePayload() // Fire again after latching
-                                }, model.holdDurationMs)
-                            }
+                                }
+                            }, model.holdDurationMs)
                         }
                     }
                 }
+
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
+                    isPressed = false  // ✅ Cancel any pending delayed latch
+
                     if (!isLatched &&
                         !model.payload.contains("RT:1.0P", ignoreCase = true) &&
                         !model.payload.contains("LT:1.0P", ignoreCase = true)) {
                         uiHelper.releaseLatched()
                     }
 
-
-
                     // DEBUG ↓  — fires when you lift your finger
                     Log.d("DEBUG_BTN", "UP    firing ${model.payload}")
 
                     // Handle latch toggling on short tap for unlatched buttons only
-                    // (We already handled unlatching on ACTION_DOWN if button was latched,
-                    // and we handled global hold mode on ACTION_DOWN as well)
                     if (!isLatched && model.holdToggle) {
                         // Cancel pending hold toggle if finger is lifted before holdDurationMs
                         holdHandler.removeCallbacksAndMessages(null)

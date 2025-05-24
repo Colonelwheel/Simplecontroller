@@ -115,6 +115,7 @@ class ControlViewHelper(
      * Send the control's payload
      */
     fun firePayload() {
+        Log.d("DEBUG_PULSE", "firePayload() called, isLatched=${(parentView as? ControlView)?.isLatched}, payload='${model.payload}'")
         Log.d("ControlViewHelper", "=== PAYLOAD DEBUG START ===")
         Log.d("ControlViewHelper", "Control ID: ${model.id}")
         Log.d("ControlViewHelper", "Control Type: ${model.type}")
@@ -161,6 +162,8 @@ class ControlViewHelper(
         // ───── Pulse support: LT:1.0P0.3 or RT:1.0P0.6 ─────
         val pulseMatch = Regex("""(LT|RT):([01](?:\.\d+)?)[Pp]([0-9.]+)""").matchEntire(command)
         if (pulseMatch != null) {
+            Log.d("DEBUG_PULSE", "Pulse match detected. isLatched=${(parentView as? ControlView)?.isLatched}")
+
             val trigger = pulseMatch.groupValues[1] // LT or RT
             val pressVal = pulseMatch.groupValues[2] // e.g. 1.0
             val holdTime = pulseMatch.groupValues[3].toFloatOrNull() ?: 0.2f // fallback to 0.2s
@@ -247,13 +250,14 @@ class ControlViewHelper(
 
     // Improved function to handle releasing held buttons
     fun releaseLatched() {
+        Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
 
         // Cancel any repeating pulse trigger
         pulseRepeater?.let {
             Handler(Looper.getMainLooper()).removeCallbacks(it)
             pulseRepeater = null
-            Log.d("ControlViewHelper", "Cancelled pulse repeater on release")
+            Log.d("DEBUG_PULSE", "pulseRepeater CANCELLED")
         }
 
         // Process all commands in the payload
