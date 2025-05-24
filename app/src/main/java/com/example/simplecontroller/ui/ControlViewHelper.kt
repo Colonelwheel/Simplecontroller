@@ -157,13 +157,35 @@ class ControlViewHelper(
     private fun sendCommand(command: String) {
         Log.d("ControlViewHelper", "sendCommand() called with: '$command'")
 
-        // Check if this is a keyboard key (not an Xbox button or special command)
+        // ───── Pulse support: LT:1.0P0.3 or RT:1.0P0.6 ─────
+        val pulseMatch = Regex("""(LT|RT):([01](?:\.\d+)?)[Pp]([0-9.]+)""").matchEntire(command)
+        if (pulseMatch != null) {
+            val trigger = pulseMatch.groupValues[1] // LT or RT
+            val pressVal = pulseMatch.groupValues[2] // e.g. 1.0
+            val holdTime = pulseMatch.groupValues[3].toFloatOrNull() ?: 0.2f // fallback to 0.2s
+
+            val downCmd = "$trigger:$pressVal"
+            val upCmd = "$trigger:0.0"
+
+            Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
+
+            UdpClient.sendCommand(downCmd)
+
+            Handler(Looper.getMainLooper()).postDelayed({
+                UdpClient.sendCommand(upCmd)
+                Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
+            }, (holdTime * 1000).toLong())
+
+            return // stop here — don’t send again below
+        }
+
+        // ──────────────────────────────────────────────
+
         val isXboxCommand = command.startsWith("X360")
         val isMouseCommand = command.startsWith("MOUSE_")
         val isTouchpadCommand = command.startsWith("TOUCHPAD:")
         val isStickCommand = command.startsWith("STICK")
         val isTriggerCommand = command.startsWith("LT:") || command.startsWith("RT:")
-
 
         Log.d("ControlViewHelper", "Command type analysis:")
         Log.d("ControlViewHelper", "  - isXboxCommand: $isXboxCommand")
@@ -180,16 +202,11 @@ class ControlViewHelper(
             Log.d("ControlViewHelper", "Sending analog trigger command via UdpClient: $command")
             UdpClient.sendCommand(command)
 
-            if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
-                val releaseCmd = if (command.startsWith("LT:")) "LT:0.0" else "RT:0.0"
-                Handler(Looper.getMainLooper()).postDelayed({
-                    Log.d("ControlViewHelper", "Auto-releasing analog trigger with: $releaseCmd")
-                    UdpClient.sendCommand(releaseCmd)
-                }, 100)
-            }
-
         } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand) {
-            Log.d("ControlViewHelper", "Treating as keyboard command, using UdpClient.sendKeyCommand")
+            Log.d(
+                "ControlViewHelper",
+                "Treating as keyboard command, using UdpClient.sendKeyCommand"
+            )
             UdpClient.sendKeyCommand(command, true)
 
             if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
@@ -206,14 +223,16 @@ class ControlViewHelper(
     }
 
 
-        // Improved function to handle releasing held buttons
+    // Improved function to handle releasing held buttons
     fun releaseLatched() {
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
+
         // Process all commands in the payload
         model.payload.split(',', ' ')
             .filter { it.isNotBlank() }
             .forEach { cmd ->
                 Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
+
                 if (cmd.startsWith("X360")) {
                     // For Xbox buttons, send release commands via UdpClient
                     val releaseCmd = if (cmd.endsWith("_HOLD")) {
@@ -223,13 +242,17 @@ class ControlViewHelper(
                     }
                     Log.d("ControlViewHelper", "Sending Xbox release command via UdpClient: '$releaseCmd'")
                     UdpClient.sendCommand(releaseCmd.trim())
+
+                } else if (cmd.startsWith("LT:") || cmd.startsWith("RT:")) {
+                    // Analog trigger release
+                    val releaseCmd = if (cmd.startsWith("LT:")) "LT:0.0" else "RT:0.0"
+                    Log.d("ControlViewHelper", "Sending analog trigger release: $releaseCmd")
+                    UdpClient.sendCommand(releaseCmd)
+
                 } else if (!cmd.startsWith("MOUSE_") &&
                     !cmd.startsWith("TOUCHPAD:") &&
                     !cmd.startsWith("STICK") &&
-                    !cmd.startsWith("TRIGGER") &&
-                    !cmd.startsWith("LT:") &&
-                    !cmd.startsWith("RT:")) {
-
+                    !cmd.startsWith("TRIGGER")) {
                     // For keyboard keys, use KEY_UP protocol
                     Log.d("ControlViewHelper", "Sending keyboard release command: '$cmd'")
                     UdpClient.sendKeyCommand(cmd.trim(), false)

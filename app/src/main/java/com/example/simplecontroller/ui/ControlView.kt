@@ -268,6 +268,13 @@ class ControlView(
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
+                    if (!isLatched &&
+                        !model.payload.contains("RT:1.0P", ignoreCase = true) &&
+                        !model.payload.contains("LT:1.0P", ignoreCase = true)) {
+                        uiHelper.releaseLatched()
+                    }
+
+
 
                     // DEBUG ↓  — fires when you lift your finger
                     Log.d("DEBUG_BTN", "UP    firing ${model.payload}")
