@@ -40,6 +40,8 @@ class ControlViewHelper(
     // UI Handler for callbacks
     private val uiHandler = Handler(Looper.getMainLooper())
 
+    var allowPulseLoop = true
+
     // For turbo/repeat functionality
     private var repeater: Runnable? = null
 
@@ -178,7 +180,7 @@ class ControlViewHelper(
             pulseRepeater?.let { handler.removeCallbacks(it) }
 
             // 🔁 If latched, keep repeating
-            if ((parentView as? ControlView)?.isLatched == true) {
+            if ((parentView as? ControlView)?.isLatched == true && allowPulseLoop) {
                 pulseRepeater = object : Runnable {
                     override fun run() {
                         Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
@@ -253,12 +255,13 @@ class ControlViewHelper(
         Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
 
-        // Cancel any repeating pulse trigger
         pulseRepeater?.let {
             Handler(Looper.getMainLooper()).removeCallbacks(it)
             pulseRepeater = null
             Log.d("DEBUG_PULSE", "pulseRepeater CANCELLED")
         }
+
+        allowPulseLoop = false  // ✅ block it from restarting after unlatch
 
         // Process all commands in the payload
         model.payload.split(',', ' ')
@@ -331,7 +334,7 @@ object GlobalSettings {
         }
 
     // Whether auto-center is enabled for sticks/pads
-    var snapEnabled = true
+    var snapEnabled = false
         set(value) {
             field = value
             if (value) {

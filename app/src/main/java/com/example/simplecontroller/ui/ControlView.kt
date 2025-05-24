@@ -228,7 +228,8 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    wasJustUnlatched = false  // reset at the top of ACTION_DOWN
+                    wasJustUnlatched = false
+                    uiHelper.allowPulseLoop = true  // ✅ enable pulsing for this press
                     // Cancel any pending long press action from before
                     holdHandler.removeCallbacksAndMessages(null)
 
