@@ -303,13 +303,26 @@ class DirectionalStickHandler(
                         val command = if (sendingUpSuperBoost) model.upSuperBoostCommand
                         else if (sendingUpBoost) model.upBoostCommand
                         else model.upCommand
+                        val intensity = abs(lastStickY)
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach {
-                                if (useUdp) {
-                                    UdpClient.sendCommand(it.trim())
+                            .forEach { cmd ->
+                                val trimmedCmd = cmd.trim()
+                                // Skip sending if the command is just a number (likely a mistake)
+                                if (trimmedCmd.matches(Regex("^\\d+\\.?\\d*$"))) {
+                                    return@forEach
+                                }
+                                
+                                val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                                    "$trimmedCmd:${"%.2f".format(intensity)}"
                                 } else {
-                                    NetworkClient.send(it.trim())
+                                    trimmedCmd
+                                }
+                                
+                                if (useUdp) {
+                                    UdpClient.sendCommand(finalCmd)
+                                } else {
+                                    NetworkClient.send(finalCmd)
                                 }
                             }
                     }
@@ -318,13 +331,26 @@ class DirectionalStickHandler(
                         val command = if (sendingDownSuperBoost) model.downSuperBoostCommand
                         else if (sendingDownBoost) model.downBoostCommand
                         else model.downCommand
+                        val intensity = abs(lastStickY)
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach {
-                                if (useUdp) {
-                                    UdpClient.sendCommand(it.trim())
+                            .forEach { cmd ->
+                                val trimmedCmd = cmd.trim()
+                                // Skip sending if the command is just a number (likely a mistake)
+                                if (trimmedCmd.matches(Regex("^\\d+\\.?\\d*$"))) {
+                                    return@forEach
+                                }
+                                
+                                val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                                    "$trimmedCmd:${"%.2f".format(intensity)}"
                                 } else {
-                                    NetworkClient.send(it.trim())
+                                    trimmedCmd
+                                }
+                                
+                                if (useUdp) {
+                                    UdpClient.sendCommand(finalCmd)
+                                } else {
+                                    NetworkClient.send(finalCmd)
                                 }
                             }
                     }
@@ -333,13 +359,26 @@ class DirectionalStickHandler(
                         val command = if (sendingLeftSuperBoost) model.leftSuperBoostCommand
                         else if (sendingLeftBoost) model.leftBoostCommand
                         else model.leftCommand
+                        val intensity = abs(lastStickX)
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach {
-                                if (useUdp) {
-                                    UdpClient.sendCommand(it.trim())
+                            .forEach { cmd ->
+                                val trimmedCmd = cmd.trim()
+                                // Skip sending if the command is just a number (likely a mistake)
+                                if (trimmedCmd.matches(Regex("^\\d+\\.?\\d*$"))) {
+                                    return@forEach
+                                }
+                                
+                                val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                                    "$trimmedCmd:${"%.2f".format(intensity)}"
                                 } else {
-                                    NetworkClient.send(it.trim())
+                                    trimmedCmd
+                                }
+                                
+                                if (useUdp) {
+                                    UdpClient.sendCommand(finalCmd)
+                                } else {
+                                    NetworkClient.send(finalCmd)
                                 }
                             }
                     }
@@ -348,13 +387,26 @@ class DirectionalStickHandler(
                         val command = if (sendingRightSuperBoost) model.rightSuperBoostCommand
                         else if (sendingRightBoost) model.rightBoostCommand
                         else model.rightCommand
+                        val intensity = abs(lastStickX)
                         command.split(',', ' ')
                             .filter { it.isNotBlank() }
-                            .forEach {
-                                if (useUdp) {
-                                    UdpClient.sendCommand(it.trim())
+                            .forEach { cmd ->
+                                val trimmedCmd = cmd.trim()
+                                // Skip sending if the command is just a number (likely a mistake)
+                                if (trimmedCmd.matches(Regex("^\\d+\\.?\\d*$"))) {
+                                    return@forEach
+                                }
+                                
+                                val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                                    "$trimmedCmd:${"%.2f".format(intensity)}"
                                 } else {
-                                    NetworkClient.send(it.trim())
+                                    trimmedCmd
+                                }
+                                
+                                if (useUdp) {
+                                    UdpClient.sendCommand(finalCmd)
+                                } else {
+                                    NetworkClient.send(finalCmd)
                                 }
                             }
                     }
