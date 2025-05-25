@@ -64,6 +64,9 @@ data class Control(
     var leftSuperBoostCommand: String = "A,SHIFT,SPACE",
     var rightSuperBoostCommand: String = "D,SHIFT,SPACE",
 
+    /* Stick+ mode - hybrid analog + directional */
+    var stickPlusMode: Boolean = false,
+
     /* Analog threshold mode (for non-directional sticks) */
     /**
      * When **true**, the stick will send additional commands when

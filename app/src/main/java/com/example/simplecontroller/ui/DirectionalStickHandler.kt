@@ -43,6 +43,101 @@ class DirectionalStickHandler(
     private val continuousSendIntervalMs = 50L // 50ms ~20Hz (was 100ms)
 
     /**
+     * Handle Stick+ mode - sends directional button commands alongside analog stick output
+     * @param x Normalized X position (-1 to 1)
+     * @param y Normalized Y position (-1 to 1)
+     * @param action The motion event action (e.g., ACTION_UP, ACTION_MOVE)
+     */
+    fun handleStickPlusMode(x: Float, y: Float, action: Int) {
+        // Store last position
+        lastStickX = x
+        lastStickY = y
+
+        // Track whether we've sent commands for each direction this frame
+        var sentUp = false
+        var sentDown = false
+        var sentLeft = false
+        var sentRight = false
+
+        // Determine the main direction(s) to send
+        val absX = abs(x)
+        val absY = abs(y)
+
+        // Check if we're close enough to center to not send any commands
+        if (absX < 0.1f && absY < 0.1f) {
+            // Near center - stop all continuous commands if this is a MOVE event
+            if (action == MotionEvent.ACTION_MOVE) {
+                stopDirectionalCommands()
+            }
+            return
+        }
+
+        // Helper function to send a command and update tracking
+        fun sendCommand(command: String, update: () -> Unit) {
+            command.split(',', ' ')
+                .filter { it.isNotBlank() }
+                .forEach {
+                    if (useUdp) {
+                        // Try UDP first for lower latency
+                        try {
+                            UdpClient.sendCommand(it.trim())
+                        } catch (e: Exception) {
+                            // Fall back to TCP if UDP fails
+                            NetworkClient.send(it.trim())
+                        }
+                    } else {
+                        NetworkClient.send(it.trim())
+                    }
+                }
+            update()
+        }
+
+        // Send commands based on direction and intensity
+        if (y < -0.1f) { // Up direction
+            if (absY > model.superBoostThreshold) {
+                sendCommand(model.upSuperBoostCommand) { sentUp = true }
+            } else if (absY > model.boostThreshold) {
+                sendCommand(model.upBoostCommand) { sentUp = true }
+            } else {
+                sendCommand(model.upCommand) { sentUp = true }
+            }
+        }
+
+        if (y > 0.1f) { // Down direction
+            if (absY > model.superBoostThreshold) {
+                sendCommand(model.downSuperBoostCommand) { sentDown = true }
+            } else if (absY > model.boostThreshold) {
+                sendCommand(model.downBoostCommand) { sentDown = true }
+            } else {
+                sendCommand(model.downCommand) { sentDown = true }
+            }
+        }
+
+        if (x < -0.1f) { // Left direction
+            if (absX > model.superBoostThreshold) {
+                sendCommand(model.leftSuperBoostCommand) { sentLeft = true }
+            } else if (absX > model.boostThreshold) {
+                sendCommand(model.leftBoostCommand) { sentLeft = true }
+            } else {
+                sendCommand(model.leftCommand) { sentLeft = true }
+            }
+        }
+
+        if (x > 0.1f) { // Right direction
+            if (absX > model.superBoostThreshold) {
+                sendCommand(model.rightSuperBoostCommand) { sentRight = true }
+            } else if (absX > model.boostThreshold) {
+                sendCommand(model.rightBoostCommand) { sentRight = true }
+            } else {
+                sendCommand(model.rightCommand) { sentRight = true }
+            }
+        }
+
+        // For Stick+ mode, we don't do continuous sending of directional commands
+        // since the analog output is already continuous. Only send commands on actual input.
+    }
+
+    /**
      * Handle directional stick inputs, sending button commands instead of analog values
      * @param x Normalized X position (-1 to 1)
      * @param y Normalized Y position (-1 to 1)

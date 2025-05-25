@@ -42,6 +42,7 @@ class PropertySheetBuilder(
         val holdLeftWhileTouch: CheckBox,
         val toggleLeftClick: CheckBox,
         val directionalMode: CheckBox,
+        val stickPlusMode: CheckBox,
         val directionalContainer: LinearLayout,
         val payloadField: AutoCompleteTextView
     )
@@ -264,19 +265,34 @@ class PropertySheetBuilder(
             isStick
         )
         
+        // Stick+ mode (for sticks)
+        val stickPlusMode = addCheckBox(
+            container,
+            "Stick+ mode (Analog + directional buttons)",
+            model.stickPlusMode,
+            isStick
+        )
+        
         // Container for directional settings
         val directionalContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            visibility = if (isStick && model.directionalMode) View.VISIBLE else View.GONE
+            visibility = if (isStick && (model.directionalMode || model.stickPlusMode)) View.VISIBLE else View.GONE
             tag = "directional_container"
         }
         container.addView(directionalContainer)
         
         // Setup visibility toggle for directional container
         if (isStick) {
-            directionalMode.setOnCheckedChangeListener { _, isChecked ->
-                directionalContainer.visibility = if (isChecked) View.VISIBLE else View.GONE
+            val updateDirectionalVisibility = {
+                val shouldShow = directionalMode.isChecked || stickPlusMode.isChecked
+                directionalContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
             }
+            
+            directionalMode.setOnCheckedChangeListener { _, _ -> updateDirectionalVisibility() }
+            stickPlusMode.setOnCheckedChangeListener { _, _ -> updateDirectionalVisibility() }
+            
+            // Make directional mode and stick+ mode mutually exclusive
+            setupMutuallyExclusiveOptions(directionalMode, stickPlusMode)
             
             // Add directional command fields
             addDirectionalCommandsUI(directionalContainer)
@@ -288,7 +304,7 @@ class PropertySheetBuilder(
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivitySeek,
             holdToggle, autoCenter, holdDurationField, swipeActivate,
-            holdLeftWhileTouch, toggleLeftClick, directionalMode,
+            holdLeftWhileTouch, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField
         )
     }
@@ -682,8 +698,9 @@ class PropertySheetBuilder(
         // Stick-specific directional mode properties
         if (model.type == ControlType.STICK) {
             model.directionalMode = components.directionalMode.isChecked
+            model.stickPlusMode = components.stickPlusMode.isChecked
             
-            if (model.directionalMode) {
+            if (model.directionalMode || model.stickPlusMode) {
                 updateDirectionalModeSettings(components.directionalContainer)
             }
         }
@@ -711,27 +728,27 @@ class PropertySheetBuilder(
      * Update directional mode settings from UI components
      */
     private fun updateDirectionalModeSettings(directionalContainer: LinearLayout) {
-        // Basic directional commands
-        readTextFieldIntoModel(directionalContainer, "up_command") { model.upCommand = it.takeIfNotBlank() ?: "W" }
-        readTextFieldIntoModel(directionalContainer, "down_command") { model.downCommand = it.takeIfNotBlank() ?: "S" }
-        readTextFieldIntoModel(directionalContainer, "left_command") { model.leftCommand = it.takeIfNotBlank() ?: "A" }
-        readTextFieldIntoModel(directionalContainer, "right_command") { model.rightCommand = it.takeIfNotBlank() ?: "D" }
+        // Basic directional commands - allow empty strings
+        readTextFieldIntoModel(directionalContainer, "up_command") { model.upCommand = it }
+        readTextFieldIntoModel(directionalContainer, "down_command") { model.downCommand = it }
+        readTextFieldIntoModel(directionalContainer, "left_command") { model.leftCommand = it }
+        readTextFieldIntoModel(directionalContainer, "right_command") { model.rightCommand = it }
         
         // Thresholds
         readThresholdValue(directionalContainer, "boost_threshold", "boost_threshold_edit") { model.boostThreshold = it }
         readThresholdValue(directionalContainer, "super_boost_threshold", "super_boost_threshold_edit") { model.superBoostThreshold = it }
         
-        // Boost commands
-        readTextFieldIntoModel(directionalContainer, "up_boost") { model.upBoostCommand = it.takeIfNotBlank() ?: "W,SHIFT" }
-        readTextFieldIntoModel(directionalContainer, "down_boost") { model.downBoostCommand = it.takeIfNotBlank() ?: "S,CTRL" }
-        readTextFieldIntoModel(directionalContainer, "left_boost") { model.leftBoostCommand = it.takeIfNotBlank() ?: "A,SHIFT" }
-        readTextFieldIntoModel(directionalContainer, "right_boost") { model.rightBoostCommand = it.takeIfNotBlank() ?: "D,SHIFT" }
+        // Boost commands - allow empty strings
+        readTextFieldIntoModel(directionalContainer, "up_boost") { model.upBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "down_boost") { model.downBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "left_boost") { model.leftBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "right_boost") { model.rightBoostCommand = it }
         
-        // Super boost commands
-        readTextFieldIntoModel(directionalContainer, "up_super_boost") { model.upSuperBoostCommand = it.takeIfNotBlank() ?: "W,SHIFT,SPACE" }
-        readTextFieldIntoModel(directionalContainer, "down_super_boost") { model.downSuperBoostCommand = it.takeIfNotBlank() ?: "S,CTRL,SPACE" }
-        readTextFieldIntoModel(directionalContainer, "left_super_boost") { model.leftSuperBoostCommand = it.takeIfNotBlank() ?: "A,SHIFT,SPACE" }
-        readTextFieldIntoModel(directionalContainer, "right_super_boost") { model.rightSuperBoostCommand = it.takeIfNotBlank() ?: "D,SHIFT,SPACE" }
+        // Super boost commands - allow empty strings
+        readTextFieldIntoModel(directionalContainer, "up_super_boost") { model.upSuperBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "down_super_boost") { model.downSuperBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "left_super_boost") { model.leftSuperBoostCommand = it }
+        readTextFieldIntoModel(directionalContainer, "right_super_boost") { model.rightSuperBoostCommand = it }
     }
     
     /**

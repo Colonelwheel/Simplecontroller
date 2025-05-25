@@ -466,11 +466,25 @@ class ControlView(
         // Store last position for continuous sending if needed
         continuousSender.setLastPosition(sx, sy)
 
-        // Handle directional mode for sticks
-        if (model.type == ControlType.STICK && model.directionalMode) {
-            directionalHandler.handleDirectionalStick(sx, sy, e.actionMasked)
+        // Handle different stick modes
+        if (model.type == ControlType.STICK) {
+            when {
+                model.directionalMode -> {
+                    // Pure directional mode - only send button commands
+                    directionalHandler.handleDirectionalStick(sx, sy, e.actionMasked)
+                }
+                model.stickPlusMode -> {
+                    // Stick+ mode - send both analog and directional commands
+                    NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+                    directionalHandler.handleStickPlusMode(sx, sy, e.actionMasked)
+                }
+                else -> {
+                    // Regular analog stick mode
+                    NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+                }
+            }
         } else {
-            // Regular analog stick/pad mode
+            // Touchpad mode
             NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
         }
 
