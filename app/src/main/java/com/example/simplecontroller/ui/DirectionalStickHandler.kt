@@ -106,41 +106,41 @@ class DirectionalStickHandler(
         // Send commands based on direction and intensity
         if (y < -0.1f) { // Up direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.upSuperBoostCommand) { sentUp = true }
+                sendCommand(model.upSuperBoostCommand, absY) { sentUp = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.upBoostCommand) { sentUp = true }
+                sendCommand(model.upBoostCommand, absY) { sentUp = true }
             } else {
-                sendCommand(model.upCommand) { sentUp = true }
+                sendCommand(model.upCommand, absY) { sentUp = true }
             }
         }
 
         if (y > 0.1f) { // Down direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.downSuperBoostCommand) { sentDown = true }
+                sendCommand(model.downSuperBoostCommand, absY) { sentDown = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.downBoostCommand) { sentDown = true }
+                sendCommand(model.downBoostCommand, absY) { sentDown = true }
             } else {
-                sendCommand(model.downCommand) { sentDown = true }
+                sendCommand(model.downCommand, absY) { sentDown = true }
             }
         }
 
         if (x < -0.1f) { // Left direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.leftSuperBoostCommand) { sentLeft = true }
+                sendCommand(model.leftSuperBoostCommand, absX) { sentLeft = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.leftBoostCommand) { sentLeft = true }
+                sendCommand(model.leftBoostCommand, absX) { sentLeft = true }
             } else {
-                sendCommand(model.leftCommand) { sentLeft = true }
+                sendCommand(model.leftCommand, absX) { sentLeft = true }
             }
         }
 
         if (x > 0.1f) { // Right direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.rightSuperBoostCommand) { sentRight = true }
+                sendCommand(model.rightSuperBoostCommand, absX) { sentRight = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.rightBoostCommand) { sentRight = true }
+                sendCommand(model.rightBoostCommand, absX) { sentRight = true }
             } else {
-                sendCommand(model.rightCommand) { sentRight = true }
+                sendCommand(model.rightCommand, absX) { sentRight = true }
             }
         }
 
@@ -221,41 +221,41 @@ class DirectionalStickHandler(
         // Send commands based on direction and intensity
         if (y < -0.1f) { // Up direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.upSuperBoostCommand) { sentUp = true }
+                sendCommand(model.upSuperBoostCommand, absY) { sentUp = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.upBoostCommand) { sentUp = true }
+                sendCommand(model.upBoostCommand, absY) { sentUp = true }
             } else {
-                sendCommand(model.upCommand) { sentUp = true }
+                sendCommand(model.upCommand, absY) { sentUp = true }
             }
         }
 
         if (y > 0.1f) { // Down direction
             if (absY > model.superBoostThreshold) {
-                sendCommand(model.downSuperBoostCommand) { sentDown = true }
+                sendCommand(model.downSuperBoostCommand, absY) { sentDown = true }
             } else if (absY > model.boostThreshold) {
-                sendCommand(model.downBoostCommand) { sentDown = true }
+                sendCommand(model.downBoostCommand, absY) { sentDown = true }
             } else {
-                sendCommand(model.downCommand) { sentDown = true }
+                sendCommand(model.downCommand, absY) { sentDown = true }
             }
         }
 
         if (x < -0.1f) { // Left direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.leftSuperBoostCommand) { sentLeft = true }
+                sendCommand(model.leftSuperBoostCommand, absX) { sentLeft = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.leftBoostCommand) { sentLeft = true }
+                sendCommand(model.leftBoostCommand, absX) { sentLeft = true }
             } else {
-                sendCommand(model.leftCommand) { sentLeft = true }
+                sendCommand(model.leftCommand, absX) { sentLeft = true }
             }
         }
 
         if (x > 0.1f) { // Right direction
             if (absX > model.superBoostThreshold) {
-                sendCommand(model.rightSuperBoostCommand) { sentRight = true }
+                sendCommand(model.rightSuperBoostCommand, absX) { sentRight = true }
             } else if (absX > model.boostThreshold) {
-                sendCommand(model.rightBoostCommand) { sentRight = true }
+                sendCommand(model.rightBoostCommand, absX) { sentRight = true }
             } else {
-                sendCommand(model.rightCommand) { sentRight = true }
+                sendCommand(model.rightCommand, absX) { sentRight = true }
             }
         }
 
