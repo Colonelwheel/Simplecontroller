@@ -474,6 +474,11 @@ class ControlView(
             NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
         }
 
+        // If auto-center triggered, ensure continuous sending is stopped
+        if (shouldSnap) {
+            stopContinuousSending()
+        }
+
         // If this is an UP or CANCEL event and we shouldn't snap,
         // start continuous sending of the last position ONLY FOR STICKS in ANALOG mode
         if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
