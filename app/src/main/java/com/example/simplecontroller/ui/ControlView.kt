@@ -456,9 +456,10 @@ class ControlView(
         val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f) * model.sensitivity
 
         // Only snap if snapEnabled is true AND the control's autoCenter is true AND it's an UP/CANCEL event
-        val shouldSnap = GlobalSettings.snapEnabled && model.autoCenter &&
-                (e.actionMasked == MotionEvent.ACTION_UP ||
-                        e.actionMasked == MotionEvent.ACTION_CANCEL)
+        val isLift = e.actionMasked == MotionEvent.ACTION_UP ||
+                e.actionMasked == MotionEvent.ACTION_CANCEL ||
+                e.actionMasked == MotionEvent.ACTION_POINTER_UP    // ← new
+        val shouldSnap = model.autoCenter && isLift                    // ← no global flag
 
         val (sx, sy) = if (shouldSnap) 0f to 0f else nx to ny
 

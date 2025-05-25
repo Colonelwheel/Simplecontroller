@@ -118,8 +118,8 @@ class ContinuousSender(
         continuousSender = null
 
         // Only force‑centre sticks that are *supposed* to auto‑centre
-        if (model.autoCenter && (abs(lastStickX) > 0.01f || abs(lastStickY) > 0.01f)) {
-            sendCenter()
+        if (model.autoCenter) {
+            sendCenter()   // unconditional – a harmless duplicate ‘0,0’ is fine
         }
         // Note: we no longer reset lastStickX/Y here – they’re kept for restart.
     }
