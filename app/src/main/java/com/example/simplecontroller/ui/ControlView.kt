@@ -488,9 +488,13 @@ class ControlView(
             NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
         }
 
-        // If auto-center triggered, ensure continuous sending is stopped
+        // If auto-center triggered, ensure continuous sending is stopped and send final 0,0
         if (shouldSnap) {
             stopContinuousSending()
+            // Ensure a final 0,0 position is sent for auto-center sticks
+            if (model.type == ControlType.STICK) {
+                UdpClient.sendStickPosition(model.payload, 0f, 0f)
+            }
         }
 
         // If this is an UP or CANCEL event and we shouldn't snap,

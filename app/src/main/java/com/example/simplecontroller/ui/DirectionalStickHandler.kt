@@ -73,20 +73,31 @@ class DirectionalStickHandler(
         }
 
         // Helper function to send a command and update tracking
-        fun sendCommand(command: String, update: () -> Unit) {
+        fun sendCommand(command: String, intensity: Float, update: () -> Unit) {
             command.split(',', ' ')
                 .filter { it.isNotBlank() }
-                .forEach {
+                .forEach { cmd ->
+                    val trimmedCmd = cmd.trim()
+                    
+                    // Check if this is an analog trigger command that needs intensity
+                    val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                        // For analog triggers, append the intensity value
+                        "$trimmedCmd:${"%.2f".format(intensity)}"
+                    } else {
+                        // For regular buttons, send as-is
+                        trimmedCmd
+                    }
+                    
                     if (useUdp) {
                         // Try UDP first for lower latency
                         try {
-                            UdpClient.sendCommand(it.trim())
+                            UdpClient.sendCommand(finalCmd)
                         } catch (e: Exception) {
                             // Fall back to TCP if UDP fails
-                            NetworkClient.send(it.trim())
+                            NetworkClient.send(finalCmd)
                         }
                     } else {
-                        NetworkClient.send(it.trim())
+                        NetworkClient.send(finalCmd)
                     }
                 }
             update()
@@ -153,7 +164,7 @@ class DirectionalStickHandler(
         if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
             // Only send this for actual STICK type controls, not buttons
             if (model.type == ControlType.STICK) {
-                UdpClient.sendStickPosition(model.id, x, y)
+                UdpClient.sendStickPosition(model.payload, x, y)
             }
         }
 
@@ -177,20 +188,31 @@ class DirectionalStickHandler(
         }
 
         // Helper function to send a command and update tracking
-        fun sendCommand(command: String, update: () -> Unit) {
+        fun sendCommand(command: String, intensity: Float, update: () -> Unit) {
             command.split(',', ' ')
                 .filter { it.isNotBlank() }
-                .forEach {
+                .forEach { cmd ->
+                    val trimmedCmd = cmd.trim()
+                    
+                    // Check if this is an analog trigger command that needs intensity
+                    val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
+                        // For analog triggers, append the intensity value
+                        "$trimmedCmd:${"%.2f".format(intensity)}"
+                    } else {
+                        // For regular buttons, send as-is
+                        trimmedCmd
+                    }
+                    
                     if (useUdp) {
                         // Try UDP first for lower latency
                         try {
-                            UdpClient.sendCommand(it.trim())
+                            UdpClient.sendCommand(finalCmd)
                         } catch (e: Exception) {
                             // Fall back to TCP if UDP fails
-                            NetworkClient.send(it.trim())
+                            NetworkClient.send(finalCmd)
                         }
                     } else {
-                        NetworkClient.send(it.trim())
+                        NetworkClient.send(finalCmd)
                     }
                 }
             update()
