@@ -302,27 +302,52 @@ class ControlViewHelper(
                 Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
 
                 if (cmd.startsWith("X360")) {
-                    // For Xbox buttons, send release commands via UdpClient
+                    // ── Xbox buttons ──────────────────────────────────────────
                     val releaseCmd = if (cmd.endsWith("_HOLD")) {
                         cmd.replace("_HOLD", "_RELEASE")
                     } else {
                         "${cmd}_RELEASE"
                     }
-                    Log.d("ControlViewHelper", "Sending Xbox release command via UdpClient: '$releaseCmd'")
+                    Log.d("ControlViewHelper",
+                        "Sending Xbox release command via UdpClient: '$releaseCmd'")
                     UdpClient.sendCommand(releaseCmd.trim())
 
                 } else if (cmd.startsWith("LT:") || cmd.startsWith("RT:")) {
-                    // Analog trigger release
+                    // ── Analog triggers ───────────────────────────────────────
                     val releaseCmd = if (cmd.startsWith("LT:")) "LT:0.0" else "RT:0.0"
-                    Log.d("ControlViewHelper", "Sending analog trigger release: $releaseCmd")
+                    Log.d("ControlViewHelper",
+                        "Sending analog trigger release: $releaseCmd")
                     UdpClient.sendCommand(releaseCmd)
+
+                } else if (cmd.startsWith("MOUSE_RIGHT")) {
+                    // ── NEW: right-mouse auto-release (matches suffix style) ──
+                    val releaseCmd = when {
+                        cmd.endsWith("_HOLD") -> cmd.replace("_HOLD", "_UP")
+                        cmd.endsWith("_DOWN") -> cmd.replace("_DOWN", "_UP")
+                        else                  -> "MOUSE_RIGHT_UP"
+                    }
+                    Log.d("ControlViewHelper",
+                        "Sending right-mouse release via UdpClient: '$releaseCmd'")
+                    UdpClient.sendCommand(releaseCmd.trim())
+
+                } else if (cmd.startsWith("MOUSE_LEFT")) {
+                    // ── NEW: left-mouse auto-release (matches suffix style) ──
+                    val releaseCmd = when {
+                        cmd.endsWith("_HOLD") -> cmd.replace("_HOLD", "_UP")
+                        cmd.endsWith("_DOWN") -> cmd.replace("_DOWN", "_UP")
+                        else                  -> "MOUSE_LEFT_UP"
+                    }
+                    Log.d("ControlViewHelper",
+                        "Sending right-mouse release via UdpClient: '$releaseCmd'")
+                    UdpClient.sendCommand(releaseCmd.trim())
 
                 } else if (!cmd.startsWith("MOUSE_") &&
                     !cmd.startsWith("TOUCHPAD:") &&
                     !cmd.startsWith("STICK") &&
                     !cmd.startsWith("TRIGGER")) {
-                    // For keyboard keys, use KEY_UP protocol
-                    Log.d("ControlViewHelper", "Sending keyboard release command: '$cmd'")
+                    // ── Keyboard keys ─────────────────────────────────────────
+                    Log.d("ControlViewHelper",
+                        "Sending keyboard release command: '$cmd'")
                     UdpClient.sendKeyCommand(cmd.trim(), false)
                 }
             }
