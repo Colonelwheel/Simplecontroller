@@ -49,7 +49,10 @@ class UIComponentBuilder(
             setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.button_blue)
             setOnClickListener { view ->
-                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                view.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                )
                 onClick(view)
             }
             addViewToCanvas(this, gravity, marginH, marginV)
@@ -103,7 +106,10 @@ class UIComponentBuilder(
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
             imageTintList = ContextCompat.getColorStateList(context, R.color.dark_text_primary)
             setOnClickListener { 
-                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                it.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                )
                 onClick() 
             }
             addViewToCanvas(this, gravity, marginH, marginV)
@@ -219,7 +225,10 @@ class UIComponentBuilder(
             // Add theme-specific styling
             imageTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
             setOnClickListener {
-                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                it.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                )
                 val value = editText.text.toString()
                 if (value.isNotEmpty()) {
                     onApply(value)

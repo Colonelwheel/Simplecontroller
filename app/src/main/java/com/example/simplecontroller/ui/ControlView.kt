@@ -249,8 +249,12 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Add haptic feedback
-                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                    // Add stronger haptic feedback with logging
+                    val hapticResult = performHapticFeedback(
+                        android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                    )
+                    Log.d("HAPTIC_DEBUG", "Button press haptic feedback result: $hapticResult")
                     
                     wasJustUnlatched = false
                     uiHelper.allowPulseLoop = true  // ✅ enable pulsing for this press
@@ -294,8 +298,12 @@ class ControlView(
                             holdHandler.postDelayed({
                                 if (isPressed && !wasJustUnlatched) {
                                     isLatched = true
-                                    // Add haptic feedback when button gets latched
-                                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                                    // Add stronger haptic feedback when button gets latched
+                                    val hapticResult = performHapticFeedback(
+                                        android.view.HapticFeedbackConstants.LONG_PRESS,
+                                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                                    )
+                                    Log.d("HAPTIC_DEBUG", "Button latch haptic feedback result: $hapticResult")
                                     invalidate()
                                     uiHelper.firePayload() // Fire again after latching
                                 }
@@ -329,8 +337,12 @@ class ControlView(
             /* ----- RE-CENTER BUTTON ----- */
             ControlType.RECENTER -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Add haptic feedback
-                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                    // Add stronger haptic feedback
+                    val hapticResult = performHapticFeedback(
+                        android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                    )
+                    Log.d("HAPTIC_DEBUG", "Recenter haptic feedback result: $hapticResult")
                     
                     // Visual feedback
                     isLatched = true
@@ -383,8 +395,12 @@ class ControlView(
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
                                 UdpClient.sendCommand("MOUSE_LEFT_DOWN")
-                                // Add haptic feedback when mouse left click activates
-                                performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                                // Add stronger haptic feedback when mouse left click activates
+                                val hapticResult = performHapticFeedback(
+                                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                                )
+                                Log.d("HAPTIC_DEBUG", "Touchpad toggle click haptic feedback result: $hapticResult")
                             } else {
                                 UdpClient.sendCommand("MOUSE_LEFT_UP")
                             }
@@ -392,8 +408,12 @@ class ControlView(
                             // Standard hold mode
                             UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                             leftHeld = true
-                            // Add haptic feedback when mouse left click activates
-                            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                            // Add stronger haptic feedback when mouse left click activates
+                            val hapticResult = performHapticFeedback(
+                                android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                            )
+                            Log.d("HAPTIC_DEBUG", "Touchpad hold click haptic feedback result: $hapticResult")
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
