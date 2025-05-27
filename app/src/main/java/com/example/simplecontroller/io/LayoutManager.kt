@@ -132,31 +132,57 @@ class LayoutManager(
      * Show the load layout dialog
      */
     fun showLoadDialog() {
-        val names = listLayouts(context)
-        if (names.isEmpty()) {
-            toast("No saved layouts")
-            return
+        val savedNames = listLayouts(context)
+        
+        // Add "New Layout" option at the top
+        val displayNames = mutableListOf("New Layout")
+        displayNames.addAll(savedNames)
+
+        val dialog = AlertDialog.Builder(context)
+            .setTitle("Load layout")
+            .setItems(displayNames.toTypedArray()) { _, i ->
+                if (i == 0) {
+                    // "New Layout" option - create blank layout
+                    createNewLayout()
+                } else {
+                    // Regular saved layout
+                    val sel = savedNames[i - 1]
+                    loadControls(context, sel)?.let { loadedControls ->
+                        // Clear existing controls and views
+                        callback?.clearControlViews()
+                        controls.clear()
+
+                        // Add loaded controls
+                        controls.addAll(loadedControls)
+                        spawnControlViews()
+
+                        // Notify callback
+                        callback?.onLayoutLoaded(sel)
+                        toast("Loaded \"$sel\"")
+                    } ?: toast("Failed to load \"$sel\"")
+                }
+            }
+            .create()
+
+        // Set up long press detection on list items (skip "New Layout" option)
+        dialog.setOnShowListener {
+            val listView = dialog.listView
+            listView?.setOnItemLongClickListener { _, _, position, _ ->
+                if (position > 0) { // Skip "New Layout" option
+                    val layoutName = savedNames[position - 1]
+                    showLayoutContextMenu(layoutName) {
+                        // Refresh the dialog with updated names
+                        dialog.dismiss()
+                        showLoadDialog()
+                    }
+                    true
+                } else {
+                    false // Don't handle long press on "New Layout"
+                }
+            }
         }
 
-        AlertDialog.Builder(context)
-            .setTitle("Load layout")
-            .setItems(names.toTypedArray()) { _, i ->
-                val sel = names[i]
-                loadControls(context, sel)?.let { loadedControls ->
-                    // Clear existing controls and views
-                    callback?.clearControlViews()
-                    controls.clear()
-
-                    // Add loaded controls
-                    controls.addAll(loadedControls)
-                    spawnControlViews()
-
-                    // Notify callback
-                    callback?.onLayoutLoaded(sel)
-                    toast("Loaded \"$sel\"")
-                } ?: toast("Failed to load \"$sel\"")
-            }
-            .show()
+        dialog.show()
     }
 
     /**
@@ -189,6 +215,133 @@ class LayoutManager(
      */
     fun removeControl(c: Control) {
         controls.remove(c)
+    }
+
+    /**
+     * Create a new blank layout
+     */
+    private fun createNewLayout() {
+        // Clear existing controls and views
+        callback?.clearControlViews()
+        controls.clear()
+        
+        // Notify callback with a generic new layout name
+        callback?.onLayoutLoaded("untitled")
+        toast("New blank layout created")
+    }
+
+    /**
+     * Show context menu for layout management
+     */
+    private fun showLayoutContextMenu(layoutName: String, onComplete: () -> Unit) {
+        val options = arrayOf("Rename", "Duplicate", "Delete")
+        
+        AlertDialog.Builder(context)
+            .setTitle("Manage \"$layoutName\"")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> renameLayout(layoutName, onComplete)
+                    1 -> duplicateLayout(layoutName, onComplete)
+                    2 -> deleteLayout(layoutName, onComplete)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Rename a layout
+     */
+    private fun renameLayout(oldName: String, onComplete: () -> Unit) {
+        val input = EditText(context).apply { 
+            setText(oldName)
+            hint = "new layout name" 
+        }
+        
+        AlertDialog.Builder(context)
+            .setTitle("Rename layout")
+            .setView(input)
+            .setPositiveButton("Rename") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty() && newName != oldName) {
+                    // Load the layout data
+                    loadControls(context, oldName)?.let { layoutData ->
+                        // Save with new name
+                        saveControls(context, newName, layoutData)
+                        // Delete old file
+                        deleteLayoutFile(oldName)
+                        toast("Renamed \"$oldName\" to \"$newName\"")
+                        onComplete()
+                    } ?: toast("Failed to rename layout")
+                } else if (newName == oldName) {
+                    onComplete() // No change needed
+                } else {
+                    toast("Invalid name")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Duplicate a layout
+     */
+    private fun duplicateLayout(layoutName: String, onComplete: () -> Unit) {
+        val input = EditText(context).apply { 
+            setText("${layoutName}_copy")
+            hint = "duplicate name" 
+        }
+        
+        AlertDialog.Builder(context)
+            .setTitle("Duplicate layout")
+            .setView(input)
+            .setPositiveButton("Duplicate") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty()) {
+                    // Load the layout data
+                    loadControls(context, layoutName)?.let { layoutData ->
+                        // Save with new name
+                        saveControls(context, newName, layoutData)
+                        toast("Duplicated \"$layoutName\" as \"$newName\"")
+                        onComplete()
+                    } ?: toast("Failed to duplicate layout")
+                } else {
+                    toast("Invalid name")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Delete a layout
+     */
+    private fun deleteLayout(layoutName: String, onComplete: () -> Unit) {
+        AlertDialog.Builder(context)
+            .setTitle("Delete layout")
+            .setMessage("Are you sure you want to delete \"$layoutName\"? This cannot be undone.")
+            .setPositiveButton("Delete") { _, _ ->
+                if (deleteLayoutFile(layoutName)) {
+                    toast("Deleted \"$layoutName\"")
+                    onComplete()
+                } else {
+                    toast("Failed to delete layout")
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    /**
+     * Delete a layout file
+     */
+    private fun deleteLayoutFile(name: String): Boolean {
+        return try {
+            val file = context.getFileStreamPath("layout_${name.lowercase()}.json")
+            file.delete()
+        } catch (e: Exception) {
+            false
+        }
     }
 
     /**
