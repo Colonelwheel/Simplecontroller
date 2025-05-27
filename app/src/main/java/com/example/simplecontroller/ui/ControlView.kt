@@ -43,6 +43,9 @@ class ControlView(
 
     /*hold*/
     private val holdHandler = Handler(Looper.getMainLooper())
+    
+    /*mouse click lock delay*/
+    private val mouseClickHandler = Handler(Looper.getMainLooper())
 
     private var wasJustUnlatched = false
 
@@ -161,6 +164,9 @@ class ControlView(
         stopRepeat()
         stopContinuousSending()
         stopDirectionalCommands()
+        
+        // Cancel any pending mouse click handlers
+        mouseClickHandler.removeCallbacksAndMessages(null)
 
         // Unregister from SwipeManager
         SwipeManager.unregisterControl(this)
@@ -411,10 +417,18 @@ class ControlView(
 
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
-                                UdpClient.sendCommand("MOUSE_LEFT_DOWN")
-                                // Trigger vibration for mouse click activation
-                                triggerStrongVibration(25) // Short vibration for mouse click
+                                // Add 750ms delay before activating mouse down in click lock mode
+                                mouseClickHandler.postDelayed({
+                                    if (leftHeld) { // Check if still in locked state
+                                        UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                        // Trigger vibration when mouse actually activates
+                                        triggerStrongVibration(25) // Short vibration for mouse click
+                                        Log.d("HAPTIC_DEBUG", "Mouse click lock activated after delay")
+                                    }
+                                }, 750) // 750ms delay
                             } else {
+                                // Cancel any pending mouse down activation
+                                mouseClickHandler.removeCallbacksAndMessages(null)
                                 UdpClient.sendCommand("MOUSE_LEFT_UP")
                             }
                         } else if (model.holdLeftWhileTouch) {
