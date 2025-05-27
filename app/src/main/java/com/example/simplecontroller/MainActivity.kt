@@ -10,11 +10,14 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.io.loadControls
@@ -68,6 +71,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
+    
+    /* ---------- layout monitoring ---------- */
+    private var lastCanvasHeight = 0
+    private var isLayoutInitialized = false
 
     // =============== life-cycle ======================================
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,7 +121,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // 7. Render current layout
         layoutManager.spawnControlViews()
 
-        // 8. Misc startup
+        // 8. Setup window insets handling for split screen
+        setupWindowInsetsHandling()
+        
+        // 9. Misc startup
         loadNetworkSettings()
         updatePlayerRoleIndicator()
     }
@@ -1442,5 +1452,63 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         
         // Re-spawn all control views with current canvas dimensions
         layoutManager.spawnControlViews()
+    }
+
+    private fun setupWindowInsetsHandling() {
+        // Handle window insets for split screen mode
+        ViewCompat.setOnApplyWindowInsetsListener(canvas) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            
+            // Apply padding to ensure content is not clipped
+            view.setPadding(
+                systemBars.left,
+                systemBars.top,
+                systemBars.right,
+                systemBars.bottom + ime.bottom
+            )
+            
+            insets
+        }
+        
+        // Monitor canvas size changes
+        canvas.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                val currentHeight = canvas.height
+                
+                // Only react to significant height changes after initial layout
+                if (isLayoutInitialized && currentHeight > 0 && 
+                    kotlin.math.abs(currentHeight - lastCanvasHeight) > 50) {
+                    
+                    lastCanvasHeight = currentHeight
+                    
+                    // Delay the refresh to ensure layout is stable
+                    canvas.post {
+                        refreshLayoutForNewDimensions()
+                    }
+                } else if (!isLayoutInitialized && currentHeight > 0) {
+                    lastCanvasHeight = currentHeight
+                    isLayoutInitialized = true
+                }
+            }
+        })
+    }
+
+    private fun refreshLayoutForNewDimensions() {
+        // Scale and reposition controls to fit the new canvas dimensions
+        val canvasWidth = canvas.width.toFloat()
+        val canvasHeight = canvas.height.toFloat()
+        
+        if (canvasWidth <= 0 || canvasHeight <= 0) return
+        
+        // Adjust control positions to ensure they stay within bounds
+        controls.forEach { control ->
+            // Ensure controls don't go off the bottom or right edge
+            control.x = control.x.coerceIn(0f, (canvasWidth - control.w).coerceAtLeast(0f))
+            control.y = control.y.coerceIn(0f, (canvasHeight - control.h).coerceAtLeast(0f))
+        }
+        
+        // Refresh the layout
+        refreshLayout()
     }
 }
