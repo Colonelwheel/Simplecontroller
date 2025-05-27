@@ -1481,22 +1481,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             insets
         }
         
-        // Monitor canvas size changes
+        // Monitor canvas size changes - DISABLED to allow manual resizing
+        // User can manually adjust controls after entering split screen mode
         canvas.viewTreeObserver.addOnGlobalLayoutListener(object : ViewTreeObserver.OnGlobalLayoutListener {
             override fun onGlobalLayout() {
                 val currentHeight = canvas.height
                 
-                // Only react to significant height changes after initial layout
-                if (isLayoutInitialized && currentHeight > 0 && 
-                    kotlin.math.abs(currentHeight - lastCanvasHeight) > 50) {
-                    
-                    lastCanvasHeight = currentHeight
-                    
-                    // Delay the refresh to ensure layout is stable
-                    canvas.post {
-                        refreshLayoutForNewDimensions()
-                    }
-                } else if (!isLayoutInitialized && currentHeight > 0) {
+                // Only store initial dimensions, don't auto-resize on changes
+                if (!isLayoutInitialized && currentHeight > 0) {
                     lastCanvasHeight = currentHeight
                     originalCanvasHeight = currentHeight.toFloat()
                     originalCanvasWidth = canvas.width.toFloat()
@@ -1505,6 +1497,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     // Store original control dimensions for scaling
                     storeOriginalControlDimensions()
                 }
+                
+                // Auto-resizing disabled - user can manually adjust controls
+                // if (isLayoutInitialized && currentHeight > 0 && 
+                //     kotlin.math.abs(currentHeight - lastCanvasHeight) > 50) {
+                //     lastCanvasHeight = currentHeight
+                //     canvas.post { refreshLayoutForNewDimensions() }
+                // }
             }
         })
     }
