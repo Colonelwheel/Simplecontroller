@@ -272,6 +272,8 @@ class ControlView(
 
                     // Normal press path (not latched)
                     isPressed = true  // ✅ This tracks "I'm still pressing"
+                    invalidate() // ✅ Trigger redraw immediately for visual feedback
+                    
                     if (GlobalSettings.globalTurbo) {
                         uiHelper.startRepeat()
                     } else {
@@ -292,6 +294,8 @@ class ControlView(
                             holdHandler.postDelayed({
                                 if (isPressed && !wasJustUnlatched) {
                                     isLatched = true
+                                    // Add haptic feedback when button gets latched
+                                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                                     invalidate()
                                     uiHelper.firePayload() // Fire again after latching
                                 }
@@ -303,6 +307,7 @@ class ControlView(
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     stopRepeat()
                     isPressed = false  // ✅ Cancel any pending delayed latch
+                    invalidate() // ✅ Trigger redraw to remove pressed visual state
 
                     if (!isLatched &&
                         !model.payload.contains("RT:1.0P", ignoreCase = true) &&
@@ -378,6 +383,8 @@ class ControlView(
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
                                 UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                // Add haptic feedback when mouse left click activates
+                                performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                             } else {
                                 UdpClient.sendCommand("MOUSE_LEFT_UP")
                             }
@@ -385,6 +392,8 @@ class ControlView(
                             // Standard hold mode
                             UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                             leftHeld = true
+                            // Add haptic feedback when mouse left click activates
+                            performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
