@@ -15,7 +15,8 @@
         android:paddingVertical="6dp"
         android:layout_margin="8dp"
         android:text="Disconnected"
-        android:textColor="#FFFFFF"/>
+        android:textColor="#FFFFFF"
+        android:adjustViewBounds="true"/>
 
     <!-- Connect button (will be added programmatically) -->
 
