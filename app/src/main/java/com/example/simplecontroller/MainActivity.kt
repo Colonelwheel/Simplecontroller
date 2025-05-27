@@ -1421,71 +1421,26 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         
-        // Handle multi-window mode changes
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-            if (isInMultiWindowMode) {
-                // App is now in multi-window mode
-                adjustLayoutForMultiWindow()
-            } else {
-                // App is back to full screen
-                adjustLayoutForFullScreen()
-            }
-        }
-        
-        // Re-render the layout after configuration change
+        // Just refresh the layout without modifying control data
         canvas.post {
-            layoutManager.spawnControlViews()
+            refreshLayout()
         }
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
         super.onMultiWindowModeChanged(isInMultiWindowMode)
         
-        if (isInMultiWindowMode) {
-            adjustLayoutForMultiWindow()
-        } else {
-            adjustLayoutForFullScreen()
-        }
-        
-        // Re-render the layout
+        // Just refresh the layout without modifying control data
         canvas.post {
-            layoutManager.spawnControlViews()
+            refreshLayout()
         }
     }
 
-    private fun adjustLayoutForMultiWindow() {
-        // Adjust UI elements for split screen mode
-        // Make controls smaller and more compact
-        controls.forEach { control ->
-            // Reduce control sizes by 20% for split screen
-            control.w = (control.w * 0.8f).coerceAtLeast(80f)
-            control.h = (control.h * 0.8f).coerceAtLeast(80f)
-        }
+    private fun refreshLayout() {
+        // Clear existing views first to prevent duplicates
+        clearControlViews()
         
-        // Adjust positioning to prevent clipping
-        adjustControlPositions()
-    }
-
-    private fun adjustLayoutForFullScreen() {
-        // Restore original control sizes when back to full screen
-        controls.forEach { control ->
-            // Restore control sizes (reverse the 20% reduction)
-            control.w = (control.w / 0.8f).coerceAtMost(canvas.width * 0.3f)
-            control.h = (control.h / 0.8f).coerceAtMost(canvas.height * 0.3f)
-        }
-        
-        // Adjust positioning for full screen
-        adjustControlPositions()
-    }
-
-    private fun adjustControlPositions() {
-        val canvasWidth = canvas.width.toFloat()
-        val canvasHeight = canvas.height.toFloat()
-        
-        controls.forEach { control ->
-            // Ensure controls don't go off screen
-            control.x = control.x.coerceIn(0f, canvasWidth - control.w)
-            control.y = control.y.coerceIn(0f, canvasHeight - control.h)
-        }
+        // Re-spawn all control views with current canvas dimensions
+        layoutManager.spawnControlViews()
     }
 }
