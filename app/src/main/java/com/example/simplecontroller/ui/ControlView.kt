@@ -7,6 +7,9 @@ import android.graphics.Paint
 import android.graphics.Paint.Style
 import android.os.Handler
 import android.os.Looper
+import android.os.Vibrator
+import android.os.VibrationEffect
+import android.os.Build
 import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -92,6 +95,32 @@ class ControlView(
 
     // Paint for drawing the control
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    
+    // System vibrator for stronger haptic feedback
+    private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+
+    /**
+     * Trigger strong vibration using system Vibrator service
+     */
+    private fun triggerStrongVibration(durationMs: Long = 50) {
+        try {
+            if (vibrator.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val effect = VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE)
+                    vibrator.vibrate(effect)
+                    Log.d("HAPTIC_DEBUG", "Strong vibration triggered (API >= 26): ${durationMs}ms")
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator.vibrate(durationMs)
+                    Log.d("HAPTIC_DEBUG", "Strong vibration triggered (API < 26): ${durationMs}ms")
+                }
+            } else {
+                Log.d("HAPTIC_DEBUG", "Device has no vibrator")
+            }
+        } catch (e: Exception) {
+            Log.e("HAPTIC_DEBUG", "Vibration failed: ${e.message}")
+        }
+    }
 
     /* ───────── init ───────────── */
     init {
@@ -249,12 +278,8 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Add stronger haptic feedback with logging
-                    val hapticResult = performHapticFeedback(
-                        android.view.HapticFeedbackConstants.KEYBOARD_TAP,
-                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                    )
-                    Log.d("HAPTIC_DEBUG", "Button press haptic feedback result: $hapticResult")
+                    // Trigger strong vibration for button press
+                    triggerStrongVibration(30) // Short 30ms vibration
                     
                     wasJustUnlatched = false
                     uiHelper.allowPulseLoop = true  // ✅ enable pulsing for this press
@@ -298,12 +323,8 @@ class ControlView(
                             holdHandler.postDelayed({
                                 if (isPressed && !wasJustUnlatched) {
                                     isLatched = true
-                                    // Add stronger haptic feedback when button gets latched
-                                    val hapticResult = performHapticFeedback(
-                                        android.view.HapticFeedbackConstants.LONG_PRESS,
-                                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                                    )
-                                    Log.d("HAPTIC_DEBUG", "Button latch haptic feedback result: $hapticResult")
+                                    // Trigger longer vibration for button latch
+                                    triggerStrongVibration(80) // Longer 80ms vibration for latch
                                     invalidate()
                                     uiHelper.firePayload() // Fire again after latching
                                 }
@@ -337,12 +358,8 @@ class ControlView(
             /* ----- RE-CENTER BUTTON ----- */
             ControlType.RECENTER -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    // Add stronger haptic feedback
-                    val hapticResult = performHapticFeedback(
-                        android.view.HapticFeedbackConstants.KEYBOARD_TAP,
-                        android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                    )
-                    Log.d("HAPTIC_DEBUG", "Recenter haptic feedback result: $hapticResult")
+                    // Trigger vibration for recenter button
+                    triggerStrongVibration(40) // Medium vibration for recenter
                     
                     // Visual feedback
                     isLatched = true
@@ -395,12 +412,8 @@ class ControlView(
                             // Send the appropriate mouse command based on new state
                             if (leftHeld) {
                                 UdpClient.sendCommand("MOUSE_LEFT_DOWN")
-                                // Add stronger haptic feedback when mouse left click activates
-                                val hapticResult = performHapticFeedback(
-                                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
-                                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                                )
-                                Log.d("HAPTIC_DEBUG", "Touchpad toggle click haptic feedback result: $hapticResult")
+                                // Trigger vibration for mouse click activation
+                                triggerStrongVibration(25) // Short vibration for mouse click
                             } else {
                                 UdpClient.sendCommand("MOUSE_LEFT_UP")
                             }
@@ -408,12 +421,8 @@ class ControlView(
                             // Standard hold mode
                             UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                             leftHeld = true
-                            // Add stronger haptic feedback when mouse left click activates
-                            val hapticResult = performHapticFeedback(
-                                android.view.HapticFeedbackConstants.KEYBOARD_TAP,
-                                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
-                            )
-                            Log.d("HAPTIC_DEBUG", "Touchpad hold click haptic feedback result: $hapticResult")
+                            // Trigger vibration for mouse click activation
+                            triggerStrongVibration(25) // Short vibration for mouse click
                         }
                     }
                     MotionEvent.ACTION_MOVE -> {
