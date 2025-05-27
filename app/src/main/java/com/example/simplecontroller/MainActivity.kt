@@ -1441,19 +1441,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         
-        // Just refresh the layout without modifying control data
-        canvas.post {
-            refreshLayout()
-        }
+        // Do nothing - keep controls exactly as they are
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
         super.onMultiWindowModeChanged(isInMultiWindowMode)
         
-        // Just refresh the layout without modifying control data
-        canvas.post {
-            refreshLayout()
-        }
+        // Do nothing - keep controls exactly as they are
     }
 
     private fun refreshLayout() {
