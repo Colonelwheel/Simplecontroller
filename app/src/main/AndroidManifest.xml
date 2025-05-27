@@ -5,6 +5,8 @@
 
     <!-- Needed for sockets -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Needed for haptic feedback/vibration -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:allowBackup="true"

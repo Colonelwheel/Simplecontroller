@@ -370,13 +370,16 @@ class PropertySheetBuilder(
      * Add width and height sliders
      */
     private fun addSizeControls(container: LinearLayout): Pair<SeekBar, SeekBar> {
+        // Determine max size based on control type - touchpads can be much larger
+        val maxSize = if (model.type == ControlType.TOUCHPAD) 1200 else 600
+        
         // Width control
         val widthText = TextView(context)
         val widthSeek = addSeekBarWithLabel(
             container, 
             "Width: ${model.w.roundToInt()} px",
-            600,
-            model.w.roundToInt().coerceIn(40, 600),
+            maxSize,
+            model.w.roundToInt().coerceIn(40, maxSize),
             { "Width: $it px" },
             widthText
         )
@@ -386,8 +389,8 @@ class PropertySheetBuilder(
         val heightSeek = addSeekBarWithLabel(
             container, 
             "Height: ${model.h.roundToInt()} px",
-            600,
-            model.h.roundToInt().coerceIn(40, 600),
+            maxSize,
+            model.h.roundToInt().coerceIn(40, maxSize),
             { "Height: $it px" },
             heightText
         )
