@@ -231,6 +231,9 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // Add haptic feedback
+                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                    
                     wasJustUnlatched = false
                     uiHelper.allowPulseLoop = true  // ✅ enable pulsing for this press
                     // Cancel any pending long press action from before
@@ -303,6 +306,9 @@ class ControlView(
             /* ----- RE-CENTER BUTTON ----- */
             ControlType.RECENTER -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // Add haptic feedback
+                    performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                    
                     // Visual feedback
                     isLatched = true
                     isPressed = true

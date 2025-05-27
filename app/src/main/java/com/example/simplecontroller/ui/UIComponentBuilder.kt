@@ -48,7 +48,10 @@ class UIComponentBuilder(
             // Add theme-specific styling
             setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.button_blue)
-            setOnClickListener(onClick)
+            setOnClickListener { view ->
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                onClick(view)
+            }
             addViewToCanvas(this, gravity, marginH, marginV)
         }
     }
@@ -99,7 +102,10 @@ class UIComponentBuilder(
             // Add theme-specific styling
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
             imageTintList = ContextCompat.getColorStateList(context, R.color.dark_text_primary)
-            setOnClickListener { onClick() }
+            setOnClickListener { 
+                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
+                onClick() 
+            }
             addViewToCanvas(this, gravity, marginH, marginV)
         }
     }
@@ -213,6 +219,7 @@ class UIComponentBuilder(
             // Add theme-specific styling
             imageTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
             setOnClickListener {
+                it.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY)
                 val value = editText.text.toString()
                 if (value.isNotEmpty()) {
                     onApply(value)
