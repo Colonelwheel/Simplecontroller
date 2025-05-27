@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Paint.Style
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -143,24 +144,40 @@ class ControlView(
         super.onDraw(c)
         when (model.type) {
             ControlType.BUTTON -> {
-                // Use a brighter color if the button is latched (held) with theme colors
-                paint.color = if (isLatched)
-                    ContextCompat.getColor(context, R.color.button_pressed_blue)
-                else
-                    ContextCompat.getColor(context, R.color.button_blue)
                 val cornerRadius = min(width, height) / 3f
-                c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
+                
+                if (isLatched || isPressed) {
+                    // Solid blue when pressed or latched
+                    paint.style = Style.FILL
+                    paint.color = ContextCompat.getColor(context, R.color.button_pressed_blue)
+                    c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
+                } else {
+                    // Transparent with blue outline when not pressed
+                    paint.style = Style.STROKE
+                    paint.strokeWidth = 4f
+                    paint.color = ContextCompat.getColor(context, R.color.button_blue)
+                    c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
+                }
             }
             ControlType.RECENTER -> {
-                // Re-center button uses a distinctive orange color with theme colors
-                paint.color = if (isLatched)
-                    ContextCompat.getColor(context, R.color.recenter_pressed_orange)
-                else
-                    ContextCompat.getColor(context, R.color.recenter_orange)
-                c.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, paint)
+                val radius = min(width, height) / 2f
+                
+                if (isLatched || isPressed) {
+                    // Solid orange when pressed or latched
+                    paint.style = Style.FILL
+                    paint.color = ContextCompat.getColor(context, R.color.recenter_pressed_orange)
+                    c.drawCircle(width / 2f, height / 2f, radius, paint)
+                } else {
+                    // Transparent with orange outline when not pressed
+                    paint.style = Style.STROKE
+                    paint.strokeWidth = 4f
+                    paint.color = ContextCompat.getColor(context, R.color.recenter_orange)
+                    c.drawCircle(width / 2f, height / 2f, radius, paint)
+                }
             }
             ControlType.STICK -> {
                 // Background of the stick area with theme colors
+                paint.style = Style.FILL
                 paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
 
@@ -170,6 +187,7 @@ class ControlView(
             }
             ControlType.TOUCHPAD -> {
                 // Semi-transparent touchpad area with theme colors
+                paint.style = Style.FILL
                 paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
             }
