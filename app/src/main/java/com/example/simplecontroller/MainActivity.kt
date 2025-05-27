@@ -75,6 +75,15 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /* ---------- layout monitoring ---------- */
     private var lastCanvasHeight = 0
     private var isLayoutInitialized = false
+    private var originalCanvasHeight = 0f
+    private var originalControlDimensions = mutableMapOf<String, OriginalDimensions>()
+    
+    data class OriginalDimensions(
+        val x: Float,
+        val y: Float, 
+        val w: Float,
+        val h: Float
+    )
 
     // =============== life-cycle ======================================
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1488,7 +1497,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     }
                 } else if (!isLayoutInitialized && currentHeight > 0) {
                     lastCanvasHeight = currentHeight
+                    originalCanvasHeight = currentHeight.toFloat()
                     isLayoutInitialized = true
+                    
+                    // Store original control dimensions for scaling
+                    storeOriginalControlDimensions()
                 }
             }
         })
@@ -1499,16 +1512,44 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val canvasWidth = canvas.width.toFloat()
         val canvasHeight = canvas.height.toFloat()
         
-        if (canvasWidth <= 0 || canvasHeight <= 0) return
+        if (canvasWidth <= 0 || canvasHeight <= 0 || originalCanvasHeight <= 0) return
         
-        // Adjust control positions to ensure they stay within bounds
+        // Calculate scaling factors
+        val heightScale = canvasHeight / originalCanvasHeight
+        val widthScale = canvasWidth / canvas.width.coerceAtLeast(1).toFloat() // Use current width as baseline
+        
+        // Use the smaller scale factor to maintain aspect ratio
+        val scaleFactor = minOf(heightScale, widthScale, 1.0f) // Don't scale up, only down
+        
+        // Apply scaling to all controls
         controls.forEach { control ->
-            // Ensure controls don't go off the bottom or right edge
-            control.x = control.x.coerceIn(0f, (canvasWidth - control.w).coerceAtLeast(0f))
-            control.y = control.y.coerceIn(0f, (canvasHeight - control.h).coerceAtLeast(0f))
+            val originalDims = originalControlDimensions[control.id]
+            if (originalDims != null) {
+                // Scale position and size proportionally
+                control.x = originalDims.x * scaleFactor
+                control.y = originalDims.y * scaleFactor
+                control.w = originalDims.w * scaleFactor
+                control.h = originalDims.h * scaleFactor
+                
+                // Ensure controls still fit within bounds after scaling
+                control.x = control.x.coerceIn(0f, (canvasWidth - control.w).coerceAtLeast(0f))
+                control.y = control.y.coerceIn(0f, (canvasHeight - control.h).coerceAtLeast(0f))
+            }
         }
         
         // Refresh the layout
         refreshLayout()
+    }
+
+    private fun storeOriginalControlDimensions() {
+        originalControlDimensions.clear()
+        controls.forEach { control ->
+            originalControlDimensions[control.id] = OriginalDimensions(
+                x = control.x,
+                y = control.y,
+                w = control.w,
+                h = control.h
+            )
+        }
     }
 }
