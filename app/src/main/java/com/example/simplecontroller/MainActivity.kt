@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private var lastCanvasHeight = 0
     private var isLayoutInitialized = false
     private var originalCanvasHeight = 0f
+    private var originalCanvasWidth = 0f
     private var originalControlDimensions = mutableMapOf<String, OriginalDimensions>()
     
     data class OriginalDimensions(
@@ -1498,6 +1499,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 } else if (!isLayoutInitialized && currentHeight > 0) {
                     lastCanvasHeight = currentHeight
                     originalCanvasHeight = currentHeight.toFloat()
+                    originalCanvasWidth = canvas.width.toFloat()
                     isLayoutInitialized = true
                     
                     // Store original control dimensions for scaling
@@ -1512,24 +1514,40 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val canvasWidth = canvas.width.toFloat()
         val canvasHeight = canvas.height.toFloat()
         
-        if (canvasWidth <= 0 || canvasHeight <= 0 || originalCanvasHeight <= 0) return
+        if (canvasWidth <= 0 || canvasHeight <= 0 || originalCanvasHeight <= 0 || originalCanvasWidth <= 0) return
         
         // Calculate scaling factors
         val heightScale = canvasHeight / originalCanvasHeight
-        val widthScale = canvasWidth / canvas.width.coerceAtLeast(1).toFloat() // Use current width as baseline
+        val widthScale = canvasWidth / originalCanvasWidth
         
-        // Use the smaller scale factor to maintain aspect ratio
-        val scaleFactor = minOf(heightScale, widthScale, 1.0f) // Don't scale up, only down
+        // For split screen, we primarily want to scale based on height reduction,
+        // but allow width to expand if needed. Only scale down on height, allow width to stay full.
+        val scaleFactor = if (heightScale < 1.0f) {
+            // In split screen (height reduced), use height scale but don't constrain width
+            heightScale
+        } else {
+            // Full screen or width change only
+            minOf(heightScale, widthScale, 1.0f)
+        }
         
         // Apply scaling to all controls
         controls.forEach { control ->
             val originalDims = originalControlDimensions[control.id]
             if (originalDims != null) {
-                // Scale position and size proportionally
-                control.x = originalDims.x * scaleFactor
-                control.y = originalDims.y * scaleFactor
-                control.w = originalDims.w * scaleFactor
-                control.h = originalDims.h * scaleFactor
+                if (heightScale < 1.0f) {
+                    // In split screen mode: scale everything by height reduction,
+                    // but allow horizontal positions to utilize the full width
+                    control.x = originalDims.x * (canvasWidth / originalCanvasWidth)
+                    control.y = originalDims.y * scaleFactor
+                    control.w = originalDims.w * scaleFactor
+                    control.h = originalDims.h * scaleFactor
+                } else {
+                    // Full screen mode: normal proportional scaling
+                    control.x = originalDims.x * scaleFactor
+                    control.y = originalDims.y * scaleFactor
+                    control.w = originalDims.w * scaleFactor
+                    control.h = originalDims.h * scaleFactor
+                }
                 
                 // Ensure controls still fit within bounds after scaling
                 control.x = control.x.coerceIn(0f, (canvasWidth - control.w).coerceAtLeast(0f))
