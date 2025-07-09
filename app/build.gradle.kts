@@ -1,6 +1,6 @@
 plugins {
     id("com.android.application")
-    kotlin("android")                                       // ← uses 2.0.21 already on class‑path
+    kotlin("android")                                       // ← uses 2.0.21 already on class-path
     kotlin("plugin.serialization") version "2.0.21"         // ← add only this one
 }
 
@@ -32,10 +32,22 @@ android {
             )
         }
     }
+
+    // ────────────────  Split settings — ONE apk per build  ────────────────
+    splits {
+        abi {
+            // Disable ABI splits → generates a single, universal ARM/x86 APK
+            isEnable = false
+        }
+        density {
+            // Disable screen-density splits
+            isEnable = false
+        }
+    }
+    // ───────────────────────────────────────────────────────────────────────
 }
 
 dependencies {
-
     /* JSON save / load */
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
 

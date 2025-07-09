@@ -11,6 +11,8 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketException
+import java.net.SocketTimeoutException
+
 
 object NetworkClient {
     // Connection status enum
@@ -176,21 +178,26 @@ object NetworkClient {
 
             while (_connectionStatus.value == ConnectionStatus.CONNECTED) {
                 try {
-                    socket?.soTimeout = 5000 // 5 second timeout
-                    socket?.receive(packet)
+                    socket?.soTimeout = 5000               // 5-second timeout
+                    socket?.receive(packet)                // blocks
                     val received = String(packet.data, 0, packet.length)
 
-                    // Handle received message (e.g., PING responses, etc.)
+                    // Handle received message (e.g., PONG responses, etc.)
                     handleServerMessage(received)
+
+                } catch (e: SocketTimeoutException) {
+                    // No packet within 5 s → harmless for an idle controller
+                    continue
+
                 } catch (e: SocketException) {
                     if (_connectionStatus.value == ConnectionStatus.DISCONNECTED) {
-                        // Socket was intentionally closed, exit gracefully
+                        // Socket was intentionally closed; exit the loop
                         break
                     }
-
                     Log.e("NetworkClient", "Socket error while listening", e)
                     handleDisconnect()
                     break
+
                 } catch (e: Exception) {
                     Log.e("NetworkClient", "Error receiving data", e)
                     if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
@@ -200,6 +207,7 @@ object NetworkClient {
             }
         }
     }
+
 
     /** Handle messages from the server */
     private fun handleServerMessage(message: String) {
