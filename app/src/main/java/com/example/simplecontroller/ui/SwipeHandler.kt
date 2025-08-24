@@ -9,34 +9,31 @@ private const val swipeCooldownMs = 120L
 /**
  * Handles swipe interactions between controls.
  *
- * Key behaviors:
- *  1) When leaving a STICK/TOUCHPAD, it immediately starts its own continuous‑sending
- *     so the last direction/position is held while you slide onto a button (walk→jump).
- *  2) Sends a proper ACTION_UP to the previous control using *clamped* local coords,
- *     so directional sticks see the true vector and can apply their internal logic.
- *  3) Short per‑control cooldown prevents rapid re‑fires while gliding over a control.
+ * Key points:
+ *  - MOVE events go to the *current* control (sticks now receive motion!)
+ *  - We only switch controls when the finger actually leaves the current one
+ *  - On switch: old control gets clamped UP (and sticks/pads start their self-sender),
+ *    new control gets DOWN + an immediate MOVE at the current coords
  */
 class SwipeHandler {
 
-    /** Last time a control was fired (per‑control) */
+    /** Last time a control was entered (for cooldown) */
     private val lastFiredMap = mutableMapOf<String, Long>()
 
-    // Track the currently touched control for swipe handling
+    // Active gesture state
     private var activeTouch: MotionEvent? = null
     private var lastTouchedView: ControlView? = null
 
-    // Whether swipe handling is currently enabled
+    // Feature flags
     private var swipeEnabled = false
-
-    // Whether edit mode is active (swipe disabled while editing)
     private var editMode = false
 
-    // All registered control views (populated by SwipeManager)
+    // Registered controls
     private val allViews = mutableSetOf<ControlView>()
 
     /**
      * Process touch events for swipe mode
-     * @return *true* if the event was handled exclusively by the SwipeHandler
+     * @return *true* if handled
      */
     fun processTouchEvent(e: MotionEvent): Boolean {
         if (!swipeEnabled || editMode) return false
@@ -45,63 +42,69 @@ class SwipeHandler {
             MotionEvent.ACTION_DOWN -> {
                 activeTouch = MotionEvent.obtain(e)
 
-                // Identify which control we started on
-                lastTouchedView = allViews.firstOrNull { it.hitTest(e) }
+                // Find the starting control
+                val start = allViews.firstOrNull { it.hitTest(e) }
+                lastTouchedView = start
 
-                // Forward the DOWN event (with local coordinates) to that control
-                lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_DOWN)
-                return lastTouchedView != null
+                // Send DOWN to it (with local coords)
+                start?.forwardEvent(e, MotionEvent.ACTION_DOWN)
+
+                return start != null
             }
 
             MotionEvent.ACTION_MOVE -> {
                 if (activeTouch == null) return false
 
-                for (view in allViews) {
-                    // Respect per‑button swipe‑activation toggle
-                    if (view.model.type == ControlType.BUTTON && !view.model.swipeActivate) continue
+                val current = lastTouchedView
+                // 1) If we’re still over the same control, just send MOVE to it
+                if (current != null && current.hitTest(e)) {
+                    current.forwardEvent(e, MotionEvent.ACTION_MOVE)
+                    return true
+                }
 
-                    if (view.hitTest(e)) {
-                        val now = System.currentTimeMillis()
-                        val lastFired = lastFiredMap[view.model.id] ?: 0L
-                        if (now - lastFired < swipeCooldownMs) break
-
-                        // 1) Wrap‑up previous control *before* switching
+                // 2) Else: finger moved off the old control; see if it entered a new one
+                val entered = allViews.firstOrNull { it.hitTest(e) }
+                if (entered != null) {
+                    val now = System.currentTimeMillis()
+                    val last = lastFiredMap[entered.model.id] ?: 0L
+                    if (now - last >= swipeCooldownMs) {
+                        // Wrap up previous control before switching
                         lastTouchedView?.let { prev ->
-                            // a) Tell sticks/touch‑pads to take over their own sending now
+                            // Sticks / Touchpads take over their own sending while we swipe away
                             if (prev.model.type == ControlType.STICK || prev.model.type == ControlType.TOUCHPAD) {
                                 prev.startContinuousSending()
                             }
-
-                            // b) Deliver a proper ACTION_UP using **clamped** coords so
-                            //    directional sticks capture the current vector.
+                            // Give it a clamped UP so directional sticks capture the last vector
                             prev.forwardEvent(e, MotionEvent.ACTION_UP, clamp = true)
                         }
 
-                        // 2) Activate the *new* control with an ACTION_DOWN
-                        view.forwardEvent(e, MotionEvent.ACTION_DOWN)
+                        // Activate the new control with DOWN…
+                        entered.forwardEvent(e, MotionEvent.ACTION_DOWN)
+                        // …and immediately feed it a MOVE so sticks have a position right away
+                        entered.forwardEvent(e, MotionEvent.ACTION_MOVE)
 
-                        // 3) Book‑keeping
-                        lastTouchedView = view
-                        lastFiredMap[view.model.id] = now
-                        break
+                        lastTouchedView = entered
+                        lastFiredMap[entered.model.id] = now
+                        return true
+                    } else {
+                        // Cooldown: don’t thrash; do nothing this frame
+                        return true
                     }
                 }
 
-                // Forward MOVE events *only* to an active touch‑pad to keep cursor fluid
-                if (lastTouchedView?.model?.type == ControlType.TOUCHPAD) {
-                    lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_MOVE)
-                }
+                // 3) We’re not over *any* control now; keep sending MOVE to sticks/touchpads
+                //    only if that’s useful to your UX. Safer to do nothing here:
                 return lastTouchedView != null
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Forward terminal event to whichever control was last active
+                // Finalize last active control with a clamped UP
                 lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_UP, clamp = true)
 
-                // Clean‑up
+                // Clean up
                 activeTouch?.recycle(); activeTouch = null
                 lastTouchedView = null
-                return false
+                return true
             }
         }
         return false
