@@ -310,32 +310,49 @@ object UdpClient {
         }
     }
 
+    private fun normalizeStickName(raw: String): String {
+        val s = raw.trim()
+        val u = s.uppercase()
+
+        // Common aliases → canonical
+        if (u == "STICK" || u == "L" || u == "LS" || u == "LEFT")  return "STICK_L"
+        if (u == "R" || u == "RS" || u == "RIGHT")                 return "STICK_R"
+
+        // Already valid prefixes → keep
+        if (u.startsWith("STICK_") || u == "STICK_L" || u == "STICK_R" || u.startsWith("DIR_")) return u
+
+        // If someone passed a view id like "stick_169..." (or any non‑canonical token), fall back safely
+        if (u.startsWith("STICK") || u.startsWith("STK") || u.startsWith("STK_") || u.startsWith("STICK-") || u.startsWith("STICK_")) {
+            return "STICK_L"
+        }
+        if (u.startsWith("STICK") || u.startsWith("STICK_")) return "STICK_L"
+        if (u.startsWith("STICK")) return "STICK_L"
+        if (u.startsWith("STICK", ignoreCase = true)) return "STICK_L"
+
+        // Default: prefix unknown tokens as a generic stick (left by default)
+        return if (u == s) "STICK_L" else "STICK_L"
+    }
+
+
     /**
      * Send a stick position update
      */
-    fun sendStickPosition(stickName: String, x: Float, y: Float) {
+    fun sendStickPosition(stickNameRaw: String, x: Float, y: Float) {
+        val norm = normalizeStickName(stickNameRaw)
+
+        // If UDP not ready, fall back to TCP (still normalized)
         if (!isInitialized || socket == null || serverAddress == null) {
-            // If not initialized, try to use NetworkClient directly
-            NetworkClient.send("${stickName}:${"%.2f".format(x)},${"%.2f".format(y)}")
+            NetworkClient.send("$norm:${"%.2f".format(x)},${"%.2f".format(y)}")
             return
         }
 
         scope.launch {
             try {
-                // Create message with player prefix and proper identifier
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-
-                // Check if stickName already includes STICK_ prefix
-                val stickPrefix = if (stickName.startsWith("STICK_") || stickName.startsWith("DIR_")) "" else "STICK_"
-                val message = "${playerPrefix}${stickPrefix}${stickName}:${"%.1f".format(x)},${"%.1f".format(y)}"
-
-                val buffer = message.toByteArray()
-
-                // Create and send packet
-                val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
-                socket?.send(packet)
+                val message = "${playerPrefix}${norm}:${"%.1f".format(x)},${"%.1f".format(y)}"
+                val buf = message.toByteArray()
+                socket?.send(DatagramPacket(buf, buf.size, serverAddress, serverPort))
             } catch (e: Exception) {
-                // Only log occasionally to avoid overwhelming logs
                 if (Math.random() < 0.01) {
                     Log.e(TAG, "Error sending UDP stick position: ${e.message}")
                 }

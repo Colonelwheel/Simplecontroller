@@ -550,13 +550,14 @@ class ControlView(
                     directionalHandler.handleDirectionalStick(sx, sy, e.actionMasked)
                 }
                 model.stickPlusMode -> {
-                    // Stick+ mode - send both analog and directional commands
-                    NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+                    // Stick+ mode - send analog via UDP helper (correct tag + player prefix),
+                    // then layer the directional keys on top
+                    UdpClient.sendStickPosition(model.payload, sx, sy)
                     directionalHandler.handleStickPlusMode(sx, sy, e.actionMasked)
                 }
                 else -> {
-                    // Regular analog stick mode
-                    NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+                    // Regular analog stick/pad mode (use UDP stick helper so tags/prefixes are correct)
+                    UdpClient.sendStickPosition(model.payload, sx, sy)
                 }
             }
         } else {
