@@ -286,14 +286,14 @@ class ControlView(
                 MotionEvent.ACTION_DOWN -> {
                     // Trigger strong vibration for button press
                     triggerStrongVibration(30) // Short 30ms vibration
-                    
+
                     wasJustUnlatched = false
                     uiHelper.allowPulseLoop = true  // ✅ enable pulsing for this press
                     // Cancel any pending long press action from before
                     holdHandler.removeCallbacksAndMessages(null)
 
-                    // DEBUG ↓ — fires the moment your finger goes down
-                    Log.d("DEBUG_BTN", "DOWN  firing ${model.payload}")
+                    // DEBUG ↓ — reflect whether we fire now or skip due to hold toggle
+                    Log.d("DEBUG_BTN", "DOWN  ${if (model.holdToggle) "skipping immediate fire" else "firing"} ${model.payload}")
 
                     // If the button is already latched, a tap should unlatch it immediately
                     if (isLatched) {
@@ -308,31 +308,30 @@ class ControlView(
                     // Normal press path (not latched)
                     isPressed = true  // ✅ This tracks "I'm still pressing"
                     invalidate() // ✅ Trigger redraw immediately for visual feedback
-                    
+
                     if (GlobalSettings.globalTurbo) {
                         uiHelper.startRepeat()
                     } else {
-                        // Handle global hold mode (instant latch)
+                        // Handle global hold mode (instant latch) for non-toggle buttons
                         if (GlobalSettings.globalHold && !model.holdToggle) {
                             isLatched = true
                             invalidate()
                         }
 
-                        // ✅ Fire payload (once) — only if not latched and not holding to latch
+                        // ✅ Non-hold buttons: fire immediately (single tap)
                         if (!model.holdToggle && !isLatched) {
                             uiHelper.firePayload()
                         }
 
-                        // Long press → enable toggle latch and refire payload
+                        // ✅ Hold-toggle buttons: DO NOT fire immediately; fire only when hold threshold is reached
                         if (model.holdToggle) {
-                            uiHelper.firePayload() // Fire immediately even if holding
                             holdHandler.postDelayed({
                                 if (isPressed && !wasJustUnlatched) {
                                     isLatched = true
                                     // Trigger longer vibration for button latch
                                     triggerStrongVibration(80) // Longer 80ms vibration for latch
                                     invalidate()
-                                    uiHelper.firePayload() // Fire again after latching
+                                    uiHelper.firePayload() // Fire once after latching (sends *_HOLD behavior while latched)
                                 }
                             }, model.holdDurationMs)
                         }
@@ -344,10 +343,19 @@ class ControlView(
                     isPressed = false  // ✅ Cancel any pending delayed latch
                     invalidate() // ✅ Trigger redraw to remove pressed visual state
 
+                    // ✅ If hold-toggle is on and we never latched, cancel silently (no release)
+                    if (model.holdToggle && !isLatched) {
+                        holdHandler.removeCallbacksAndMessages(null)
+                        // DEBUG ↓ — early release before latch; nothing sent
+                        Log.d("DEBUG_BTN", "UP    (early release, holdToggle) ${model.payload}")
+                        return
+                    }
+
                     if (!isLatched &&
+                        !model.holdToggle && // ✅ don't release for hold-toggle quick taps
                         !model.payload.contains("RT:1.0P", ignoreCase = true) &&
                         !model.payload.contains("LT:1.0P", ignoreCase = true)) {
-                        uiHelper.releaseLatched()  // ✅ Only release if NOT latched and not pulse-based
+                        uiHelper.releaseLatched()  // ✅ Only release if NOT latched, NOT hold-toggle, and not pulse-based
                     }
 
                     // DEBUG ↓  — fires when you lift your finger
