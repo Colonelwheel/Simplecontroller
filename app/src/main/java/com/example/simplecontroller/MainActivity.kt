@@ -34,6 +34,8 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import com.example.simplecontroller.net.UdpClient
+import android.widget.CheckBox
+import android.view.ViewGroup
 
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
@@ -402,7 +404,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Also initialize UdpClient with the same settings
         UdpClient.initialize(host, port)
-        UdpClient.setConsoleBridgeEnabled(true)
+
+        // Read saved CBv0 preference and apply
+        val useCbv0 = networkPrefs.getBoolean("useCbv0", false)
+        UdpClient.setConsoleBridgeEnabled(useCbv0)
     }
 
     /**
@@ -416,6 +421,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val editHost = dialogView.findViewById<EditText>(R.id.editServerHost)
         val editPort = dialogView.findViewById<EditText>(R.id.editServerPort)
         val checkAutoReconnect = dialogView.findViewById<CheckBox>(R.id.checkboxAutoReconnect)
+
+        // --- CBv0 toggle checkbox (added next to Auto Reconnect) ---
+        val checkUseCbv0 = CheckBox(this).apply {
+            text = "Use ConsoleBridge (CBv0)"
+            isChecked = networkPrefs.getBoolean("useCbv0", false)
+        }
+        // Put it into the same container as Auto Reconnect
+        (checkAutoReconnect.parent as? ViewGroup)?.addView(checkUseCbv0)
 
         // Add radio buttons for player selection
         val radioPlayer1 = dialogView.findViewById<RadioButton>(R.id.radioPlayer1)
@@ -450,33 +463,35 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             .setTitle("Server Connection")
             .setView(dialogView)
             .setPositiveButton("Connect") { _, _ ->
-                // Save settings
+                // --- Read fields ---
                 val host = editHost.text.toString()
                 val port = editPort.text.toString().toIntOrNull() ?: 9001
                 val autoReconnect = checkAutoReconnect.isChecked
+                val useCbv0Checked = checkUseCbv0.isChecked  // <-- the new checkbox
 
-                // Set player role
+                // Player role from radio buttons
                 val playerRole = if (radioPlayer1.isChecked)
                     NetworkClient.PlayerRole.PLAYER1
                 else
                     NetworkClient.PlayerRole.PLAYER2
 
-                // Save to preferences
+                // --- Save to preferences (adds useCbv0) ---
                 networkPrefs.edit()
                     .putString("serverHost", host)
                     .putInt("serverPort", port)
                     .putBoolean("autoReconnect", autoReconnect)
                     .putString("playerRole", playerRole.name)
+                    .putBoolean("useCbv0", useCbv0Checked)   // persist toggle
                     .apply()
 
-                // Update client and connect
+                // --- Update client and connect (honor toggle) ---
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
-                UdpClient.initialize(host, port)
-                UdpClient.setConsoleBridgeEnabled(true)
-                NetworkClient.start()
 
-                // Update UI to reflect player role
+                UdpClient.initialize(host, port)
+                UdpClient.setConsoleBridgeEnabled(useCbv0Checked)
+
+                NetworkClient.start()
                 updatePlayerRoleIndicator()
             }
             .setNegativeButton("Cancel", null)
