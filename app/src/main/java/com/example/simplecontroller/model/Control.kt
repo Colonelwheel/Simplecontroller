@@ -40,6 +40,13 @@ data class Control(
      */
     var toggleLeftClick: Boolean = false,
 
+    /* NEW: Touchpad double-tap click-lock (Unified Remote style) */
+    /**
+     * When true, a quick double-tap locks the left mouse button down,
+     * and the next quick tap (with minimal movement) unlocks it.
+     */
+    var doubleTapClickLock: Boolean = false,
+
     /* 2b - per-control swipe activation */
     /**
      * When **true** this control can be activated by swiping onto it

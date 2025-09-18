@@ -79,6 +79,24 @@ class ControlView(
     private var touchInitialized = false
     private var touchpadSensitivity = 1.0f
 
+    // ─── Double-tap-hold lock helpers ─────────────────────────────
+    private var lastTapTime = 0L
+    private var lastDownTime = 0L
+    private var downX = 0f
+    private var downY = 0f
+    private var fingerIsDown = false
+
+    private val tapTimeoutMs = 200L              // clean tap press duration
+    private val tapSlopPx = 24f                  // movement tolerance for a tap
+    private val secondTapMaxGapMs = 150L        // generous gap allowed between taps
+    private val holdToLockMs = 300L              // HOLD on the 2nd tap for this long to lock
+
+    private var secondTapHoldCheck: Runnable? = null
+
+    // Single-tap deferral so we can detect a second tap
+    private var awaitingSecondTap = false
+    private var pendingSingleTap: Runnable? = null
+
     // Touchpad smoothing factors
     private val touchSmoothingFactor = 0.5f  // 0.0 = no smoothing, 1.0 = maximum smoothing
     private val touchMinMovement = 0.05f     // Minimum movement threshold
@@ -293,7 +311,10 @@ class ControlView(
                     holdHandler.removeCallbacksAndMessages(null)
 
                     // DEBUG ↓ — reflect whether we fire now or skip due to hold toggle
-                    Log.d("DEBUG_BTN", "DOWN  ${if (model.holdToggle) "skipping immediate fire" else "firing"} ${model.payload}")
+                    Log.d(
+                        "DEBUG_BTN",
+                        "DOWN  ${if (model.holdToggle) "skipping immediate fire" else "firing"} ${model.payload}"
+                    )
 
                     // If the button is already latched, a tap should unlatch it immediately
                     if (isLatched) {
@@ -354,7 +375,8 @@ class ControlView(
                     if (!isLatched &&
                         !model.holdToggle && // ✅ don't release for hold-toggle quick taps
                         !model.payload.contains("RT:1.0P", ignoreCase = true) &&
-                        !model.payload.contains("LT:1.0P", ignoreCase = true)) {
+                        !model.payload.contains("LT:1.0P", ignoreCase = true)
+                    ) {
                         uiHelper.releaseLatched()  // ✅ Only release if NOT latched, NOT hold-toggle, and not pulse-based
                     }
 
@@ -374,7 +396,7 @@ class ControlView(
                 MotionEvent.ACTION_DOWN -> {
                     // Trigger vibration for recenter button
                     triggerStrongVibration(40) // Medium vibration for recenter
-                    
+
                     // Visual feedback
                     isLatched = true
                     isPressed = true
@@ -383,6 +405,7 @@ class ControlView(
                     // Trigger re-centering of all sticks
                     SwipeManager.recenterAllSticks()
                 }
+
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     // Visual feedback
                     isLatched = false
@@ -418,8 +441,40 @@ class ControlView(
                         // Don't use MOUSE_RESET as it causes position jumps
                         // NetworkClient.send("MOUSE_RESET")
 
+                        // Record press
+                        fingerIsDown = true
+                        lastDownTime = System.currentTimeMillis()
+                        downX = e.x
+                        downY = e.y
+
                         // Handle mouse button states
-                        if (model.toggleLeftClick) {
+                        if (model.doubleTapClickLock) {
+                            // If this DOWN follows a recent clean tap, allow HOLD to engage lock
+                            val now = System.currentTimeMillis()
+                            val withinSecondTap = (now - lastTapTime) <= secondTapMaxGapMs && !leftHeld
+
+                            // Cancel any prior pending check
+                            secondTapHoldCheck?.let { mouseClickHandler.removeCallbacks(it) }
+                            secondTapHoldCheck = null
+
+                            if (withinSecondTap) {
+                                // Post a short hold check: if finger still down & hasn't moved -> LOCK
+                                secondTapHoldCheck = Runnable {
+                                    val stillDown = fingerIsDown
+                                    val movedTooMuch = (kotlin.math.abs(lastTouchX - downX) > tapSlopPx) ||
+                                            (kotlin.math.abs(lastTouchY - downY) > tapSlopPx)
+                                    if (stillDown && !movedTooMuch && !leftHeld) {
+                                        leftHeld = true
+                                        UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                        triggerStrongVibration(25)
+                                        Log.d("TOUCHPAD", "Double-tap-HOLD: click-lock ON")
+                                    }
+                                    secondTapHoldCheck = null
+                                }
+                                mouseClickHandler.postDelayed(secondTapHoldCheck!!, holdToLockMs)
+                            }
+
+                        } else if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
 
@@ -494,11 +549,46 @@ class ControlView(
                         // Send a final zero movement to ensure mouse stops
                         UdpClient.sendTouchpadPosition(0f, 0f)
 
-                        // Only release mouse button on up/cancel if using standard hold mode
-                        if (!model.toggleLeftClick &&
-                            leftHeld && model.holdLeftWhileTouch) {
-                            UdpClient.sendCommand("MOUSE_LEFT_UP")
-                            leftHeld = false
+                        // End-of-gesture flags / cleanup
+                        fingerIsDown = false
+                        secondTapHoldCheck?.let { mouseClickHandler.removeCallbacks(it) }
+                        secondTapHoldCheck = null
+
+                        if (model.doubleTapClickLock) {
+                            val upTime = System.currentTimeMillis()
+                            val duration = upTime - lastDownTime
+                            val movedTooMuch =
+                                (kotlin.math.abs(e.x - downX) > tapSlopPx) ||
+                                        (kotlin.math.abs(e.y - downY) > tapSlopPx)
+                            val isCleanTap = (duration <= tapTimeoutMs && !movedTooMuch)
+
+                            if (leftHeld) {
+                                // While locked: a clean tap = unlock
+                                if (isCleanTap) {
+                                    UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                    leftHeld = false
+                                    triggerStrongVibration(15)
+                                    Log.d("TOUCHPAD", "Tap: click-lock OFF")
+                                }
+                            } else {
+                                // Not locked: a clean tap = normal click (immediate)
+                                if (isCleanTap) {
+                                    UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                    UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                    triggerStrongVibration(20)
+                                    Log.d("TOUCHPAD", "Single tap: click")
+                                    lastTapTime = upTime // mark this as the prior tap for a potential 2nd-tap-hold
+                                } else {
+                                    // Not a clean tap (drag etc.) → don't update lastTapTime
+                                }
+                            }
+                        } else {
+                            // Only release mouse button on up/cancel if using standard hold mode
+                            if (!model.toggleLeftClick &&
+                                leftHeld && model.holdLeftWhileTouch) {
+                                UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                leftHeld = false
+                            }
                         }
                     }
                 }

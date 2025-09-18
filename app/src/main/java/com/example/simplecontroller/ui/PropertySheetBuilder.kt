@@ -40,6 +40,7 @@ class PropertySheetBuilder(
         val holdDurationField: EditText,
         val swipeActivate: CheckBox,
         val holdLeftWhileTouch: CheckBox,
+        val doubleTapClickLock: CheckBox,   // NEW
         val toggleLeftClick: CheckBox,
         val directionalMode: CheckBox,
         val stickPlusMode: CheckBox,
@@ -150,6 +151,10 @@ class PropertySheetBuilder(
         components.holdLeftWhileTouch.buttonTintList =
             ContextCompat.getColorStateList(context, R.color.primary_blue)
 
+        components.doubleTapClickLock.setTextColor(ThemeManager.getTextColor(context))
+        components.doubleTapClickLock.buttonTintList =
+            ContextCompat.getColorStateList(context, R.color.primary_blue)
+
         components.toggleLeftClick.setTextColor(ThemeManager.getTextColor(context))
         components.toggleLeftClick.buttonTintList =
             ContextCompat.getColorStateList(context, R.color.primary_blue)
@@ -250,10 +255,20 @@ class PropertySheetBuilder(
             model.toggleLeftClick,
             isTouchpad
         )
-        
-        // Make options mutually exclusive for touchpad
+
+        /* NEW: Double-tap click-lock (Unified Remote style) */
+        val doubleTapClickLock = addCheckBox(
+            container,
+            "Double-tap click-lock (UR style)",
+            model.doubleTapClickLock,
+            isTouchpad
+        )
+
+// Make the three touchpad click modes mutually exclusive
         if (isTouchpad) {
             setupMutuallyExclusiveOptions(holdLeftWhileTouch, toggleLeftClick)
+            setupMutuallyExclusiveOptions(holdLeftWhileTouch, doubleTapClickLock)
+            setupMutuallyExclusiveOptions(toggleLeftClick, doubleTapClickLock)
         }
         
         // Directional mode (for sticks)
@@ -304,7 +319,7 @@ class PropertySheetBuilder(
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivitySeek,
             holdToggle, autoCenter, holdDurationField, swipeActivate,
-            holdLeftWhileTouch, toggleLeftClick, directionalMode, stickPlusMode,
+            holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField
         )
     }
@@ -696,6 +711,7 @@ class PropertySheetBuilder(
         if (model.type == ControlType.TOUCHPAD) {
             model.holdLeftWhileTouch = components.holdLeftWhileTouch.isChecked
             model.toggleLeftClick = components.toggleLeftClick.isChecked
+            model.doubleTapClickLock = components.doubleTapClickLock.isChecked   // NEW
         }
         
         // Stick-specific directional mode properties
