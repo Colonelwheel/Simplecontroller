@@ -170,32 +170,7 @@ object UdpClient {
     // -------------------------------------------------------------------
     //   TOUCHPAD (NEW ‑ relative Δ packets)
     // -------------------------------------------------------------------
-    /**
-     * Primary method used by the revamped touchpad: send *deltas* instead of
-     * absolute positions to eliminate drift & bounding‑box issues.
-     */
-    fun sendTouchpadDelta(dx: Float, dy: Float) {
-        // ----- build the common player prefix -----
-        val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1)
-            "player1:" else "player2:"
 
-        // ----- if UDP not ready, fall back to TCP -----
-        if (!isInitialized || socket == null || serverAddress == null) {
-            NetworkClient.send("${playerPrefix}DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
-            return
-        }
-
-        // ----- normal UDP path -----
-        scope.launch {
-            try {
-                val msgStr = "${playerPrefix}DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}"
-                val msg = msgStr.toByteArray()
-                socket?.send(DatagramPacket(msg, msg.size, serverAddress, serverPort))
-            } catch (e: Exception) {
-                if (Math.random() < 0.01) Log.e(TAG, "UDP delta error: ${e.message}")
-            }
-        }
-    }
 
     /**
      * Send a directional key command with reliable delivery
@@ -306,32 +281,47 @@ object UdpClient {
     }
 
     /**
-     * Send a touchpad position update
+     * Primary method used by the touchpad: send *deltas* (dx, dy).
+     * When CBv0 is enabled, we encode to TYPE_MOUSE_DELTA and send to :9010.
+     * Otherwise, we send the legacy text "playerX:DELTA:x,y" to :9001.
      */
-    fun sendTouchpadPosition(x: Float, y: Float) {
+    fun sendTouchpadDelta(dx: Float, dy: Float) {
+        // Build the common player prefix for legacy path
+        val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+
+        // If UDP not ready, fall back to TCP (legacy text)
         if (!isInitialized || socket == null || serverAddress == null) {
-            // Fall back to TCP for touchpad
-            NetworkClient.send("TOUCHPAD:${"%.2f".format(x)},${"%.2f".format(y)}")
+            NetworkClient.send("${playerPrefix}DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
             return
         }
 
         scope.launch {
             try {
-                // Create message with player prefix with CORRECT TOUCHPAD format
-                val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                // Use just "TOUCHPAD" instead of "STICK_TOUCHPAD"
-                val message = "${playerPrefix}TOUCHPAD:${"%.2f".format(x)},${"%.2f".format(y)}"
-                val buffer = message.toByteArray()
+                if (useCbv0) {
+                    // Encode as CBv0 (TYPE_MOUSE_DELTA) and send to gateway port (:9010)
+                    val frame = CbProtocol.encode("DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}")
+                    if (frame != null) {
+                        val packet = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        socket?.send(packet)
+                        return@launch
+                    }
+                    // If for some reason encoding isn't supported, fall through to legacy
+                }
 
-                // Create and send packet
-                val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
-                socket?.send(packet)
+                // Legacy text path (direct to :9001) — includes player prefix
+                val msgStr = "${playerPrefix}DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}"
+                val msg = msgStr.toByteArray()
+                socket?.send(DatagramPacket(msg, msg.size, serverAddress, serverPort))
             } catch (e: Exception) {
-                // Fall back to TCP on error
-                NetworkClient.send("TOUCHPAD:${"%.2f".format(x)},${"%.2f".format(y)}")
+                if (Math.random() < 0.01) Log.e(TAG, "UDP delta error: ${e.message}")
+                // Last resort: TCP legacy
+                NetworkClient.send("${playerPrefix}DELTA:${"%.2f".format(dx)},${"%.2f".format(dy)}")
             }
         }
     }
+
+    // Back-compat shim (some callers still use the old name)
+    fun sendTouchpadPosition(x: Float, y: Float) = sendTouchpadDelta(x, y)
 
     private fun normalizeStickName(raw: String): String {
         val s = raw.trim()
