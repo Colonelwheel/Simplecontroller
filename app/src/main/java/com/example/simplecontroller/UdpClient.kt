@@ -361,27 +361,47 @@ object UdpClient {
      * Send a stick position update
      */
     fun sendStickPosition(stickNameRaw: String, x: Float, y: Float) {
-        val norm = normalizeStickName(stickNameRaw)
+        val canon = normalizeStickName(stickNameRaw) // e.g., "STICK_L" or "STICK_R"
 
-        // If UDP not ready, fall back to TCP (still normalized)
+        // If UDP not ready, fall back to TCP (legacy text, canonical name)
         if (!isInitialized || socket == null || serverAddress == null) {
-            NetworkClient.send("$norm:${"%.2f".format(x)},${"%.2f".format(y)}")
+            NetworkClient.send("$canon:${"%.2f".format(x)},${"%.2f".format(y)}")
             return
         }
 
         scope.launch {
             try {
+                if (useCbv0) {
+                    // Map canon → CBv0-friendly side ("LS"/"RS")
+                    val isRight = canon.contains("_R")
+                    val side = if (isRight) "RS" else "LS"
+
+                    // Build a CBv0-encodable legacy string, then encode → frame
+                    val cbCompat = "$side:${"%.2f".format(x)},${"%.2f".format(y)}"
+                    val frame = CbProtocol.encode(cbCompat)
+                    if (frame != null) {
+                        val pkt = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        socket?.send(pkt)
+                        return@launch
+                    }
+                    // If for any reason encoding returns null, fall through to legacy path below.
+                }
+
+                // Legacy text path (direct to :9001) — includes player prefix and canonical stick name
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-                val message = "${playerPrefix}${norm}:${"%.1f".format(x)},${"%.1f".format(y)}"
+                val message = "${playerPrefix}${canon}:${"%.2f".format(x)},${"%.2f".format(y)}"
                 val buf = message.toByteArray()
                 socket?.send(DatagramPacket(buf, buf.size, serverAddress, serverPort))
             } catch (e: Exception) {
                 if (Math.random() < 0.01) {
-                    Log.e(TAG, "Error sending UDP stick position: ${e.message}")
+                    Log.e(TAG, "Error sending UDP stick: ${e.message}")
                 }
+                // Last resort TCP (legacy text)
+                NetworkClient.send("$canon:${"%.2f".format(x)},${"%.2f".format(y)}")
             }
         }
     }
+
 
 
     /**
