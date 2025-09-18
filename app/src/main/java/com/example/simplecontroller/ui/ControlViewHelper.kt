@@ -175,12 +175,15 @@ class ControlViewHelper(
                 if (GlobalSettings.scrollMode) "Scroll mode ON" else "Scroll mode OFF",
                 Toast.LENGTH_SHORT
             ).show()
-            return                                 // do not forward toggle to PC
+            return // do not forward toggle to PC
         }
 
         // ───── Pulse support: LT:1.0P0.3 or RT:1.0P0.6 ─────
         val pulseMatch = Regex("""(LT|RT):([01](?:\.\d+)?)[Pp]([0-9.]+)""").matchEntire(command)
-        Log.d("DEBUG_PULSE", "LOOP CHECK → latched=${(parentView as? ControlView)?.isLatched}, allowed=$allowPulseLoop, alreadyFired=$pulseAlreadyFired, active=$isPulseLoopActive")
+        Log.d(
+            "DEBUG_PULSE",
+            "LOOP CHECK → latched=${(parentView as? ControlView)?.isLatched}, allowed=$allowPulseLoop, alreadyFired=$pulseAlreadyFired, active=$isPulseLoopActive"
+        )
         if (pulseMatch != null) {
             Log.d("DEBUG_PULSE", "Pulse match detected. isLatched=${(parentView as? ControlView)?.isLatched}")
 
@@ -190,18 +193,17 @@ class ControlViewHelper(
 
             val downCmd = "$trigger:$pressVal"
             val upCmd = "$trigger:0.0"
-
             val delayMs = (holdTime * 1000).toLong()
-            
+
             // Stop any previous repeater using our dedicated handler
             pulseRepeater?.let { pulseHandler.removeCallbacks(it) }
 
             // 🔁 If latched, keep repeating
             if ((parentView as? ControlView)?.isLatched == true &&
-                allowPulseLoop && !isPulseLoopActive && !pulseAlreadyFired) {
-
-                pulseAlreadyFired = true   // ✅ SET IMMEDIATELY before posting the loop
-                isPulseLoopActive = true   // ✅ Guard from further restarts
+                allowPulseLoop && !isPulseLoopActive && !pulseAlreadyFired
+            ) {
+                pulseAlreadyFired = true
+                isPulseLoopActive = true
 
                 pulseRepeater = object : Runnable {
                     override fun run() {
@@ -216,8 +218,6 @@ class ControlViewHelper(
                     }
                 }
                 pulseHandler.post(pulseRepeater!!)
-
-
             } else {
                 // 🔂 Not latched → send once
                 Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
@@ -230,7 +230,7 @@ class ControlViewHelper(
 
             return // skip rest of sendCommand
         }
-// ──────────────────────────────────────────────
+        // ──────────────────────────────────────────────────────
 
         val isXboxCommand = command.startsWith("X360")
         val isMouseCommand = command.startsWith("MOUSE_")
@@ -245,22 +245,37 @@ class ControlViewHelper(
         Log.d("ControlViewHelper", "  - isStickCommand: $isStickCommand")
         Log.d("ControlViewHelper", "  - isTriggerCommand: $isTriggerCommand")
 
+        val cv = (parentView as? ControlView)
+        val fingerPressed = cv?.isPressed == true
+        val isLatchedNow = cv?.isLatched == true
+
         if (isXboxCommand) {
+            // 👇 NEW: When finger is down (and not turbo), convert to HOLD so the server won't auto-release
+            var cmdToSend = command
+            if (!command.contains("_RELEASE") &&
+                !command.contains("_HOLD") &&
+                fingerPressed &&
+                !isLatchedNow &&
+                !GlobalSettings.globalTurbo
+            ) {
+                cmdToSend = "${command}_HOLD"
+                Log.d("ControlViewHelper", "Press-and-hold → converting Xbox cmd to HOLD: '$cmdToSend'")
+            }
             Log.d("ControlViewHelper", "Treating as Xbox command, using UdpClient.sendCommand")
-            UdpClient.sendCommand(command)
+            UdpClient.sendCommand(cmdToSend)
 
         } else if (isTriggerCommand) {
             Log.d("ControlViewHelper", "Sending analog trigger command via UdpClient: $command")
             UdpClient.sendCommand(command)
 
         } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand) {
-            Log.d(
-                "ControlViewHelper",
-                "Treating as keyboard command, using UdpClient.sendKeyCommand"
-            )
+            // Keyboard key path
+            Log.d("ControlViewHelper", "Treating as keyboard command, using UdpClient.sendKeyCommand")
             UdpClient.sendKeyCommand(command, true)
 
-            if (!(parentView is ControlView && (parentView as ControlView).isLatched)) {
+            // 👇 NEW: Only auto-release if turbo is on OR the finger isn't actually held down.
+            val shouldAutoRelease = !isLatchedNow && (GlobalSettings.globalTurbo || !fingerPressed)
+            if (shouldAutoRelease) {
                 Handler(Looper.getMainLooper()).postDelayed({
                     Log.d("ControlViewHelper", "Sending delayed key release for: '$command'")
                     UdpClient.sendKeyCommand(command, false)
@@ -290,65 +305,57 @@ class ControlViewHelper(
         isPulseLoopActive = false
         allowPulseLoop = false
         pulseAlreadyFired = false
-        
+
         // Cancel any pending pulse tasks to be absolutely sure
         pulseHandler.removeCallbacksAndMessages(null)
-
 
         // Process all commands in the payload
         model.payload.split(',', ' ')
             .filter { it.isNotBlank() }
-            .forEach { cmd ->
+            .forEach { raw ->
+                val cmd = raw.trim()
                 Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
 
-                if (cmd.startsWith("X360")) {
-                    // ── Xbox buttons ──────────────────────────────────────────
-                    val releaseCmd = if (cmd.endsWith("_HOLD")) {
-                        cmd.replace("_HOLD", "_RELEASE")
-                    } else {
-                        "${cmd}_RELEASE"
+                when {
+                    // Xbox buttons → explicit *_RELEASE
+                    cmd.startsWith("X360") -> {
+                        val releaseCmd = if (cmd.endsWith("_HOLD")) {
+                            cmd.replace("_HOLD", "_RELEASE")
+                        } else {
+                            "${cmd}_RELEASE"
+                        }
+                        Log.d("ControlViewHelper", "Sending Xbox release via UdpClient: '$releaseCmd'")
+                        UdpClient.sendCommand(releaseCmd)
                     }
-                    Log.d("ControlViewHelper",
-                        "Sending Xbox release command via UdpClient: '$releaseCmd'")
-                    UdpClient.sendCommand(releaseCmd.trim())
 
-                } else if (cmd.startsWith("LT:") || cmd.startsWith("RT:")) {
-                    // ── Analog triggers ───────────────────────────────────────
-                    val releaseCmd = if (cmd.startsWith("LT:")) "LT:0.0" else "RT:0.0"
-                    Log.d("ControlViewHelper",
-                        "Sending analog trigger release: $releaseCmd")
-                    UdpClient.sendCommand(releaseCmd)
-
-                } else if (cmd.startsWith("MOUSE_RIGHT")) {
-                    // ── NEW: right-mouse auto-release (matches suffix style) ──
-                    val releaseCmd = when {
-                        cmd.endsWith("_HOLD") -> cmd.replace("_HOLD", "_UP")
-                        cmd.endsWith("_DOWN") -> cmd.replace("_DOWN", "_UP")
-                        else                  -> "MOUSE_RIGHT_UP"
+                    // Triggers → analog zero
+                    cmd.startsWith("LT:") || cmd.startsWith("RT:") -> {
+                        val releaseCmd = if (cmd.startsWith("LT:")) "LT:0.0" else "RT:0.0"
+                        Log.d("ControlViewHelper", "Sending analog trigger release: $releaseCmd")
+                        UdpClient.sendCommand(releaseCmd)
                     }
-                    Log.d("ControlViewHelper",
-                        "Sending right-mouse release via UdpClient: '$releaseCmd'")
-                    UdpClient.sendCommand(releaseCmd.trim())
 
-                } else if (cmd.startsWith("MOUSE_LEFT")) {
-                    // ── NEW: left-mouse auto-release (matches suffix style) ──
-                    val releaseCmd = when {
-                        cmd.endsWith("_HOLD") -> cmd.replace("_HOLD", "_UP")
-                        cmd.endsWith("_DOWN") -> cmd.replace("_DOWN", "_UP")
-                        else                  -> "MOUSE_LEFT_UP"
+                    // 👇 NEW: Mouse down payloads get matched "up" on lift
+                    cmd == "MOUSE_LEFT_DOWN" -> {
+                        Log.d("ControlViewHelper", "Mouse release: MOUSE_LEFT_UP")
+                        UdpClient.sendCommand("MOUSE_LEFT_UP")
                     }
-                    Log.d("ControlViewHelper",
-                        "Sending right-mouse release via UdpClient: '$releaseCmd'")
-                    UdpClient.sendCommand(releaseCmd.trim())
+                    cmd == "MOUSE_RIGHT_DOWN" -> {
+                        Log.d("ControlViewHelper", "Mouse release: MOUSE_RIGHT_UP")
+                        UdpClient.sendCommand("MOUSE_RIGHT_UP")
+                    }
+                    cmd == "MOUSE_MIDDLE_DOWN" -> {
+                        Log.d("ControlViewHelper", "Mouse release: MOUSE_MIDDLE_UP")
+                        UdpClient.sendCommand("MOUSE_MIDDLE_UP")
+                    }
 
-                } else if (!cmd.startsWith("MOUSE_") &&
-                    !cmd.startsWith("TOUCHPAD:") &&
-                    !cmd.startsWith("STICK") &&
-                    !cmd.startsWith("TRIGGER")) {
-                    // ── Keyboard keys ─────────────────────────────────────────
-                    Log.d("ControlViewHelper",
-                        "Sending keyboard release command: '$cmd'")
-                    UdpClient.sendKeyCommand(cmd.trim(), false)
+                    // Keyboard keys (skip mouse/touchpad/stick/trigger tokens)
+                    !cmd.startsWith("MOUSE_") &&
+                            !cmd.startsWith("TOUCHPAD:") &&
+                            !cmd.startsWith("STICK") -> {
+                        Log.d("ControlViewHelper", "Sending keyboard release: '$cmd'")
+                        UdpClient.sendKeyCommand(cmd, false)
+                    }
                 }
             }
     }
