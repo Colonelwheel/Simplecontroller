@@ -14,12 +14,26 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.example.simplecontroller.CbProtocol
 
 /**
  * Provides UDP communication for lower latency position updates.
  * Designed to complement NetworkClient for time-sensitive data.
  */
 object UdpClient {
+
+    // ===== ConsoleBridge (CBv0) toggle =====
+    @Volatile private var useCbv0: Boolean = false
+    private const val CB_PORT = 9010
+
+    /** Enable/disable CBv0 binary sending at runtime. */
+    fun setConsoleBridgeEnabled(enabled: Boolean) {
+        useCbv0 = enabled
+    }
+
+    /** Decide which UDP port to target based on protocol. */
+    private fun targetPort(): Int = if (useCbv0) CB_PORT else serverPort
+
     // Using constants for tagging and configuration
     private const val TAG = "UdpClient"
     private const val DEFAULT_PORT = 9001
@@ -118,27 +132,36 @@ object UdpClient {
      */
     fun sendCommand(command: String) {
         if (!isInitialized || socket == null || serverAddress == null) {
-            // If not initialized, fall back to NetworkClient
+            // Fallback to TCP legacy path if UDP isn't ready
             NetworkClient.send(command)
             return
         }
 
         scope.launch {
             try {
-                // Create message with player prefix for server routing
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+
+                if (useCbv0) {
+                    // Try CBv0 first (frame goes to :9010; player prefix added by the gateway)
+                    val frame = CbProtocol.encode(command)
+                    if (frame != null) {
+                        val packet = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        socket?.send(packet)
+                        return@launch
+                    }
+                    // If this command isn't supported by CBv0 yet, fall through to legacy text.
+                }
+
+                // Legacy text path (direct to :9001) — includes player prefix
                 val message = "${playerPrefix}${command}"
                 val buffer = message.toByteArray()
-
-                // Create and send packet
                 val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
                 socket?.send(packet)
             } catch (e: Exception) {
-                // Only log occasionally to avoid overwhelming logs
-                if (Math.random() < 0.01) {
+                if (Math.random() < 0.01) { // avoid log spam
                     Log.e(TAG, "Error sending UDP command: ${e.message}")
                 }
-                // Fall back to TCP if UDP fails
+                // Try TCP as last resort
                 NetworkClient.send(command)
             }
         }

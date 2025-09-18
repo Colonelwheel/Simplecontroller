@@ -402,6 +402,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Also initialize UdpClient with the same settings
         UdpClient.initialize(host, port)
+        UdpClient.setConsoleBridgeEnabled(true)
     }
 
     /**
@@ -471,6 +472,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 // Update client and connect
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
+                UdpClient.initialize(host, port)
+                UdpClient.setConsoleBridgeEnabled(true)
                 NetworkClient.start()
 
                 // Update UI to reflect player role
