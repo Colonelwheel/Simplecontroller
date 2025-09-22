@@ -1,0 +1,6 @@
+2025-05-21 19:22:21,599 - INFO - UDP Controller Server starting up...
+2025-05-21 19:22:21,600 - INFO - Press Ctrl+C to exit
+2025-05-21 19:22:21,601 - INFO - Applied UDP buffer size settings
+2025-05-21 19:22:21,602 - ERROR - UDP server error: [WinError 10048] Only one usage of each socket address (protocol/network address/port) is normally permitted
+2025-05-21 19:22:21,602 - INFO - UDP server stopped
+2025-05-21 19:22:21,602 - INFO - Server stopped
