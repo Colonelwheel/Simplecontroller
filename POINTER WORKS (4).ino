@@ -2,7 +2,12 @@
 #include <WiFiUdp.h>
 #include <WiFiClient.h>
 #include <WiFiServer.h>
+#define CFG_TUD_HID 2  // enable up to two HID interfaces
 #include <Adafruit_TinyUSB.h>
+// For this test build, expose Gamepad only (no keyboard/mouse)
+#ifndef GAMEPAD_ONLY
+#define GAMEPAD_ONLY 1
+#endif
 #include <RP2040.h>
 
 // ===== Network (Static IP) =====
@@ -29,20 +34,85 @@ void ledWrite(bool on){ pinMode(LED_BUILTIN, OUTPUT); digitalWrite(LED_BUILTIN, 
 void ledTask(){ static const uint16_t BOOT_SEQ[]={100,100,100,700}; static const uint16_t CONN_SEQ[]={120,120,120,600}; static const uint16_t STA_SEQ[]={2000,60}; static const uint16_t AP_SEQ[]={200,1000}; static const uint16_t ERR_SEQ[]={150,150,150,150,150,800}; const uint16_t* seq=BOOT_SEQ; int len=2; switch(currentPat){case LED_BOOT:seq=BOOT_SEQ;len=2;break;case LED_WIFI_CONNECTING:seq=CONN_SEQ;len=2;break;case LED_STA:seq=STA_SEQ;len=1;break;case LED_AP:seq=AP_SEQ;len=2;break;default:seq=ERR_SEQ;len=3;break;} unsigned long now=millis(); if(now<patNext)return; patOn=!patOn; ledWrite(patOn); uint16_t dur=seq[patIndex% (len* (currentPat==LED_BOOT||currentPat==LED_WIFI_CONNECTING||currentPat==LED_AP?2:1))]; patNext=now+dur; patIndex++;}
 
 // ===== HID =====
-uint8_t const hid_desc[] = {
-  TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(1)),
-  TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(2)),
-  TUD_HID_REPORT_DESC_GAMEPAD(HID_REPORT_ID(3))
-};
-Adafruit_USBD_HID usb_hid(hid_desc, sizeof(hid_desc), HID_ITF_PROTOCOL_NONE, 3, false);
+// Gamepad-only mode for diagnosis to ensure hosts see a controller.
+#if GAMEPAD_ONLY
+  #define RID_GP    1
+  // Custom Gamepad report descriptor (matches our 7-byte report: 16 buttons, hat(4b), padding(4b), X Y Z Rz int8)
+  static uint8_t const hid_desc_gp[] = {
+    0x05, 0x01,       // USAGE_PAGE (Generic Desktop)
+    0x09, 0x05,       // USAGE (Game Pad)
+    0xA1, 0x01,       // COLLECTION (Application)
+      0x85, RID_GP,   //   REPORT_ID (RID_GP)
+      // Buttons (16)
+      0x05, 0x09,     //   USAGE_PAGE (Button)
+      0x19, 0x01,     //   USAGE_MINIMUM (Button 1)
+      0x29, 0x10,     //   USAGE_MAXIMUM (Button 16)
+      0x15, 0x00,     //   LOGICAL_MINIMUM (0)
+      0x25, 0x01,     //   LOGICAL_MAXIMUM (1)
+      0x95, 0x10,     //   REPORT_COUNT (16)
+      0x75, 0x01,     //   REPORT_SIZE (1)
+      0x81, 0x02,     //   INPUT (Data,Var,Abs)
+      // Hat switch (4 bits) with Null state (8 = center), then 4-bit padding
+      0x05, 0x01,     //   USAGE_PAGE (Generic Desktop)
+      0x09, 0x39,     //   USAGE (Hat switch)
+      0x15, 0x00,     //   LOGICAL_MINIMUM (0)
+      0x25, 0x07,     //   LOGICAL_MAXIMUM (7)
+      0x35, 0x00,     //   PHYSICAL_MINIMUM (0)
+      0x46, 0x3B, 0x01, // PHYSICAL_MAXIMUM (315)
+      0x65, 0x14,     //   UNIT (Eng Rot)
+      0x75, 0x04,     //   REPORT_SIZE (4)
+      0x95, 0x01,     //   REPORT_COUNT (1)
+      0x81, 0x42,     //   INPUT (Data,Var,Abs,Null)
+      0x65, 0x00,     //   UNIT (None)
+      0x75, 0x04,     //   REPORT_SIZE (4)
+      0x95, 0x01,     //   REPORT_COUNT (1)
+      0x81, 0x03,     //   INPUT (Const,Var,Abs) - padding
+      // Axes X, Y, Z, Rz as int8 [-127..127]
+      0x05, 0x01,     //   USAGE_PAGE (Generic Desktop)
+      0x09, 0x30,     //   USAGE (X)
+      0x09, 0x31,     //   USAGE (Y)
+      0x09, 0x32,     //   USAGE (Z)
+      0x09, 0x35,     //   USAGE (Rz)
+      0x15, 0x81,     //   LOGICAL_MINIMUM (-127)
+      0x25, 0x7F,     //   LOGICAL_MAXIMUM (127)
+      0x75, 0x08,     //   REPORT_SIZE (8)
+      0x95, 0x04,     //   REPORT_COUNT (4)
+      0x81, 0x02,     //   INPUT (Data,Var,Abs)
+    0xC0              // END_COLLECTION
+  };
+  Adafruit_USBD_HID usb_hid_gp(hid_desc_gp, sizeof(hid_desc_gp), HID_ITF_PROTOCOL_NONE, 1, false);
+#else
+  // Two interfaces: one for keyboard+mouse, one for gamepad.
+  #define RID_KBD   1
+  #define RID_MOUSE 2
+  static uint8_t const hid_desc_km[] = {
+    TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(RID_KBD)),
+    TUD_HID_REPORT_DESC_MOUSE   (HID_REPORT_ID(RID_MOUSE))
+  };
+  #define RID_GP    1
+  static uint8_t const hid_desc_gp[] = {
+    TUD_HID_REPORT_DESC_GAMEPAD (HID_REPORT_ID(RID_GP))
+  };
+  Adafruit_USBD_HID usb_hid_km(hid_desc_km, sizeof(hid_desc_km), HID_ITF_PROTOCOL_NONE, 2, false);
+  Adafruit_USBD_HID usb_hid_gp(hid_desc_gp, sizeof(hid_desc_gp), HID_ITF_PROTOCOL_NONE, 1, false);
+#endif
 typedef struct __attribute__((packed)) { uint8_t modifier; uint8_t reserved; uint8_t keycode[6]; } hid_kbd_report_t;
 hid_kbd_report_t kbd = {0,0,{0,0,0,0,0,0}};
 uint8_t mouse_buttons = 0;
 enum { MOD_LCTRL=0x01, MOD_LSHIFT=0x02, MOD_LALT=0x04, MOD_LGUI=0x08 };
 static void waitHIDReady(){ uint32_t t0=millis(); while(!TinyUSBDevice.mounted() && (millis()-t0)<5000) delay(10); }
 static void blinkActivity(uint16_t ms){ digitalWrite(LED_BUILTIN,HIGH); delay(ms); digitalWrite(LED_BUILTIN,LOW); }
-void kbdSend(){ usb_hid.sendReport(1, &kbd, sizeof(kbd)); }
-void mouseSend(int8_t dx,int8_t dy){ uint8_t rpt[5]={mouse_buttons,(uint8_t)dx,(uint8_t)dy,0,0}; usb_hid.sendReport(2,rpt,sizeof(rpt)); }
+void kbdSend(){
+#if !GAMEPAD_ONLY
+  usb_hid_km.sendReport(RID_KBD, &kbd, sizeof(kbd));
+#endif
+}
+void mouseSend(int8_t dx,int8_t dy){
+#if !GAMEPAD_ONLY
+  uint8_t rpt[5]={mouse_buttons,(uint8_t)dx,(uint8_t)dy,0,0};
+  usb_hid_km.sendReport(RID_MOUSE,rpt,sizeof(rpt));
+#endif
+}
 void mousePress(uint8_t m){ mouse_buttons|=m; mouseSend(0,0); }
 void mouseRelease(uint8_t m){ mouse_buttons&=~m; mouseSend(0,0); }
 
@@ -64,13 +134,73 @@ static inline int8_t scale_i16_to_i8(int16_t v){ // 32767 -> ~127
 void gpSend(){
   // ensure neutral hat when not explicitly set
   if(gp.hat > 8) gp.hat = 8;
-  usb_hid.sendReport(3, &gp, sizeof(gp));
+  bool ok = usb_hid_gp.sendReport(RID_GP, &gp, sizeof(gp));
+  if(!ok){ Serial.println("GP send failed (EP busy)"); }
 }
 void gpSetButton(int id, bool down){ if(id<0||id>15) return; uint16_t mask = (1u<<id); if(down) gp.buttons |= mask; else gp.buttons &= ~mask; gpSend(); }
 
 // ===== Legacy ASCII (fallback) =====
 static inline String trimCopy(const String& s){ int i=0,j=s.length()-1; while(i<=j&&isspace((unsigned char)s[i])) i++; while(j>=i&&(isspace((unsigned char)s[j])||s[j]==',')) j--; return (j<i)?String(""):s.substring(i,j+1); }
 static inline bool eqNoCase(const String& a, const char* b){ String aa=a; aa.toUpperCase(); String bb=b; for(size_t i=0;i<bb.length();++i) bb[i]=toupper(bb[i]); return aa==bb; }
+
+static String canonicalToken(const String& s){
+  String t; t.reserve(s.length());
+  for(size_t i=0;i<s.length();++i){ char c=s[i]; if(isalnum((unsigned char)c)) t += (char)toupper((unsigned char)c); }
+  return t;
+}
+
+static int gpIdForName(const String& name){
+  String n = canonicalToken(name);
+  if(n=="A"||n=="BTNA"||n=="SOUTH"||n=="BTNSOUTH"||n=="CROSS") return 0;
+  if(n=="B"||n=="BTNB"||n=="EAST" ||n=="BTNEAST" ||n=="CIRCLE") return 1;
+  if(n=="X"||n=="BTNX"||n=="WEST" ||n=="BTNWEST" ||n=="SQUARE") return 2;
+  if(n=="Y"||n=="BTNY"||n=="NORTH"||n=="BTNNORTH"||n=="TRIANGLE") return 3;
+  if(n=="LB"||n=="L1"||n=="LEFTBUMPER") return 4;
+  if(n=="RB"||n=="R1"||n=="RIGHTBUMPER") return 5;
+  if(n=="BACK"||n=="SELECT"||n=="MINUS") return 6;
+  if(n=="START"||n=="OPTIONS"||n=="PLUS") return 7;
+  if(n=="LS"||n=="L3"||n=="LSC"||n=="LEFTSTICK") return 8;
+  if(n=="RS"||n=="R3"||n=="RSC"||n=="RIGHTSTICK") return 9;
+  if(n=="LT"||n=="L2"||n=="LEFTTRIGGER") return 10;
+  if(n=="RT"||n=="R2"||n=="RIGHTTRIGGER") return 11;
+  if(n=="DPADUP"||n=="HATUP"||n=="UP") return 12;
+  if(n=="DPADDOWN"||n=="HATDOWN"||n=="DOWN") return 13;
+  if(n=="DPADLEFT"||n=="HATLEFT"||n=="LEFT") return 14;
+  if(n=="DPADRIGHT"||n=="HATRIGHT"||n=="RIGHT") return 15;
+  return -1;
+}
+
+static bool parseX360Key(const String& key, int& gid, uint8_t& opOut){
+  // Robust parse: uppercase + strip non-alnum so X360X_HOLD → X360XHOLD
+  String c = canonicalToken(key);
+  Serial.print("X360 parse canonical='"); Serial.print(c); Serial.println("'");
+  if(c.length() < 5) return false;
+  if(!(c[0]=='X' && c[1]=='3' && c[2]=='6' && c[3]=='0')) return false;
+  String rest = c.substring(4);
+  Serial.print("X360 rest='"); Serial.print(rest); Serial.println("'");
+
+  // Determine op by suffix tokens HOLD/RELEASE if present
+  uint8_t op = 2; // default press
+  if(rest.endsWith("HOLD")) { op = 0; rest.remove(rest.length()-4); }
+  else if(rest.endsWith("RELEASE")) { op = 1; rest.remove(rest.length()-7); }
+  Serial.print("X360 base='"); Serial.print(rest); Serial.print("' op="); Serial.println(op);
+
+  // Map rest to button id
+  if(rest=="A") gid = 0;
+  else if(rest=="B") gid = 1;
+  else if(rest=="X") gid = 2;
+  else if(rest=="Y") gid = 3;
+  else if(rest=="LB"||rest=="L1") gid = 4;
+  else if(rest=="RB"||rest=="R1") gid = 5;
+  else if(rest=="BACK"||rest=="SELECT"||rest=="MINUS") gid = 6;
+  else if(rest=="START"||rest=="OPTIONS"||rest=="PLUS") gid = 7;
+  else if(rest=="LSC"||rest=="L3") gid = 8;
+  else if(rest=="RSC"||rest=="R3") gid = 9;
+  else return false;
+
+  opOut = op;
+  return true;
+}
 
 uint8_t keyForName(const String& name, uint8_t& mods){
   mods=0; String n=name; n.toUpperCase();
@@ -142,8 +272,8 @@ static uint8_t crc8_poly07(const uint8_t* data, int len){
 }
 
 static bool parseCbv0AndExecute(const uint8_t* buf, int n){
-  if(n < 6) return false;
-  if(buf[0] != CB_MAGIC || buf[1] != CB_VERSION) return false;
+  if(n < 6){ Serial.print("CBv0 short packet n="); Serial.println(n); return false; }
+  if(buf[0] != CB_MAGIC || buf[1] != CB_VERSION){ Serial.print("CBv0 bad header m="); Serial.print(buf[0], HEX); Serial.print(" v="); Serial.println(buf[1]); return false; }
   // uint16_t seq = (uint16_t)(buf[2] | (buf[3]<<8));
   uint8_t type = buf[4];
   uint8_t crc_calc = crc8_poly07(buf, n-1);
@@ -154,6 +284,7 @@ static bool parseCbv0AndExecute(const uint8_t* buf, int n){
   }
   const uint8_t* payload = buf + 5;
   int payload_len = n - 6; // exclude header(5) + crc(1)
+  Serial.print("CBv0 type "); Serial.print(type, HEX); Serial.print(" len "); Serial.println(payload_len);
 
   // First: decode by explicit CBv0 type (preferred)
   switch(type){
@@ -166,15 +297,52 @@ static bool parseCbv0AndExecute(const uint8_t* buf, int n){
       String key; key.reserve(klen);
       for(int i=0;i<klen;i++) key += (char)payload[2+i];
 
+      Serial.print("CBv0 KEY str='"); Serial.print(key); Serial.println("'");
+
+      // Special-case: some senders misclassify gamepad as TYPE_KEY with X360* tokens
+      int xgid=-1; uint8_t xop=2;
+      if(parseX360Key(key, xgid, xop)){
+        Serial.print("CBv0 KEY->X360 map id="); Serial.print(xgid); Serial.print(" op="); Serial.println(xop);
+        if(xop == 0)           { gpSetButton(xgid, true); }
+        else if(xop == 1)      { gpSetButton(xgid, false); }
+        else /*press*/         { gpSetButton(xgid, true); delay(15); gpSetButton(xgid, false); }
+        return true;
+      }
+
       uint8_t mods=0; uint8_t kc = keyForName(key, mods);
-      if(op == 0)           { kbdPress(kc, mods); }
-      else if(op == 1)      { kbdRelease(kc, mods); }
-      else /*op==2*/        { kbdPress(kc, mods); delay(10); kbdRelease(kc, mods); }
+      if(kc!=0 || mods!=0){
+        if(op == 0)           { kbdPress(kc, mods); }
+        else if(op == 1)      { kbdRelease(kc, mods); }
+        else /*op==2*/        { kbdPress(kc, mods); delay(10); kbdRelease(kc, mods); }
+        return true;
+      }
+
+      int gid = gpIdForName(key);
+      if(gid >= 0){
+        Serial.print("CBv0 KEY->GP_BUTTON id="); Serial.print(gid); Serial.print(" op="); Serial.println(op);
+        if(op == 0)           { gpSetButton(gid, true); }
+        else if(op == 1)      { gpSetButton(gid, false); }
+        else /*press*/        { gpSetButton(gid, true); delay(15); gpSetButton(gid, false); }
+        return true;
+      }
+
+      Serial.println("CBv0 KEY unknown mapping");
       return true;
     }
 
     case TYPE_MOUSE_DELTA: {
-      if(payload_len != 4) return true;
+      if(payload_len == 2){
+        // Treat as alternate trigger format: [op, which] (0=LT,1=RT)
+        uint8_t op = payload[0];
+        uint8_t which = payload[1] & 0x01;
+        int btnId = (which==0) ? 10 : 11;
+        Serial.print("CBv0 ALT_TRIGGER which="); Serial.print(which); Serial.print(" op="); Serial.println(op);
+        if(op == 0)           { gpSetButton(btnId, true); }
+        else if(op == 1)      { gpSetButton(btnId, false); }
+        else /*press*/        { gpSetButton(btnId, true); delay(15); gpSetButton(btnId, false); }
+        return true;
+      }
+      if(payload_len != 4){ Serial.print("CBv0 MOUSE_DELTA bad len "); Serial.println(payload_len); return true; }
       int16_t dx = (int16_t)(payload[0] | (payload[1]<<8));
       int16_t dy = (int16_t)(payload[2] | (payload[3]<<8));
       if(dx > 127) dx = 127; if(dx < -128) dx = -128;
@@ -197,12 +365,13 @@ static bool parseCbv0AndExecute(const uint8_t* buf, int n){
 
     // Gamepad: buttons, sticks, triggers (CBv0)
     case 0x04: { // TYPE_GP_BUTTON
-      if(payload_len < 2) return true;
+      if(payload_len < 2){ Serial.print("CBv0 GP_BUTTON short len "); Serial.println(payload_len); return true; }
       uint8_t op = payload[0]; // 0=down/hold,1=up,2=press
       uint8_t id = payload[1]; // 0=A,1=B,2=X,3=Y,4=LB,5=RB,6=BACK,7=START,8=LSC,9=RSC
       // Debug: confirm CBv0 gamepad button decode
       Serial.print("CBv0 GP_BUTTON id="); Serial.print(id);
       Serial.print(" op="); Serial.println(op);
+      if(id > 15){ Serial.print("CBv0 GP_BUTTON id out of range: "); Serial.println(id); return true; }
       if(op == 0)           { gpSetButton(id, true); }
       else if(op == 1)      { gpSetButton(id, false); }
       else /*press*/        { gpSetButton(id, true); delay(15); gpSetButton(id, false); }
@@ -210,7 +379,7 @@ static bool parseCbv0AndExecute(const uint8_t* buf, int n){
     }
 
     case 0x05: { // TYPE_GP_STICK
-      if(payload_len < 5) return true;
+      if(payload_len < 5){ Serial.print("CBv0 GP_STICK short len "); Serial.println(payload_len); return true; }
       uint8_t which = payload[0]; // 0=LS,1=RS
       int16_t xi = (int16_t)(payload[1] | (payload[2]<<8));
       int16_t yi = (int16_t)(payload[3] | (payload[4]<<8));
@@ -220,12 +389,13 @@ static bool parseCbv0AndExecute(const uint8_t* buf, int n){
       if(x8>-3 && x8<3) x8=0; if(y8>-3 && y8<3) y8=0;
       if(which == 0){ gp.x = x8; gp.y = y8; }
       else          { gp.z = x8; gp.rz = y8; }
+      Serial.print("CBv0 GP_STICK which="); Serial.print(which); Serial.print(" x="); Serial.print(x8); Serial.print(" y="); Serial.println(y8);
       gpSend();
       return true;
     }
 
     case 0x06: { // TYPE_GP_TRIGGER → no analog axis in our simple report; map to buttons 10/11
-      if(payload_len < 2) return true;
+      if(payload_len < 2){ Serial.print("CBv0 GP_TRIGGER short len "); Serial.println(payload_len); return true; }
       uint8_t which = payload[0]; // 0=LT,1=RT
       uint8_t v     = payload[1]; // 0..255
       bool down = v >= 128;       // threshold
@@ -302,7 +472,11 @@ void httpTask(){
 // ===== setup/loop =====
 void setup(){
   Serial.begin(115200); delay(50);
-  usb_hid.begin(); waitHIDReady(); memset(&kbd,0,sizeof(kbd)); kbdSend(); mouseSend(0,0); gpSend();
+  usb_hid_gp.begin();
+  waitHIDReady();
+  memset(&kbd,0,sizeof(kbd));
+  // In gamepad-only mode, skip initial kbd/mouse reports
+  gpSend();
   setPattern(LED_WIFI_CONNECTING);
 
   WiFi.mode(WIFI_STA);
