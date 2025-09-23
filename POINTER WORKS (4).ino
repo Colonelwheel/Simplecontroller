@@ -23,6 +23,9 @@ const uint16_t CB_PORT = 9010;
 WiFiUDP udp;
 WiFiServer http(80);
 
+// ===== Tunables =====
+#define CB_MOUSE_SCALE 0.10f   // lower => less sensitive
+
 // ===== LED =====
 #ifndef LED_BUILTIN
 #define LED_BUILTIN 25
