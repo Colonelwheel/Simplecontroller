@@ -4,9 +4,9 @@
 #include <WiFiServer.h>
 #define CFG_TUD_HID 2  // enable up to two HID interfaces
 #include <Adafruit_TinyUSB.h>
-// For this test build, expose Gamepad only (no keyboard/mouse)
+// For normal use, expose both KM + Gamepad (set to 0). Set to 1 for gamepad-only debug.
 #ifndef GAMEPAD_ONLY
-#define GAMEPAD_ONLY 1
+#define GAMEPAD_ONLY 0
 #endif
 #include <RP2040.h>
 
@@ -472,10 +472,18 @@ void httpTask(){
 // ===== setup/loop =====
 void setup(){
   Serial.begin(115200); delay(50);
+#if GAMEPAD_ONLY
   usb_hid_gp.begin();
+#else
+  usb_hid_km.begin();
+  usb_hid_gp.begin();
+#endif
   waitHIDReady();
   memset(&kbd,0,sizeof(kbd));
-  // In gamepad-only mode, skip initial kbd/mouse reports
+#if !GAMEPAD_ONLY
+  kbdSend();
+  mouseSend(0,0);
+#endif
   gpSend();
   setPattern(LED_WIFI_CONNECTING);
 
