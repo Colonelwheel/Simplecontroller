@@ -92,9 +92,16 @@ class ControlView(
     private val holdToLockMs = 380L             // must HOLD the 2nd tap a hair longer to lock
     private val postUnlockCooldownMs = 120L     // short buffer after unlocking
 
+    // Looser thresholds for a normal single-click (UR mode)
+    private val tapTimeoutClickMs = 240L
+    private val tapSlopClickPx = 32f
+
+
     private var secondTapHoldCheck: Runnable? = null
     private var lastTapWasClean = false         // NEW: only a clean tap can "prime" a lock
     private var lastUnlockTime = 0L             // NEW: prevent immediate re-lock after unlock
+    // Click-first suppression: if lock engages mid-gesture, skip click on UP
+    private var suppressNextUpClick = false
 
     // Single-tap deferral so we can detect a second tap
     private var awaitingSecondTap = false
@@ -475,6 +482,7 @@ class ControlView(
                             // Cancel any prior pending check
                             secondTapHoldCheck?.let { mouseClickHandler.removeCallbacks(it) }
                             secondTapHoldCheck = null
+                            suppressNextUpClick = false   // click-first: reset at gesture start
 
                             if (qualifiesForLockArm) {
                                 // Post a hold check: if finger still down & hasn't moved -> LOCK
@@ -484,6 +492,7 @@ class ControlView(
                                             (kotlin.math.abs(lastTouchY - downY) > tapSlopPx)
                                     if (stillDown && !movedTooMuch && !leftHeld) {
                                         leftHeld = true
+                                        suppressNextUpClick = true   // convert this tap into a hold; no click on UP
                                         UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                                         triggerStrongVibration(25)
                                         // consume the primed tap so you can't lock again much later
@@ -495,7 +504,8 @@ class ControlView(
                                 }
                                 mouseClickHandler.postDelayed(secondTapHoldCheck!!, holdToLockMs)
                             }
-                        } else if (model.toggleLeftClick) {
+                        }
+                        else if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
 
