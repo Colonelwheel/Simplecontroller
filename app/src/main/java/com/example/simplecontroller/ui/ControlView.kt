@@ -43,7 +43,7 @@ class ControlView(
 
     /*hold*/
     private val holdHandler = Handler(Looper.getMainLooper())
-    
+
     /*mouse click lock delay*/
     private val mouseClickHandler = Handler(Looper.getMainLooper())
 
@@ -86,12 +86,15 @@ class ControlView(
     private var downY = 0f
     private var fingerIsDown = false
 
-    private val tapTimeoutMs = 200L              // clean tap press duration
-    private val tapSlopPx = 24f                  // movement tolerance for a tap
-    private val secondTapMaxGapMs = 150L        // generous gap allowed between taps
-    private val holdToLockMs = 300L              // HOLD on the 2nd tap for this long to lock
+    private val tapTimeoutMs = 180L             // a bit tighter for what counts as a tap
+    private val tapSlopPx = 20f                 // a bit stricter movement budget
+    private val secondTapMaxGapMs = 120L        // must tap again quickly to qualify
+    private val holdToLockMs = 380L             // must HOLD the 2nd tap a hair longer to lock
+    private val postUnlockCooldownMs = 120L     // short buffer after unlocking
 
     private var secondTapHoldCheck: Runnable? = null
+    private var lastTapWasClean = false         // NEW: only a clean tap can "prime" a lock
+    private var lastUnlockTime = 0L             // NEW: prevent immediate re-lock after unlock
 
     // Single-tap deferral so we can detect a second tap
     private var awaitingSecondTap = false
@@ -116,7 +119,7 @@ class ControlView(
 
     // Paint for drawing the control
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    
+
     // System vibrator for stronger haptic feedback
     private val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
 
@@ -182,7 +185,7 @@ class ControlView(
         stopRepeat()
         stopContinuousSending()
         stopDirectionalCommands()
-        
+
         // Cancel any pending mouse click handlers
         mouseClickHandler.removeCallbacksAndMessages(null)
 
@@ -198,7 +201,7 @@ class ControlView(
         when (model.type) {
             ControlType.BUTTON -> {
                 val cornerRadius = min(width, height) / 3f
-                
+
                 if (isLatched || isPressed) {
                     // Solid blue when pressed or latched
                     paint.style = Style.FILL
@@ -214,7 +217,7 @@ class ControlView(
             }
             ControlType.RECENTER -> {
                 val radius = min(width, height) / 2f
-                
+
                 if (isLatched || isPressed) {
                     // Solid orange when pressed or latched
                     paint.style = Style.FILL
@@ -448,17 +451,33 @@ class ControlView(
                         downY = e.y
 
                         // Handle mouse button states
+
                         if (model.doubleTapClickLock) {
-                            // If this DOWN follows a recent clean tap, allow HOLD to engage lock
+                            // If this DOWN follows a recent clean tap, allow HOLD to engage lock (strict UR mode)
                             val now = System.currentTimeMillis()
-                            val withinSecondTap = (now - lastTapTime) <= secondTapMaxGapMs && !leftHeld
+
+                            // Expire any old "primed" tap if the window passed
+                            if (now - lastTapTime > secondTapMaxGapMs) {
+                                lastTapWasClean = false
+                            }
+
+                            // Don’t allow re-lock immediately after an unlock tap
+                            val inPostUnlockCooldown = (now - lastUnlockTime) < postUnlockCooldownMs
+
+                            // Only arm a lock if: (a) inside 2nd-tap window, (b) previous tap was clean,
+                            // (c) not already held, (d) not in cooldown
+                            val qualifiesForLockArm =
+                                (now - lastTapTime) <= secondTapMaxGapMs &&
+                                        lastTapWasClean &&
+                                        !leftHeld &&
+                                        !inPostUnlockCooldown
 
                             // Cancel any prior pending check
                             secondTapHoldCheck?.let { mouseClickHandler.removeCallbacks(it) }
                             secondTapHoldCheck = null
 
-                            if (withinSecondTap) {
-                                // Post a short hold check: if finger still down & hasn't moved -> LOCK
+                            if (qualifiesForLockArm) {
+                                // Post a hold check: if finger still down & hasn't moved -> LOCK
                                 secondTapHoldCheck = Runnable {
                                     val stillDown = fingerIsDown
                                     val movedTooMuch = (kotlin.math.abs(lastTouchX - downX) > tapSlopPx) ||
@@ -467,13 +486,15 @@ class ControlView(
                                         leftHeld = true
                                         UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                                         triggerStrongVibration(25)
+                                        // consume the primed tap so you can't lock again much later
+                                        lastTapWasClean = false
+                                        lastTapTime = 0L
                                         Log.d("TOUCHPAD", "Double-tap-HOLD: click-lock ON")
                                     }
                                     secondTapHoldCheck = null
                                 }
                                 mouseClickHandler.postDelayed(secondTapHoldCheck!!, holdToLockMs)
                             }
-
                         } else if (model.toggleLeftClick) {
                             // Toggle mode - flip the leftHeld state
                             leftHeld = !leftHeld
@@ -554,6 +575,7 @@ class ControlView(
                         secondTapHoldCheck?.let { mouseClickHandler.removeCallbacks(it) }
                         secondTapHoldCheck = null
 
+
                         if (model.doubleTapClickLock) {
                             val upTime = System.currentTimeMillis()
                             val duration = upTime - lastDownTime
@@ -567,19 +589,31 @@ class ControlView(
                                 if (isCleanTap) {
                                     UdpClient.sendCommand("MOUSE_LEFT_UP")
                                     leftHeld = false
+                                    lastUnlockTime = upTime          // NEW: short cooldown before a re-lock
                                     triggerStrongVibration(15)
                                     Log.d("TOUCHPAD", "Tap: click-lock OFF")
                                 }
+                                // Unlocking should not prime a new lock
+                                lastTapWasClean = false
+                                lastTapTime = 0L
                             } else {
-                                // Not locked: a clean tap = normal click (immediate)
                                 if (isCleanTap) {
+                                    // Single clean tap = normal click
                                     UdpClient.sendCommand("MOUSE_LEFT_DOWN")
                                     UdpClient.sendCommand("MOUSE_LEFT_UP")
                                     triggerStrongVibration(20)
                                     Log.d("TOUCHPAD", "Single tap: click")
-                                    lastTapTime = upTime // mark this as the prior tap for a potential 2nd-tap-hold
+
+                                    // Prime for a potential lock (expires quickly)
+                                    lastTapWasClean = true
+                                    lastTapTime = upTime
                                 } else {
-                                    // Not a clean tap (drag etc.) → don't update lastTapTime
+                                    // Not a clean tap → do not prime a lock
+                                    lastTapWasClean = false
+                                    // Clear stale timestamp so a much-later second tap can't arm a lock
+                                    if (upTime - lastTapTime > secondTapMaxGapMs) {
+                                        lastTapTime = 0L
+                                    }
                                 }
                             }
                         } else {
