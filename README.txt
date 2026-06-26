@@ -454,7 +454,7 @@ A typical editing flow is:
 1. Open the profile you want to edit.
 2. Turn on **Edit Mode**.
 3. Use the add button, usually a `+` button, to add controls.
-4. Tap a control’s gear/settings icon to edit it.
+4. Hold your finger on a control.
 5. Drag controls to move them.
 6. Resize controls if the version supports resizing.
 7. Save the profile/layout.
