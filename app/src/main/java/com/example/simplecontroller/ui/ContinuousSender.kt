@@ -25,7 +25,7 @@ class ContinuousSender(
     private var lastStickY = 0f
 
     // Throttle sending frequency
-    private val sendIntervalMs = 10L  // ~100 FPS (down from 16ms)
+    private val sendIntervalMs = 16L  // ~100 FPS (up from 10ms)
     private var lastSendTimeMs = 0L
 
     // Use UDP by default for faster transmission
