@@ -37,6 +37,8 @@ class ControlViewHelper(
     private val parentView: ControlView,
     private val onDeleteRequested: (Control) -> Unit
 ) {
+    private data class StickDirectionCommand(val stickName: String, val x: Float, val y: Float)
+
     private var pulseRepeater: Runnable? = null
     var pulseAlreadyFired = false
     private var isPulseLoopActive = false
@@ -232,6 +234,12 @@ class ControlViewHelper(
         }
         // ──────────────────────────────────────────────────────
 
+        parseStickDirectionCommand(command)?.let { stickCommand ->
+            Log.d("ControlViewHelper", "Sending stick direction command via UdpClient: $command")
+            UdpClient.sendStickPosition(stickCommand.stickName, stickCommand.x, stickCommand.y)
+            return
+        }
+
         val isXboxCommand = command.startsWith("X360")
         val isMouseCommand = command.startsWith("MOUSE_")
         val isTouchpadCommand = command.startsWith("TOUCHPAD:")
@@ -315,8 +323,15 @@ class ControlViewHelper(
             .forEach { raw ->
                 val cmd = raw.trim()
                 Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
+                val stickCommand = parseStickDirectionCommand(cmd)
 
                 when {
+                    // Stick direction button payloads -> center the stick on lift
+                    stickCommand != null -> {
+                        Log.d("ControlViewHelper", "Sending stick direction release: ${stickCommand.stickName}:0.00,0.00")
+                        UdpClient.sendStickPosition(stickCommand.stickName, 0f, 0f)
+                    }
+
                     // Xbox buttons → explicit *_RELEASE
                     cmd.startsWith("X360") -> {
                         val releaseCmd = if (cmd.endsWith("_HOLD")) {
@@ -358,6 +373,27 @@ class ControlViewHelper(
                     }
                 }
             }
+    }
+
+    private fun parseStickDirectionCommand(command: String): StickDirectionCommand? {
+        val match = Regex("""(?i)^(LS|RS):([A-Z]+)([0-9]{1,3})?$""")
+            .matchEntire(command.trim())
+            ?: return null
+        val stickName = match.groupValues[1].uppercase()
+        val direction = match.groupValues[2].uppercase()
+        val amount = ((match.groupValues[3].toFloatOrNull() ?: 100f).coerceIn(0f, 100f)) / 100f
+        val (x, y) = when (direction) {
+            "R", "RIGHT" -> 1f to 0f
+            "L", "LEFT" -> -1f to 0f
+            "U", "UP" -> 0f to -1f
+            "D", "DOWN" -> 0f to 1f
+            "UR" -> 1f to -1f
+            "UL" -> -1f to -1f
+            "BR" -> 1f to 1f
+            "BL" -> -1f to 1f
+            else -> return null
+        }
+        return StickDirectionCommand(stickName, x * amount, y * amount)
     }
 
     /**
