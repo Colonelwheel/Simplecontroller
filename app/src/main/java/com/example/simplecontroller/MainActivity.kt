@@ -386,7 +386,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     private fun loadNetworkSettings() {
         val host = networkPrefs.getString("serverHost", "10.0.2.2") ?: "10.0.2.2"
-        val port = networkPrefs.getInt("serverPort", 9001)
+        val port = networkPrefs.getInt("serverPort", NetworkClient.DEFAULT_RECEIVER_PORT)
         val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
 
         // Load player role
@@ -443,7 +443,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Fill in current values
         editHost.setText(networkPrefs.getString("serverHost", "10.0.2.2"))
-        editPort.setText(networkPrefs.getInt("serverPort", 9001).toString())
+        editPort.setText(networkPrefs.getInt("serverPort", NetworkClient.DEFAULT_RECEIVER_PORT).toString())
         checkAutoReconnect.isChecked = networkPrefs.getBoolean("autoReconnect", false)
 
         // Apply theme to dialog elements
@@ -465,7 +465,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             .setPositiveButton("Connect") { _, _ ->
                 // --- Read fields ---
                 val host = editHost.text.toString()
-                val port = editPort.text.toString().toIntOrNull() ?: 9001
+                val port = editPort.text.toString().toIntOrNull() ?: NetworkClient.DEFAULT_RECEIVER_PORT
                 val autoReconnect = checkAutoReconnect.isChecked
                 val useCbv0Checked = checkUseCbv0.isChecked  // <-- the new checkbox
 

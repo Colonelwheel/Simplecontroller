@@ -15,7 +15,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.example.simplecontroller.CbProtocol
-import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Provides UDP communication for lower latency position updates.
@@ -27,9 +26,6 @@ object UdpClient {
     @Volatile private var useCbv0: Boolean = false
     private const val CB_PORT = 9010
 
-    private val stickSessionId = UUID.randomUUID().toString().take(8)
-    private val stickSequence = AtomicLong(0L)
-
     /** Enable/disable CBv0 binary sending at runtime. */
     fun setConsoleBridgeEnabled(enabled: Boolean) {
         useCbv0 = enabled
@@ -40,7 +36,7 @@ object UdpClient {
 
     // Using constants for tagging and configuration
     private const val TAG = "UdpClient"
-    private const val DEFAULT_PORT = 9001
+    private const val DEFAULT_PORT = NetworkClient.DEFAULT_RECEIVER_PORT
 
     // Socket and address information
     private var socket: DatagramSocket? = null
@@ -156,7 +152,7 @@ object UdpClient {
                     // If this command isn't supported by CBv0 yet, fall through to legacy text.
                 }
 
-                // Legacy text path (direct to :9001) — includes player prefix
+                // Legacy text path (direct to the receiver port) includes player prefix.
                 val message = "${playerPrefix}${command}"
                 val buffer = message.toByteArray()
                 val packet = DatagramPacket(buffer, buffer.size, serverAddress, serverPort)
@@ -287,7 +283,7 @@ object UdpClient {
     /**
      * Primary method used by the touchpad: send *deltas* (dx, dy).
      * When CBv0 is enabled, we encode to TYPE_MOUSE_DELTA and send to :9010.
-     * Otherwise, we send the legacy text "playerX:DELTA:x,y" to :9001.
+     * Otherwise, we send the legacy text "playerX:DELTA:x,y" to the receiver port.
      */
     fun sendTouchpadDelta(dx: Float, dy: Float) {
         // Build the common player prefix for legacy path
@@ -312,7 +308,7 @@ object UdpClient {
                     // If for some reason encoding isn't supported, fall through to legacy
                 }
 
-                // Legacy text path (direct to :9001) — includes player prefix
+                // Legacy text path (direct to the receiver port) includes player prefix.
                 val msgStr = "${playerPrefix}DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}"
                 val msg = msgStr.toByteArray()
                 socket?.send(DatagramPacket(msg, msg.size, serverAddress, serverPort))
@@ -357,16 +353,9 @@ object UdpClient {
     fun sendStickPosition(stickNameRaw: String, x: Float, y: Float) {
         val canon = normalizeStickName(stickNameRaw) // e.g., "STICK_L" or "STICK_R"
 
-        // Assign sequence number BEFORE launching the coroutine.
-        // This lets the Python receiver identify stale/out-of-order UDP packets.
-        val seq = stickSequence.incrementAndGet()
-
-        val xText = "%.2f".format(x)
-        val yText = "%.2f".format(y)
-
-        // If UDP not ready, fall back to legacy path with sequencing included
+        // If UDP not ready, fall back to TCP (legacy text, canonical name)
         if (!isInitialized || socket == null || serverAddress == null) {
-            NetworkClient.send("$canon:$stickSessionId:$seq:$xText,$yText")
+            NetworkClient.send("$canon:${"%.2f".format(x)},${"%.2f".format(y)}")
             return
         }
 
@@ -377,9 +366,8 @@ object UdpClient {
                     val isRight = canon.contains("_R")
                     val side = if (isRight) "RS" else "LS"
 
-                    // CBv0 already has its own sequence number built into the protocol,
-                    // so leave its existing packet format unchanged.
-                    val cbCompat = "$side:$xText,$yText"
+                    // Build a CBv0-encodable legacy string, then encode → frame
+                    val cbCompat = "$side:${"%.2f".format(x)},${"%.2f".format(y)}"
                     val frame = CbProtocol.encode(cbCompat)
                     if (frame != null) {
                         val pkt = DatagramPacket(frame, frame.size, serverAddress, targetPort())
@@ -389,34 +377,17 @@ object UdpClient {
                     // If for any reason encoding returns null, fall through to legacy path below.
                 }
 
-                // Legacy text path — includes player prefix, session ID and sequence number
-                val playerPrefix =
-                    if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
-
-                val message = "${playerPrefix}${canon}:$stickSessionId:$seq:$xText,$yText"
+                // Legacy text path (direct to the receiver port) includes player prefix and canonical stick name.
+                val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+                val message = "${playerPrefix}${canon}:${"%.2f".format(x)},${"%.2f".format(y)}"
                 val buf = message.toByteArray()
-                val packet = DatagramPacket(buf, buf.size, serverAddress, serverPort)
-
-                // Normal stick positions are sent once.
-                // Center/release packets are sent 3 times with the SAME sequence number.
-                // This helps prevent a lost 0,0 packet from leaving the stick stuck.
-                val repeats = if (x == 0f && y == 0f) 3 else 1
-
-                repeat(repeats) { index ->
-                    socket?.send(packet)
-
-                    if (repeats > 1 && index < repeats - 1) {
-                        delay(5)
-                    }
-                }
-
+                socket?.send(DatagramPacket(buf, buf.size, serverAddress, serverPort))
             } catch (e: Exception) {
                 if (Math.random() < 0.01) {
                     Log.e(TAG, "Error sending UDP stick: ${e.message}")
                 }
-
-                // Last resort legacy path with sequencing included
-                NetworkClient.send("$canon:$stickSessionId:$seq:$xText,$yText")
+                // Last resort TCP (legacy text)
+                NetworkClient.send("$canon:${"%.2f".format(x)},${"%.2f".format(y)}")
             }
         }
     }

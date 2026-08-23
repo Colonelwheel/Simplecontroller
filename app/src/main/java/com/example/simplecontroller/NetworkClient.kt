@@ -4,18 +4,34 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import kotlinx.coroutines.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.net.DatagramPacket
 import java.net.DatagramSocket
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.net.SocketException
 import java.net.SocketTimeoutException
 
-
 object NetworkClient {
-    // Connection status enum
+    private const val TAG = "NetworkClient"
+    private const val DEFAULT_HOST = "10.0.2.2"
+    const val DEFAULT_RECEIVER_PORT = 42734
+    private const val LEGACY_RECEIVER_PORT = 9001
+    private const val DISCOVERY_REQUEST = "SIMPLE_CONTROLLER_DISCOVER"
+    private const val DISCOVERY_RESPONSE_PREFIX = "SIMPLE_CONTROLLER_RECEIVER"
+    private const val CONNECT_TIMEOUT_MS = 700
+    private const val DISCOVERY_TIMEOUT_MS = 1200
+    private const val HEARTBEAT_TIMEOUT_MS = 6500L
+
     enum class ConnectionStatus {
         DISCONNECTED,
         CONNECTING,
@@ -23,28 +39,29 @@ object NetworkClient {
         ERROR
     }
 
-    // Define player roles
     enum class PlayerRole {
         PLAYER1,
         PLAYER2
     }
 
-    // Current player selection
+    private data class ReceiverEndpoint(
+        val address: InetAddress,
+        val port: Int,
+        val discovered: Boolean
+    )
+
     private var currentPlayerRole = PlayerRole.PLAYER1
 
-    // Expose connection status as state flow for UI updates
     private val _connectionStatus = MutableStateFlow(ConnectionStatus.DISCONNECTED)
     val connectionStatus = _connectionStatus.asStateFlow()
 
-    // Add last error message
     private val _lastErrorMessage = MutableStateFlow<String?>(null)
     val lastErrorMessage = _lastErrorMessage.asStateFlow()
 
-    // Connection settings with default values
-    private var hostAddress = "10.0.2.2"
-    private var portNumber = 9001
+    private var hostAddress = DEFAULT_HOST
+    private var portNumber = DEFAULT_RECEIVER_PORT
+    private var activePortNumber = DEFAULT_RECEIVER_PORT
 
-    // Auto-reconnect settings
     private var autoReconnect = false
     private var reconnectAttempts = 0
     private val maxReconnectAttempts = 5
@@ -52,9 +69,8 @@ object NetworkClient {
     private val reconnectHandler = Handler(Looper.getMainLooper())
     private val reconnectRunnable = Runnable { start() }
 
-    // Heartbeat for connection verification
     private val heartbeatHandler = Handler(Looper.getMainLooper())
-    private val heartbeatInterval = 2000L // 2 seconds
+    private val heartbeatInterval = 2000L
     private val heartbeatRunnable = object : Runnable {
         override fun run() {
             if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
@@ -67,101 +83,91 @@ object NetworkClient {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: DatagramSocket? = null
     private var serverAddress: InetAddress? = null
+    private var lastPacketReceivedAt = 0L
 
-    /**
-     * Configure socket for minimal latency
-     */
     private fun setupLowLatencySocket(socket: DatagramSocket) {
         try {
-            // Set minimal buffer sizes
             socket.sendBufferSize = 1024
             socket.receiveBufferSize = 1024
 
-            // Set traffic class for low latency if on newer Android versions
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                socket.trafficClass = 0x10  // IPTOS_LOWDELAY
+                socket.trafficClass = 0x10
             }
 
-            Log.d("NetworkClient", "Applied low-latency socket configuration")
+            Log.d(TAG, "Applied low-latency socket configuration")
         } catch (e: Exception) {
-            Log.e("NetworkClient", "Failed to apply low-latency socket config: ${e.message}")
+            Log.e(TAG, "Failed to apply low-latency socket config: ${e.message}")
         }
     }
 
-    /** Update connection settings */
     fun updateSettings(host: String, port: Int, autoReconnectEnabled: Boolean) {
-        this.hostAddress = host
-        this.portNumber = port
-        this.autoReconnect = autoReconnectEnabled
+        hostAddress = host.trim().ifEmpty { DEFAULT_HOST }
+        portNumber = if (port > 0) port else DEFAULT_RECEIVER_PORT
+        activePortNumber = portNumber
+        autoReconnect = autoReconnectEnabled
 
-        // If already connected, disconnect and reconnect with new settings
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             close()
             start()
         }
     }
 
-    /** Set the player role for this client */
     fun setPlayerRole(role: PlayerRole) {
         currentPlayerRole = role
-        Log.d("NetworkClient", "Player role set to: $role")
+        Log.d(TAG, "Player role set to: $role")
 
-        // If already connected, send player registration
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             val roleId = if (role == PlayerRole.PLAYER1) "player1" else "player2"
             send("REGISTER:$roleId")
         }
     }
 
-    /** Get the current player role */
     fun getPlayerRole(): PlayerRole {
         return currentPlayerRole
     }
 
-    /** Start connection to server */
     fun start() {
         if (_connectionStatus.value == ConnectionStatus.CONNECTING) return
 
         _connectionStatus.value = ConnectionStatus.CONNECTING
         scope.launch {
             try {
-                // Cancel any pending reconnect attempts
                 reconnectHandler.removeCallbacks(reconnectRunnable)
+                heartbeatHandler.removeCallbacks(heartbeatRunnable)
 
-                Log.d("NetworkClient", "Connecting to $hostAddress:$portNumber via UDP")
+                Log.d(TAG, "Connecting to $hostAddress:$portNumber via UDP")
 
-                // Close existing socket if any
                 socket?.close()
+                val newSocket = DatagramSocket()
+                setupLowLatencySocket(newSocket)
+                socket = newSocket
 
-                // Create a new UDP socket
-                socket = DatagramSocket()
+                val endpoint = resolveReceiverEndpoint(newSocket)
+                    ?: throw IOException("No Simple Controller receiver found")
 
-                // Apply low-latency optimizations
-                socket?.let { setupLowLatencySocket(it) }
+                serverAddress = endpoint.address
+                activePortNumber = endpoint.port
+                lastPacketReceivedAt = System.currentTimeMillis()
 
-                serverAddress = InetAddress.getByName(hostAddress)
-
-                // Send an initial connection message to establish communication
-                val connectMessage = "CONNECT:${if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"}"
-                sendRaw(connectMessage)
-
-                // Start listening for responses in a separate coroutine
-                startListening()
+                UdpClient.updateSettings(endpoint.address.hostAddress ?: hostAddress, endpoint.port)
 
                 _connectionStatus.value = ConnectionStatus.CONNECTED
+                startListening()
                 reconnectAttempts = 0
-                Log.d("NetworkClient", "Connected successfully via UDP")
+                val mode = if (endpoint.discovered) "discovered" else "saved"
+                Log.d(TAG, "Connected to $mode receiver at ${endpoint.address.hostAddress}:${endpoint.port}")
 
-                // Start heartbeat
                 heartbeatHandler.post(heartbeatRunnable)
 
-                // Register player role with server
                 val roleId = if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"
                 send("REGISTER:$roleId")
             } catch (e: Exception) {
-                Log.e("NetworkClient", "Connection error", e)
+                Log.e(TAG, "Connection error", e)
+                socket?.close()
+                socket = null
                 _connectionStatus.value = ConnectionStatus.ERROR
-                _lastErrorMessage.value = "Failed to connect: ${e.message}"
+                _lastErrorMessage.value =
+                    "Failed to connect. Start simple_controller_receiver, enable USB tethering or Wi-Fi, and check Windows Firewall."
 
                 if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
                     scheduleReconnect()
@@ -170,7 +176,147 @@ object NetworkClient {
         }
     }
 
-    /** Start listening for server responses */
+    private suspend fun resolveReceiverEndpoint(sock: DatagramSocket): ReceiverEndpoint? =
+        withContext(Dispatchers.IO) {
+            directEndpointCandidates().firstOrNull { tryConnectEndpoint(sock, it) }
+                ?: discoverReceiver(sock)?.takeIf { tryConnectEndpoint(sock, it) }
+        }
+
+    private fun directEndpointCandidates(): List<ReceiverEndpoint> {
+        val endpoints = mutableListOf<ReceiverEndpoint>()
+        val ports = listOf(portNumber, DEFAULT_RECEIVER_PORT, LEGACY_RECEIVER_PORT).distinct()
+
+        try {
+            val address = InetAddress.getByName(hostAddress)
+            ports.forEach { port ->
+                endpoints += ReceiverEndpoint(address, port, discovered = false)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Saved host is not usable for direct connect: $hostAddress", e)
+        }
+
+        return endpoints
+    }
+
+    private fun tryConnectEndpoint(sock: DatagramSocket, endpoint: ReceiverEndpoint): Boolean {
+        val roleId = if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"
+        val message = "CONNECT:$roleId"
+
+        return try {
+            sendPacket(sock, message, endpoint.address, endpoint.port)
+            receiveMatching(sock, CONNECT_TIMEOUT_MS) { response, packet ->
+                packet.address == endpoint.address &&
+                    (response == "CONNECTED:$roleId" || response.startsWith("CONNECTED:"))
+            } != null
+        } catch (e: Exception) {
+            Log.d(TAG, "Receiver did not answer at ${endpoint.address.hostAddress}:${endpoint.port}: ${e.message}")
+            false
+        }
+    }
+
+    private fun discoverReceiver(sock: DatagramSocket): ReceiverEndpoint? {
+        return try {
+            sock.broadcast = true
+            val payload = DISCOVERY_REQUEST.toByteArray()
+            val ports = listOf(portNumber, DEFAULT_RECEIVER_PORT, LEGACY_RECEIVER_PORT).distinct()
+            val addresses = discoveryBroadcastAddresses()
+
+            for (address in addresses) {
+                for (port in ports) {
+                    try {
+                        sock.send(DatagramPacket(payload, payload.size, address, port))
+                    } catch (e: Exception) {
+                        Log.d(TAG, "Discovery send failed to ${address.hostAddress}:$port: ${e.message}")
+                    }
+                }
+            }
+
+            receiveDiscoveryResponse(sock)
+        } catch (e: Exception) {
+            Log.w(TAG, "Receiver discovery failed: ${e.message}", e)
+            null
+        }
+    }
+
+    private fun receiveDiscoveryResponse(sock: DatagramSocket): ReceiverEndpoint? {
+        val result = receiveMatching(sock, DISCOVERY_TIMEOUT_MS) { response, _ ->
+            response.startsWith(DISCOVERY_RESPONSE_PREFIX)
+        } ?: return null
+
+        val response = result.first
+        val packet = result.second
+        val discoveredPort = response.split(":").getOrNull(1)?.toIntOrNull() ?: packet.port
+
+        Log.d(TAG, "Discovered receiver at ${packet.address.hostAddress}:$discoveredPort")
+        return ReceiverEndpoint(packet.address, discoveredPort, discovered = true)
+    }
+
+    private fun discoveryBroadcastAddresses(): List<InetAddress> {
+        val addresses = linkedSetOf(
+            "255.255.255.255",
+            "192.168.42.255",
+            "192.168.43.255"
+        )
+
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val networkInterface = interfaces.nextElement()
+                if (!networkInterface.isUp || networkInterface.isLoopback) continue
+
+                for (interfaceAddress in networkInterface.interfaceAddresses) {
+                    val broadcast = interfaceAddress.broadcast
+                    if (broadcast is Inet4Address) {
+                        addresses += broadcast.hostAddress
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Could not enumerate broadcast addresses: ${e.message}")
+        }
+
+        return addresses.mapNotNull { host ->
+            runCatching { InetAddress.getByName(host) }.getOrNull()
+        }
+    }
+
+    private fun receiveMatching(
+        sock: DatagramSocket,
+        timeoutMs: Int,
+        isMatch: (String, DatagramPacket) -> Boolean
+    ): Pair<String, DatagramPacket>? {
+        val originalTimeout = sock.soTimeout
+        val deadline = System.currentTimeMillis() + timeoutMs
+        val buffer = ByteArray(1024)
+
+        try {
+            while (true) {
+                val remaining = (deadline - System.currentTimeMillis()).toInt()
+                if (remaining <= 0) return null
+
+                sock.soTimeout = remaining
+                val packet = DatagramPacket(buffer, buffer.size)
+                try {
+                    sock.receive(packet)
+                } catch (e: SocketTimeoutException) {
+                    return null
+                }
+
+                val response = String(packet.data, packet.offset, packet.length).trim()
+                if (isMatch(response, packet)) {
+                    return response to packet
+                }
+            }
+        } finally {
+            sock.soTimeout = originalTimeout
+        }
+    }
+
+    private fun sendPacket(sock: DatagramSocket, message: String, address: InetAddress, port: Int) {
+        val buffer = message.toByteArray()
+        sock.send(DatagramPacket(buffer, buffer.size, address, port))
+    }
+
     private fun startListening() {
         scope.launch {
             val buffer = ByteArray(1024)
@@ -178,28 +324,23 @@ object NetworkClient {
 
             while (_connectionStatus.value == ConnectionStatus.CONNECTED) {
                 try {
-                    socket?.soTimeout = 5000               // 5-second timeout
-                    socket?.receive(packet)                // blocks
+                    socket?.soTimeout = 5000
+                    packet.length = buffer.size
+                    socket?.receive(packet)
                     val received = String(packet.data, 0, packet.length)
-
-                    // Handle received message (e.g., PONG responses, etc.)
+                    lastPacketReceivedAt = System.currentTimeMillis()
                     handleServerMessage(received)
-
                 } catch (e: SocketTimeoutException) {
-                    // No packet within 5 s → harmless for an idle controller
                     continue
-
                 } catch (e: SocketException) {
                     if (_connectionStatus.value == ConnectionStatus.DISCONNECTED) {
-                        // Socket was intentionally closed; exit the loop
                         break
                     }
-                    Log.e("NetworkClient", "Socket error while listening", e)
+                    Log.e(TAG, "Socket error while listening", e)
                     handleDisconnect()
                     break
-
                 } catch (e: Exception) {
-                    Log.e("NetworkClient", "Error receiving data", e)
+                    Log.e(TAG, "Error receiving data", e)
                     if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
                         _lastErrorMessage.value = "Connection error: ${e.message}"
                     }
@@ -208,29 +349,29 @@ object NetworkClient {
         }
     }
 
-
-    /** Handle messages from the server */
     private fun handleServerMessage(message: String) {
         when {
-            message.startsWith("PONG") -> {
-                // Heartbeat response, connection is still alive
-                Log.d("NetworkClient", "Received heartbeat response")
-            }
-            // Add other message types as needed
+            message.startsWith("PONG") -> Log.d(TAG, "Received heartbeat response")
+            message.startsWith("REGISTERED:") -> Log.d(TAG, "Registered with receiver")
         }
     }
 
-    /** Send a heartbeat to verify connection */
     private fun sendHeartbeat() {
         try {
             sendRaw("PING")
+
+            val elapsed = System.currentTimeMillis() - lastPacketReceivedAt
+            if (elapsed > HEARTBEAT_TIMEOUT_MS) {
+                Log.w(TAG, "Receiver heartbeat timed out after ${elapsed}ms")
+                _lastErrorMessage.value = "Receiver connection lost"
+                handleDisconnect()
+            }
         } catch (e: Exception) {
-            Log.e("NetworkClient", "Failed to send heartbeat", e)
+            Log.e(TAG, "Failed to send heartbeat", e)
             handleDisconnect()
         }
     }
 
-    /** Close the connection */
     fun close() {
         reconnectHandler.removeCallbacks(reconnectRunnable)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
@@ -238,15 +379,16 @@ object NetworkClient {
         closeConnection()
     }
 
-    /** Internal method to close socket */
     private fun closeConnection() {
         socket?.close()
         socket = null
+        serverAddress = null
+        activePortNumber = portNumber
+        UdpClient.close()
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
         scope.coroutineContext.cancelChildren()
     }
 
-    /** Handle disconnection */
     private fun handleDisconnect() {
         closeConnection()
 
@@ -255,66 +397,56 @@ object NetworkClient {
         }
     }
 
-    /** Schedule a reconnection attempt */
     private fun scheduleReconnect() {
         reconnectAttempts++
-        Log.d("NetworkClient", "Scheduling reconnect attempt $reconnectAttempts/$maxReconnectAttempts")
+        Log.d(TAG, "Scheduling reconnect attempt $reconnectAttempts/$maxReconnectAttempts")
         reconnectHandler.postDelayed(reconnectRunnable, reconnectDelayMs)
     }
 
-    /** Send raw data directly without player prefix */
     private fun sendRaw(message: String) {
-        socket?.let { socket ->
+        socket?.let { openSocket ->
             serverAddress?.let { address ->
                 try {
-                    val buffer = message.toByteArray()
-                    val packet = DatagramPacket(buffer, buffer.size, address, portNumber)
-                    socket.send(packet)
+                    sendPacket(openSocket, message, address, activePortNumber)
                 } catch (e: Exception) {
-                    Log.e("NetworkClient", "Error sending data: ${e.message}")
+                    Log.e(TAG, "Error sending data: ${e.message}")
                     throw e
                 }
             }
         }
     }
 
-    /**
-     * Send a command with the current player prefix.
-     * Non‑blocking, thread‑safe.
-     */
     fun send(message: String) {
-        android.util.Log.d("NetworkClient", "Sending: $message")
+        Log.d(TAG, "Sending: $message")
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             scope.launch {
                 try {
-                    // Prefix message with player ID if it doesn't already have one
                     val prefixedMessage = if (message.startsWith("REGISTER:") ||
                         message.startsWith("player1:") ||
-                        message.startsWith("player2:")) {
+                        message.startsWith("player2:")
+                    ) {
                         message
                     } else {
                         val playerPrefix = if (currentPlayerRole == PlayerRole.PLAYER1) "player1:" else "player2:"
                         "$playerPrefix$message"
                     }
 
-                    // Send the message via UDP
                     serverAddress?.let { address ->
                         val buffer = prefixedMessage.toByteArray()
-                        val packet = DatagramPacket(buffer, buffer.size, address, portNumber)
+                        val packet = DatagramPacket(buffer, buffer.size, address, activePortNumber)
                         socket?.send(packet)
                     }
                 } catch (e: Exception) {
-                    Log.e("NetworkClient", "Failed to send message: ${e.message}")
+                    Log.e(TAG, "Failed to send message: ${e.message}")
                     _lastErrorMessage.value = "Failed to send data: ${e.message}"
 
-                    // Check if this is a connection error
                     if (e is SocketException) {
                         handleDisconnect()
                     }
                 }
             }
         } else {
-            Log.w("NetworkClient", "Cannot send when not connected")
+            Log.w(TAG, "Cannot send when not connected")
         }
     }
 }
