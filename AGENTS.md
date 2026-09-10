@@ -36,6 +36,6 @@
 
 ## Stable Recovery Baseline
 - Read `STABLE_BASELINE.md` before implementation work.
-- GitHub commit `c6b60428296e1bc2a93fe3859bb962104f769bc9` is Tyler's confirmed stable recovery baseline for this critical app.
+- GitHub commit `c6b60428296e1bc2a93fe3859bb962104f769bc9`, tagged `stable-2026-09-10`, is Tyler's confirmed stable recovery baseline for this critical app.
 - Preserve the history containing that commit. Never force-push, rewrite, squash away, or otherwise remove the stable recovery point.
 - The dirty local checkout may contain newer unconfirmed work and is not part of the stable baseline unless it is deliberately committed and confirmed later.

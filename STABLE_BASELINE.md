@@ -8,6 +8,7 @@ SimpleController is a critical accessibility application for Tyler. Treat its co
 - Branch at confirmation: `master`
 - Stable commit: `c6b60428296e1bc2a93fe3859bb962104f769bc9`
 - Short commit: `c6b6042`
+- Recovery tag: `stable-2026-09-10`
 - Confirmed by Tyler on September 10, 2026.
 
 Tyler confirmed that the GitHub repository state at this commit is a stable copy. Here, "stable" means a user-confirmed working recovery snapshot; it does not claim that exhaustive formal testing proved the absence of every defect.
@@ -15,6 +16,7 @@ Tyler confirmed that the GitHub repository state at this commit is a stable copy
 ## Preservation rules
 
 - Preserve the Git history containing this commit.
+- Preserve the annotated `stable-2026-09-10` tag and keep it pointing to the confirmed commit.
 - Never force-push, rewrite, squash away, delete, or overwrite this recovery point.
 - Base risky or substantial work on a separate branch or worktree when practical.
 - Keep later changes focused and reversible, with verification proportional to their risk.
