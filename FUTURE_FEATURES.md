@@ -176,8 +176,8 @@ Example flow:
 1. The surface starts as LT plus aim.
 2. The first completed LT gesture arms an alternate RT plus aim phase. LT may have released normally or may remain latched, according to the base button's settings.
 3. The next touch on the same physical surface behaves as RT plus aim, so the finger can reacquire/continue tracking and fire without traveling to another button.
-4. Releasing the temporary RT gesture releases RT and returns the surface to its normal LT function.
-5. If LT remains latched, the next base-state touch follows the agreed unlatch behavior.
+4. Normally completing and releasing the temporary RT gesture releases RT, releases any still-latched LT base payload, and returns the surface to an unlatched LT function.
+5. If Android unexpectedly cancels the temporary RT gesture, the surface remains armed as RT rather than unexpectedly returning to LT. A deliberate adjustable hold-and-release reset returns it to unlatched LT.
 
 This should be a separate optional state layered onto Button Aim Surface rather than a mutation of `model.payload`. Keep the persisted base and alternate configurations stable and track only the active phase at runtime.
 
@@ -186,6 +186,7 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [ ] `Use one-shot alternate` checkbox.
 - [ ] `Alternate payload` field.
 - [ ] `Alternate send timing`: Immediate or On release.
+- [ ] `Alternate reset hold duration`, defaulting to 2,000 ms.
 - [ ] Optional alternate name, color, and haptic pattern so the armed state is unmistakable.
 - [ ] Initially reuse the base Button Aim Surface output, sensitivity, inversion, response curve, and displacement settings.
 - [ ] Consider independent alternate aim settings only if a real use case requires them; avoid duplicating every property initially.
@@ -196,7 +197,9 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [ ] Use explicit states such as `BASE`, `ALTERNATE_ARMED`, and `ALTERNATE_ACTIVE`; do not rewrite the serialized base payload.
 - [ ] A successful intentional base activation transitions `BASE -> ALTERNATE_ARMED`.
 - [ ] Touch-down on an armed surface transitions `ALTERNATE_ARMED -> ALTERNATE_ACTIVE` and uses the alternate payload/timing.
-- [ ] Intentional alternate release cleans up alternate outputs and transitions `ALTERNATE_ACTIVE -> BASE`.
+- [ ] Intentional normal alternate release cleans up alternate outputs, releases any base payload that remained latched for the alternate gesture, and transitions `ALTERNATE_ACTIVE -> BASE` with Base unlatched.
+- [ ] Unexpected alternate `ACTION_CANCEL` cleans up active alternate output but transitions back to `ALTERNATE_ARMED`, allowing an RT retry instead of silently changing the surface to LT.
+- [ ] While left in the canceled/armed alternate state, holding the surface for at least the configured reset duration arms the reset, but does not perform it until release. The RT gesture remains valid throughout; releasing completes RT normally and then returns the surface to unlatched Base.
 - [ ] Aim output is available during both base and alternate gestures and always centers/stops at each gesture's terminal event.
 - [ ] A base action should arm the alternate only if the base action actually activated. A canceled gesture, failed connection, or Hold Toggle quick release that intentionally does nothing must not arm it.
 
@@ -205,13 +208,14 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [ ] If the base payload (for example LT) remains latched when the alternate phase is armed, keep that base payload held throughout the temporary alternate gesture.
 - [ ] The alternate touch must bypass the ordinary `already latched -> unlatch immediately` branch; otherwise touching RT would incorrectly release LT.
 - [ ] Track base-held and alternate-held commands separately so cleaning up RT cannot release the latched LT.
-- [ ] After the alternate releases and the surface returns to Base, the next base-state touch may use the ordinary immediate-unlatch path to release LT.
+- [ ] After a normally completed alternate releases, automatically release the latched LT base payload and return to unlatched Base. Do not require another LT touch solely to exit ADS.
 - [ ] If base and alternate payloads address the same logical output, define ownership before implementation so one phase cannot release an output still owned by the other.
 
 ### Delayed alternate behavior
 
 - [ ] With alternate timing set to On release, aim during the alternate gesture without sending its payload.
 - [ ] On intentional lift, send the alternate payload first and center/stop aim immediately afterward, following the Button Aim Surface release-order decision.
+- [ ] A reset-duration alternate gesture remains a valid RT gesture. Immediate RT stays held until release; On-release RT fires normally on release. After RT completes, release any latched base payload and reset the surface to unlatched Base.
 - [ ] Never fire a delayed alternate payload on `ACTION_CANCEL`, app pause, edit-mode entry, control deletion, connection loss, invalid pointer ownership, or an unsuccessful base activation.
 
 ### Visual, haptic, and reset behavior
@@ -219,7 +223,9 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [ ] Visibly change the label/color while the alternate is armed and active; hidden phase changes are unsafe and confusing.
 - [ ] Use distinct optional haptic feedback when the alternate becomes armed, activates, and returns to Base.
 - [ ] Reset the temporary phase to Base on layout load/change, edit-mode entry, control deletion, app shutdown, explicit disconnect, and `RELEASE_ALL`.
-- [ ] On alternate `ACTION_CANCEL`, release any alternate-held outputs and return safely to Base while preserving an independently latched base payload unless a global safety cleanup requires releasing it.
+- [ ] On alternate `ACTION_CANCEL`, center aim, release any alternate-held outputs, and remain visibly `ALTERNATE_ARMED` as RT. Preserve an intentionally latched base payload for retry unless a global safety cleanup such as disconnect, app shutdown, or `RELEASE_ALL` requires releasing it.
+- [ ] While recovering from cancellation, use a distinct reset-armed haptic when the configured hold duration is reached; return to unlatched Base only when that long hold is released.
+- [ ] A global safety cleanup always releases both base and alternate outputs and returns to unlatched Base, even if the ordinary cancellation-retry behavior would remain armed.
 - [ ] Do not persist the temporary armed phase across app restarts.
 
 ### Conflicts and safeguards
@@ -234,10 +240,13 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 
 ### Decisions to confirm before implementation
 
-- [ ] When LT remains latched, confirm that it stays held during the temporary RT gesture; after RT releases and the surface returns to Base, the following base-state touch unlatches LT.
-- [ ] Confirm that the alternate should have its own Immediate/On-release choice.
-- [ ] Confirm that the initial version may keep the alternate momentary rather than giving it an independent Hold Toggle.
-- [ ] Confirm that alternate cancellation should return the surface to Base rather than leave Alternate armed for a retry.
+- [x] When LT remains latched, it stays held during the temporary RT gesture. Normal RT completion then automatically unlatches LT and returns the surface to unlatched Base.
+- [x] The alternate has its own Immediate/On-release choice.
+- [x] The initial version keeps the alternate momentary rather than giving it an independent Hold Toggle.
+- [x] Unexpected alternate cancellation leaves the surface armed as RT for retry instead of returning to LT.
+- [x] Resetting a canceled alternate requires holding the surface for at least 2 seconds by default, then releasing; the duration is adjustable.
+- [x] Reaching the alternate reset duration only arms the reset; it does not switch back to LT until release.
+- [x] The long reset gesture does not suppress RT. Immediate RT remains active during the hold, while delayed RT fires normally on release; RT completes before the surface returns to unlatched LT.
 
 ## General implementation safeguards
 
