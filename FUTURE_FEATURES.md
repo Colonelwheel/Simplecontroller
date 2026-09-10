@@ -90,15 +90,16 @@ Two target workflows:
 ### Proposed properties
 
 - [ ] `Aim while pressed` checkbox on Button controls.
+- [ ] Keep the ordinary Button `Payload` field fully configurable. LT and RT are examples only; allow any payload already supported by a normal button, including other gamepad inputs, keyboard keys, mouse buttons, macros, and multi-command payloads.
 - [ ] `Aim output` choice: Mouse, Right Stick, or Left Stick.
 - [ ] `Send payload on release` checkbox.
 - [ ] Aim sensitivity.
 - [ ] Invert Y.
-- [ ] Optional response curve for stick output.
+- [ ] `Aim movement profile` choice appropriate to the selected output: Linear or Response Curve for Left/Right Stick; Linear Relative or the current Smoothed/Nonlinear scaling for Mouse.
 - [ ] Stick displacement/deadzone settings.
 - [ ] Clear visual and haptic indication for immediate, armed, and latched states.
 
-Reuse the existing `TouchAimOutput` choices and shared aim math where practical, but do not make the new button depend on TouchAim contact-level thresholds.
+Payload and aim output must remain independent. For example, a mouse-button payload may aim with Right Stick, and a gamepad-button payload may aim with Mouse. Reuse the existing `TouchAimOutput` choices and shared aim math where practical, but do not make the new button depend on TouchAim contact-level thresholds.
 
 ### Immediate-payload behavior
 
@@ -127,8 +128,8 @@ Reuse the existing `TouchAimOutput` choices and shared aim math where practical,
 
 ### Aim coordinate recommendation
 
-- [ ] For Mouse, use relative deltas from the previous sample, following the proven TouchAim/touchpad cadence and smoothing model.
-- [ ] For Left/Right Stick, use displacement from the initial finger-down point as the virtual neutral origin rather than the geometric center of the button. This lets the finger start anywhere within the button and avoids an immediate stick jump.
+- [ ] For Mouse, use relative deltas from the previous sample. Let the user choose raw Linear Relative movement or the proven TouchAim/touchpad Smoothed/Nonlinear scaling; keep cadence and rate limiting safe in both modes.
+- [ ] For Left/Right Stick, use displacement from the initial finger-down point as the virtual neutral origin rather than the geometric center of the button. Let the user choose the existing normal Linear mapping or Response Curve mapping. This lets the finger start anywhere within the button and avoids an immediate stick jump.
 - [ ] Clamp stick output, resend it at the established cadence, use ordered stick packets, and explicitly center on every terminal path.
 - [ ] Decide whether return-to-origin centers the stick and whether a configurable floating-origin/recenter behavior is desirable.
 
@@ -159,6 +160,8 @@ Reuse the existing `TouchAimOutput` choices and shared aim math where practical,
 
 ### Decisions to confirm before implementation
 
+- [x] Button Aim Surface payloads are user-configurable rather than hard-coded to LT/RT. Base and one-shot alternate payloads are configured independently and may use any normal Button payload, including mouse buttons.
+- [x] Aim movement behavior is selectable. Stick output offers Linear or Response Curve; Mouse output offers Linear Relative or the existing Smoothed/Nonlinear scaling.
 - [x] With `Send payload on release` and Hold Toggle both enabled, a quick release sends a normal press while a long release creates a latch.
 - [x] Stick aiming uses the initial touch point as neutral rather than the button center.
 - [x] The button retains finger ownership outside its bounds and temporarily suppresses global Swipe.
