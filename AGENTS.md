@@ -33,3 +33,9 @@
 ## Configuration & Operational Notes
 - Maintain `local.properties` locally; it holds the Android SDK path. New preference keys need safe defaults in `NetworkClient` plus PR notes for QA.
 - For layout issues, export the current layout via the in-app save action and attach the file from `touchpad_logs/` for reviewers.
+
+## Stable Recovery Baseline
+- Read `STABLE_BASELINE.md` before implementation work.
+- GitHub commit `c6b60428296e1bc2a93fe3859bb962104f769bc9` is Tyler's confirmed stable recovery baseline for this critical app.
+- Preserve the history containing that commit. Never force-push, rewrite, squash away, or otherwise remove the stable recovery point.
+- The dirty local checkout may contain newer unconfirmed work and is not part of the stable baseline unless it is deliberately committed and confirmed later.
