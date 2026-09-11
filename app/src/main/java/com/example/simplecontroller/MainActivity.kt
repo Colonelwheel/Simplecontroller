@@ -1,6 +1,5 @@
 package com.example.simplecontroller
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
@@ -8,8 +7,6 @@ import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.os.Bundle
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.Settings
@@ -85,8 +82,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /* ---------- connection UI ---------- */
     private lateinit var connectionStatusText: TextView
     private lateinit var btnConnect: Button
-    private lateinit var btnReleaseAll: Button
-    private val releaseFeedbackHandler = Handler(Looper.getMainLooper())
 
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
@@ -149,7 +144,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // 7. Render current layout
         layoutManager.spawnControlViews()
-        btnReleaseAll.bringToFront()
 
         // 8. Setup window insets handling for split screen
         setupWindowInsetsHandling()
@@ -219,12 +213,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     // Override dispatchTouchEvent to handle swipe mode
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
-        // The built-in safety control always wins over Swipe hit-testing, even if a
-        // user control occupies the same screen coordinates.
-        if (::btnReleaseAll.isInitialized && isInsideView(ev, btnReleaseAll)) {
-            return super.dispatchTouchEvent(ev)
-        }
-
         // When swipe mode is active and we're not in edit mode, handle with SwipeManager
         if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
             // If the manager processes it, we're done
@@ -244,9 +232,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var turboSpeedControl: Pair<EditText, ImageButton>
     private var turboSpeed = 16L // Default speed in milliseconds (≈60 Hz)
 
-    // Release All intentionally fires on ACTION_DOWN; a normal click listener remains
-    // installed for accessibility services that invoke performClick directly.
-    @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
         /* --- Edit toggle ------------------------------------------------ */
         uiBuilder.addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
@@ -263,43 +248,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             64                          // Vertical margin
         ) {
             showConnectionSettingsDialog()
-        }
-
-        /* --- Always-available emergency release ------------------------- */
-        btnReleaseAll = uiBuilder.addCornerButton(
-            "RELEASE ALL",
-            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
-            16,
-            16
-        ) {
-            // Accessibility services invoke click directly. Physical touch is handled
-            // on ACTION_DOWN below so a release never waits for finger-up.
-            activateReleaseAll()
-        }.apply {
-            alpha = 1f
-            contentDescription = "Release all SimpleController outputs"
-            backgroundTintList = ContextCompat.getColorStateList(
-                this@MainActivity,
-                R.color.status_error
-            )
-            minWidth = (180 * resources.displayMetrics.density).toInt()
-            minHeight = (56 * resources.displayMetrics.density).toInt()
-            elevation = 24 * resources.displayMetrics.density
-
-            setOnTouchListener { view, event ->
-                when (event.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> {
-                        view.isPressed = true
-                        activateReleaseAll()
-                        true
-                    }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                        view.isPressed = false
-                        true
-                    }
-                    else -> true
-                }
-            }
         }
 
         /* --- Switches --------------------------------------------------- */
@@ -767,7 +715,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     override fun onLayoutLoaded(layoutName: String) {
         this.layoutName = layoutName
-        btnReleaseAll.bringToFront()
     }
 
     /**
@@ -789,9 +736,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     fun activateReleaseAll(showFeedback: Boolean = true) {
         if (showFeedback) {
             triggerReleaseAllHaptic()
-            releaseFeedbackHandler.removeCallbacksAndMessages(null)
-            btnReleaseAll.text = "RELEASED"
-            releaseFeedbackHandler.postDelayed({ btnReleaseAll.text = "RELEASE ALL" }, 1200L)
         }
 
         ReleaseAllCoordinator.releaseAll { status ->
@@ -822,13 +766,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             @Suppress("DEPRECATION")
             vibrator.vibrate(pattern, -1)
         }
-    }
-
-    private fun isInsideView(event: MotionEvent, view: View): Boolean {
-        val location = IntArray(2)
-        view.getLocationOnScreen(location)
-        return event.rawX >= location[0] && event.rawX < location[0] + view.width &&
-            event.rawY >= location[1] && event.rawY < location[1] + view.height
     }
 
     /**

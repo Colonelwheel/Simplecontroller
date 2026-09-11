@@ -22,12 +22,12 @@ Likely touchpoints: `TouchDiagnosticActivity.kt`, `TouchAimHandler.kt`, `Control
 
 ### One-tap Release Everything safety action
 
-- [ ] Add an explicit idempotent `RELEASE_ALL` command.
-- [ ] Clear held/latched Xbox buttons, triggers, keyboard keys, mouse buttons, stick coordinates/macros, Turbo/pulse loops, TouchAim stage holds, Camera Follow output, and any future action-layer state that can hold an output.
-- [ ] Clear the Android-side state as well as the receiver-side state.
-- [ ] Make repeated or delayed duplicate commands harmless.
-- [ ] Provide a normal assignable button payload and an easily reachable built-in emergency option.
-- [ ] Add tests for activation during each held-output type, disconnection, and packet duplication.
+- [x] Add an explicit idempotent `RELEASE_ALL` command.
+- [x] Clear held/latched Xbox buttons, triggers, keyboard keys, mouse buttons, stick coordinates/macros, Turbo/pulse loops, TouchAim stage holds, Camera Follow output, and any future action-layer state that can hold an output.
+- [x] Clear the Android-side state as well as the receiver-side state.
+- [x] Make repeated or delayed duplicate commands harmless.
+- [x] Provide `RELEASE_ALL` as a normal assignable Button payload. No always-visible built-in button is shown.
+- [x] Add tests for activation during each held-output type, disconnection, and packet duplication.
 
 Likely touchpoints: `UdpClient.kt`, `ControlView.kt`, `ControlViewHelper.kt`, `TouchAimHandler.kt`, `simple_controller_receiver.py`, and receiver tests.
 
