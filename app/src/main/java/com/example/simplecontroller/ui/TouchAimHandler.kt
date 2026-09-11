@@ -3,11 +3,12 @@ package com.example.simplecontroller.ui
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
+import com.example.simplecontroller.model.ButtonAimMouseProfile
+import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.TouchAimOutput
 import com.example.simplecontroller.model.TouchStageAction
 import com.example.simplecontroller.net.UdpClient
-import kotlin.math.abs
 
 enum class TouchContactLevel(val rank: Int, val displayName: String) {
     AIM_ONLY(-1, "AIM"),
@@ -35,6 +36,11 @@ class TouchAimHandler(
     private val heldCommands = linkedMapOf<String, OutputCommand>()
     private val pendingPresses = linkedMapOf<String, OutputCommand>()
     private val pressGenerations = mutableMapOf<String, Int>()
+    private val aimOutput = AimOutputSession(
+        ownerToken = Any(),
+        controlSize = controlSize,
+        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick
+    )
 
     var currentLevel: TouchContactLevel = TouchContactLevel.AIM_ONLY
         private set
@@ -43,32 +49,6 @@ class TouchAimHandler(
 
     private var hasScore = false
     private var activePointerId = MotionEvent.INVALID_POINTER_ID
-    private var lastX = 0f
-    private var lastY = 0f
-    private var lastAimSendTime = 0L
-    private var pendingDx = 0f
-    private var pendingDy = 0f
-    private var previousMouseDx = 0f
-    private var previousMouseDy = 0f
-    private var lastStickX = 0f
-    private var lastStickY = 0f
-    private var isStickResending = false
-
-    private val resendStick = object : Runnable {
-        override fun run() {
-            val stickName = model.touchAimOutput.stickName()
-            if (!isStickResending ||
-                activePointerId == MotionEvent.INVALID_POINTER_ID ||
-                stickName == null
-            ) {
-                isStickResending = false
-                return
-            }
-
-            UdpClient.sendStickPosition(stickName, lastStickX, lastStickY)
-            handler.postDelayed(this, STICK_SEND_INTERVAL_MS)
-        }
-    }
 
     fun onTouch(event: MotionEvent) {
         when (event.actionMasked) {
@@ -85,7 +65,6 @@ class TouchAimHandler(
     }
 
     fun releaseAll() {
-        isStickResending = false
         handler.removeCallbacksAndMessages(null)
 
         val commandsToRelease = linkedMapOf<String, OutputCommand>()
@@ -99,18 +78,12 @@ class TouchAimHandler(
             pressGenerations[key] = (pressGenerations[key] ?: 0) + 1
         }
 
-        model.touchAimOutput.stickName()?.let { UdpClient.sendStickPosition(it, 0f, 0f) }
+        aimOutput.finish(flushMouse = false)
 
         activePointerId = MotionEvent.INVALID_POINTER_ID
         currentLevel = TouchContactLevel.AIM_ONLY
         currentScore = 0f
         hasScore = false
-        pendingDx = 0f
-        pendingDy = 0f
-        previousMouseDx = 0f
-        previousMouseDy = 0f
-        lastStickX = 0f
-        lastStickY = 0f
         onStateChanged()
     }
 
@@ -125,9 +98,26 @@ class TouchAimHandler(
             releaseAll()
         }
         activePointerId = event.getPointerId(event.actionIndex)
-        lastX = event.getX(event.actionIndex)
-        lastY = event.getY(event.actionIndex)
-        lastAimSendTime = event.eventTime
+        aimOutput.begin(
+            pointerId = activePointerId,
+            x = event.getX(event.actionIndex),
+            y = event.getY(event.actionIndex),
+            eventTime = event.eventTime,
+            newConfig = AimOutputConfig(
+                output = model.touchAimOutput,
+                sensitivity = model.sensitivity,
+                invertY = model.touchInvertY,
+                stickProfile = if (model.touchUseResponseCurve) {
+                    ButtonAimStickProfile.RESPONSE_CURVE
+                } else {
+                    ButtonAimStickProfile.LINEAR
+                },
+                mouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
+                stickFullDisplacementPx = 1f,
+                stickDeadzonePx = 0f,
+                originMode = AimOriginMode.CONTROL_CENTER
+            )
+        )
         updateContact(event)
     }
 
@@ -332,95 +322,22 @@ class TouchAimHandler(
 
     private fun updateAim(event: MotionEvent) {
         val pointerIndex = event.findPointerIndex(activePointerId)
-        if (pointerIndex < 0) return
-
-        val x = event.getX(pointerIndex)
-        val y = event.getY(pointerIndex)
-
-        val stickName = model.touchAimOutput.stickName()
-        if (stickName != null) {
-            sendStickPosition(stickName, x, y)
+        if (pointerIndex < 0) {
+            releaseAll()
             return
         }
-
-        val dx = x - lastX
-        val dy = y - lastY
-        lastX = x
-        lastY = y
-        pendingDx += dx
-        pendingDy += dy
-
-        if (event.eventTime - lastAimSendTime < AIM_SEND_INTERVAL_MS) return
-
-        sendMouseAim()
-        lastAimSendTime = event.eventTime
-        pendingDx = 0f
-        pendingDy = 0f
-    }
-
-    /** Uses the same center-to-edge position calculation as a normal stick control. */
-    private fun sendStickPosition(stickName: String, touchX: Float, touchY: Float) {
-        val (controlWidth, controlHeight) = controlSize()
-        if (controlWidth <= 0f || controlHeight <= 0f) return
-
-        val centerX = controlWidth / 2f
-        val centerY = controlHeight / 2f
-        val rawX = ((touchX - centerX) / centerX).coerceIn(-1f, 1f)
-        val rawY = ((touchY - centerY) / centerY).coerceIn(-1f, 1f)
-        val x = if (model.touchUseResponseCurve) {
-            StickResponseCurve.apply(rawX, model.sensitivity)
-        } else {
-            rawX * model.sensitivity
-        }
-        val curvedOrLinearY = if (model.touchUseResponseCurve) {
-            StickResponseCurve.apply(rawY, model.sensitivity)
-        } else {
-            rawY * model.sensitivity
-        }
-        val y = if (model.touchInvertY) -curvedOrLinearY else curvedOrLinearY
-
-        lastStickX = x
-        lastStickY = y
-        UdpClient.sendStickPosition(stickName, x, y)
-        startStickResending()
-    }
-
-    private fun startStickResending() {
-        if (isStickResending) return
-        isStickResending = true
-        handler.postDelayed(resendStick, STICK_SEND_INTERVAL_MS)
-    }
-
-    private fun sendMouseAim() {
-        val dx = pendingDx * model.sensitivity
-        val dy = pendingDy * model.sensitivity * if (model.touchInvertY) -1f else 1f
-        val smoothedDx = dx * 0.5f + previousMouseDx * 0.5f
-        val smoothedDy = dy * 0.5f + previousMouseDy * 0.5f
-        previousMouseDx = smoothedDx
-        previousMouseDy = smoothedDy
-        if (abs(smoothedDx) < 0.02f && abs(smoothedDy) < 0.02f) return
-        UdpClient.sendTouchpadDelta(scaleMouse(smoothedDx), scaleMouse(smoothedDy))
-    }
-
-    private fun scaleMouse(value: Float): Float {
-        val magnitude = abs(value)
-        val sign = if (value >= 0f) 1f else -1f
-        return when {
-            magnitude < 0.2f -> sign * magnitude * 1.5f
-            magnitude < 0.6f -> value
-            else -> sign * (0.6f + (magnitude - 0.6f) * 0.8f)
+        if (!aimOutput.update(
+                activePointerId,
+                event.getX(pointerIndex),
+                event.getY(pointerIndex),
+                event.eventTime
+            )
+        ) {
+            releaseAll()
         }
     }
 
     companion object {
         private const val PRESS_DURATION_MS = 90L
-        private const val AIM_SEND_INTERVAL_MS = 8L
-        private const val STICK_SEND_INTERVAL_MS = 16L
     }
-}
-
-private fun TouchAimOutput.stickName(): String? = when (this) {
-    TouchAimOutput.MOUSE -> null
-    TouchAimOutput.RIGHT_STICK -> "STICK_R"
-    TouchAimOutput.LEFT_STICK -> "STICK_L"
 }

@@ -123,6 +123,15 @@ class ControlView(
     private val directionalHandler: DirectionalStickHandler
     private val continuousSender: ContinuousSender
     private val touchAimHandler: TouchAimHandler?
+    private val buttonAimOutput = AimOutputSession(
+        ownerToken = Any(),
+        controlSize = { width.toFloat() to height.toFloat() },
+        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick
+    )
+    private val buttonAimHandler: ButtonAimHandler?
+    private val manualStickOwnerToken = Any()
+    private var ownsManualStick = false
+    private var manualStickPointerId = MotionEvent.INVALID_POINTER_ID
 
     // Paint for drawing the control
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -181,6 +190,35 @@ class ControlView(
         } else {
             null
         }
+        buttonAimHandler = if (model.type == ControlType.BUTTON) {
+            ButtonAimHandler(
+                model = model,
+                aimOutput = buttonAimOutput,
+                isLatched = { isLatched },
+                setLatched = {
+                    isLatched = it
+                    invalidate()
+                },
+                setPressed = {
+                    isPressed = it
+                    invalidate()
+                },
+                firePayload = uiHelper::firePayload,
+                releasePayload = uiHelper::releaseLatched,
+                startTurbo = uiHelper::startRepeat,
+                stopTurbo = uiHelper::stopRepeat,
+                isGlobalHold = { GlobalSettings.globalHold },
+                isGlobalTurbo = { GlobalSettings.globalTurbo },
+                shouldSkipImmediateRelease = {
+                    model.payload.contains("RT:1.0P", ignoreCase = true) ||
+                        model.payload.contains("LT:1.0P", ignoreCase = true)
+                },
+                vibrate = ::triggerStrongVibration,
+                onStateChanged = { invalidate() }
+            )
+        } else {
+            null
+        }
 
         SwipeManager.registerControl(this)
 
@@ -204,11 +242,22 @@ class ControlView(
         when (model.type) {
             ControlType.BUTTON -> {
                 val cornerRadius = min(width, height) / 3f
+                val aimState = buttonAimHandler?.visualState ?: ButtonAimVisualState.IDLE
+                val activeAimColor = when {
+                    !model.buttonAimEnabled -> null
+                    isLatched -> Color.rgb(126, 87, 194)
+                    aimState == ButtonAimVisualState.WAITING_TO_FIRE -> Color.rgb(239, 108, 0)
+                    aimState == ButtonAimVisualState.LATCH_READY -> Color.rgb(171, 71, 188)
+                    aimState == ButtonAimVisualState.ARMED -> Color.rgb(245, 166, 35)
+                    aimState == ButtonAimVisualState.AIMING -> Color.rgb(0, 150, 136)
+                    else -> null
+                }
 
-                if (isLatched || isPressed) {
-                    // Solid blue when pressed or latched
+                if (activeAimColor != null || isLatched || isPressed) {
+                    // Button Aim uses distinct colors for held/armed/latch-ready/waiting states.
                     paint.style = Style.FILL
-                    paint.color = ContextCompat.getColor(context, R.color.button_pressed_blue)
+                    paint.color = activeAimColor
+                        ?: ContextCompat.getColor(context, R.color.button_pressed_blue)
                     c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
                 } else {
                     // Transparent with blue outline when not pressed
@@ -305,7 +354,9 @@ class ControlView(
         }
 
         // Normal game mode
-        if (GlobalSettings.globalSwipe && model.type != ControlType.TOUCH_AIM) {
+        val directPointerSurface = model.type == ControlType.TOUCH_AIM ||
+            (model.type == ControlType.BUTTON && model.buttonAimEnabled)
+        if (GlobalSettings.globalSwipe && !directPointerSurface) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                 // Avoid rapid repeat unless turbo is on — handled inside playTouch now
                 playTouch(e)
@@ -343,7 +394,12 @@ class ControlView(
     fun playTouch(e: MotionEvent) {
         when (model.type) {
             /* ----- BUTTON ----- */
-            ControlType.BUTTON -> when (e.actionMasked) {
+            ControlType.BUTTON -> {
+                if (model.buttonAimEnabled && !uiHelper.isReleaseAllAction()) {
+                    buttonAimHandler?.onTouch(e)
+                    return
+                }
+                when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     // The safety payload is an immediate action, never a hold/turbo/latch input.
                     if (uiHelper.isReleaseAllAction()) {
@@ -449,6 +505,7 @@ class ControlView(
                     }
                 }
             }
+            }
 
             /* ----- RE-CENTER BUTTON ----- */
             ControlType.RECENTER -> when (e.actionMasked) {
@@ -479,8 +536,24 @@ class ControlView(
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                     stopContinuousSending()
                     stopDirectionalCommands()
+                    if (!model.directionalMode) {
+                        val stickName = ManualStickArbiter.canonicalStickName(model.payload)
+                        SwipeManager.stopContinuousSendingForStick(stickName)
+                        ownsManualStick = ManualStickArbiter.acquire(stickName, manualStickOwnerToken)
+                        manualStickPointerId = e.getPointerId(e.actionIndex)
+                        if (ownsManualStick && stickName == "STICK_R") {
+                            UdpClient.setManualRightStickActive(manualStickOwnerToken, true)
+                        }
+                    }
                 }
                 handleStickOrPad(e)
+                if (e.actionMasked == MotionEvent.ACTION_UP ||
+                    e.actionMasked == MotionEvent.ACTION_CANCEL ||
+                    (e.actionMasked == MotionEvent.ACTION_POINTER_UP &&
+                        e.getPointerId(e.actionIndex) == manualStickPointerId)
+                ) {
+                    releaseManualStickOwnership(center = false)
+                }
             }
 
             /* ----- TOUCHPAD (with one-finger drag) ----- */
@@ -754,8 +827,11 @@ class ControlView(
         val directionalX = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawX else sx
         val directionalY = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawY else sy
 
-        // Store last position for continuous sending if needed
-        continuousSender.setLastPosition(sx, sy)
+        val canSendAnalog = ownsManualStick &&
+            ManualStickArbiter.owns(model.payload, manualStickOwnerToken)
+
+        // Store/send only while this initiating pointer owns the requested stick.
+        if (canSendAnalog) continuousSender.setLastPosition(sx, sy)
 
         // Handle different stick modes
         if (isStickControl) {
@@ -773,12 +849,16 @@ class ControlView(
                 model.stickPlusMode -> {
                     // Stick+ mode - send analog via UDP helper (correct tag + player prefix),
                     // then layer the directional keys on top
-                    UdpClient.sendStickPosition(model.payload, sx, sy)
+                    if (canSendAnalog) {
+                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy)
+                    }
                     directionalHandler.handleStickPlusMode(directionalX, directionalY, e.actionMasked)
                 }
                 else -> {
                     // Regular analog stick/pad mode (use UDP stick helper so tags/prefixes are correct)
-                    UdpClient.sendStickPosition(model.payload, sx, sy)
+                    if (canSendAnalog) {
+                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy)
+                    }
                 }
             }
         } else {
@@ -790,8 +870,8 @@ class ControlView(
         if (shouldSnap) {
             stopContinuousSending()
             // Ensure a final 0,0 position is sent for auto-center sticks
-            if (isStickControl) {
-                UdpClient.sendStickPosition(model.payload, 0f, 0f)
+            if (isStickControl && canSendAnalog) {
+                ManualStickArbiter.send(model.payload, manualStickOwnerToken, 0f, 0f)
             }
         }
 
@@ -800,6 +880,7 @@ class ControlView(
         if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
             !shouldSnap &&
             isStickControl &&  // Only for sticks, not touchpads
+            canSendAnalog &&
             !model.directionalMode &&  // Only for analog sticks, not directional ones
             !model.autoCenter) {
 
@@ -829,6 +910,27 @@ class ControlView(
         continuousSender.stopContinuousSending()
     }
 
+    fun stopContinuousSendingForStick(stickName: String) {
+        if ((model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) &&
+            ManualStickArbiter.canonicalStickName(model.payload) ==
+            ManualStickArbiter.canonicalStickName(stickName) &&
+            continuousSender.isActive()
+        ) {
+            stopContinuousSending()
+        }
+    }
+
+    private fun releaseManualStickOwnership(center: Boolean) {
+        if (!ownsManualStick) return
+        val stickName = ManualStickArbiter.canonicalStickName(model.payload)
+        ManualStickArbiter.release(stickName, manualStickOwnerToken, center)
+        if (stickName == "STICK_R") {
+            UdpClient.setManualRightStickActive(manualStickOwnerToken, false)
+        }
+        ownsManualStick = false
+        manualStickPointerId = MotionEvent.INVALID_POINTER_ID
+    }
+
     /** Stop the sender and force its remembered coordinate to neutral for safety cleanup. */
     private fun stopContinuousSendingAndCenter() {
         continuousSender.stopAndCenter()
@@ -856,11 +958,20 @@ class ControlView(
         }
     }
 
+    fun releaseButtonAim() {
+        buttonAimHandler?.takeIf { it.hasRuntimeState() }?.let {
+            it.cancelForSafety()
+            uiHelper.cancelPendingActionsForReleaseAll()
+        }
+    }
+
     /**
      * Clear every held, delayed, latched, or repeating state owned by this view.
      * This deliberately leaves the serialized model and all global settings unchanged.
      */
     fun releaseEverythingLocally() {
+        val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
+        if (buttonAimOwnedRuntime) buttonAimHandler?.cancelForSafety()
         holdHandler.removeCallbacksAndMessages(null)
         mouseClickHandler.removeCallbacksAndMessages(null)
         secondTapHoldCheck = null
@@ -871,6 +982,7 @@ class ControlView(
         stopContinuousSendingAndCenter()
         stopDirectionalCommands()
         touchAimHandler?.releaseAll()
+        releaseManualStickOwnership(center = true)
 
         if (leftHeld) UdpClient.sendCommand("MOUSE_LEFT_UP")
         leftHeld = false
@@ -887,7 +999,9 @@ class ControlView(
         val wasLatched = isLatched
         isPressed = false
         if (model.type == ControlType.BUTTON) {
-            if (wasLatched) {
+            if (buttonAimOwnedRuntime) {
+                // The Button Aim state machine already reconciled its payload exactly once.
+            } else if (wasLatched) {
                 isLatched = false
             } else {
                 // A physically held non-latched button still needs its normal release mapping.
@@ -908,6 +1022,7 @@ class ControlView(
     fun showProps() {
         PropertySheetBuilder(context, model) {
             // After properties are updated:
+            releaseButtonAim()
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.width = model.w.toInt()
             lp.height = model.h.toInt()

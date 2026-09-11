@@ -38,3 +38,10 @@ Status: deferred. The production Pico firmware has not been identified or author
 - [ ] Test Wi-Fi loss, reconnect, firmware restart, and repeated emergency taps.
 - [ ] Test every enabled USB HID profile on the actual intended Pico and console/PC target.
 - [ ] Keep Pico support labeled unverified until those hardware tests pass.
+
+## Button Aim Surface follow-up (deferred)
+
+- [ ] Identify the intended production Pico firmware, then verify Button Aim Surface payloads,
+  sustained Mouse/LS/RS traffic, ordered stick updates, rate limits, terminal centering, configured
+  release delay cancellation, and `RELEASE_ALL` behavior on the real hardware. No Pico firmware,
+  UF2, protocol, or flashing change is authorized as part of the Android Button Aim implementation.

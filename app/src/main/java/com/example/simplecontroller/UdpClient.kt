@@ -66,6 +66,7 @@ object UdpClient {
 
     private val cameraFollowStateLock = Any()
     @Volatile private var cameraFollowEnabled = false
+    private val manualRightStickOwners = mutableSetOf<Any>()
 
     // Key state tracking for reliable directional commands
     private val activeKeys = ConcurrentHashMap<String, Boolean>()
@@ -222,24 +223,41 @@ object UdpClient {
     }
 
     fun toggleCameraFollow(): Boolean {
-        val enabled = synchronized(cameraFollowStateLock) {
+        val (enabled, effectiveEnabled) = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled = !cameraFollowEnabled
-            cameraFollowEnabled
+            cameraFollowEnabled to (cameraFollowEnabled && manualRightStickOwners.isEmpty())
         }
-        sendCommand("CAMERA_FOLLOW:${if (enabled) 1 else 0}")
+        sendCommand("CAMERA_FOLLOW:${if (effectiveEnabled) 1 else 0}")
         return enabled
     }
 
     fun setCameraFollowEnabled(enabled: Boolean) {
-        synchronized(cameraFollowStateLock) {
+        val effectiveEnabled = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled = enabled
+            cameraFollowEnabled && manualRightStickOwners.isEmpty()
+        }
+        sendCommand("CAMERA_FOLLOW:${if (effectiveEnabled) 1 else 0}")
+    }
+
+    fun resendCameraFollowState() {
+        val enabled = synchronized(cameraFollowStateLock) {
+            cameraFollowEnabled && manualRightStickOwners.isEmpty()
         }
         sendCommand("CAMERA_FOLLOW:${if (enabled) 1 else 0}")
     }
 
-    fun resendCameraFollowState() {
-        val enabled = synchronized(cameraFollowStateLock) { cameraFollowEnabled }
-        sendCommand("CAMERA_FOLLOW:${if (enabled) 1 else 0}")
+    /**
+     * Temporarily suppress receiver-generated Camera Follow for the full lifetime of a real
+     * manual Right Stick gesture, including neutral/dead-zone positions.
+     */
+    fun setManualRightStickActive(owner: Any, active: Boolean) {
+        val effectiveChange = synchronized(cameraFollowStateLock) {
+            val wasEnabled = cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            if (active) manualRightStickOwners.add(owner) else manualRightStickOwners.remove(owner)
+            val isEnabled = cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            if (wasEnabled == isEnabled) null else isEnabled
+        }
+        effectiveChange?.let { sendCommand("CAMERA_FOLLOW:${if (it) 1 else 0}") }
     }
 
     // -------------------------------------------------------------------

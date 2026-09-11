@@ -190,7 +190,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onPause() {
         super.onPause()
-        activateReleaseAll(showFeedback = false)
+        // Cancel only Button Aim gesture state. Global RELEASE_ALL is intentionally reserved
+        // for an explicit control payload and is not triggered automatically on app pause.
+        SwipeManager.releaseAllButtonAimSurfaces()
         saveControls(this, layoutName, controls)   // auto-persist
     }
 
@@ -336,7 +338,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     private fun observeConnectionStatus() {
         lifecycleScope.launch {
+            var previousStatus = NetworkClient.connectionStatus.value
             NetworkClient.connectionStatus.collectLatest { status ->
+                if (previousStatus == NetworkClient.ConnectionStatus.CONNECTED &&
+                    status != NetworkClient.ConnectionStatus.CONNECTED
+                ) {
+                    // Cancel armed/delayed Button Aim state locally. In particular, a payload
+                    // released during a network outage must not fire after reconnection.
+                    SwipeManager.releaseAllButtonAimSurfaces()
+                }
+                previousStatus = status
                 updateConnectionStatusUI(status)
                 updatePlayerRoleIndicator()
                 if (status == NetworkClient.ConnectionStatus.CONNECTED) {
@@ -402,7 +413,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
                 NetworkClient.ConnectionStatus.CONNECTING -> {
-                    activateReleaseAll(showFeedback = false)
                     NetworkClient.close()
                 }
 
@@ -553,9 +563,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 val port = editPort.text.toString().toIntOrNull() ?: 9001
                 val autoReconnect = checkAutoReconnect.isChecked
                 val useCbv0Checked = checkUseCbv0.isChecked  // <-- the new checkbox
-
-                // Clear the old endpoint before changing player/transport settings.
-                activateReleaseAll(showFeedback = false)
 
                 // Player role from radio buttons
                 val playerRole = if (radioPlayer1.isChecked)

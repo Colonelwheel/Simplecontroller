@@ -40,8 +40,17 @@ class SwipeHandler {
 
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Button Aim must receive the original pointer directly and retain it outside
+                // the view. Returning false lets normal Android child dispatch own the gesture.
+                val topmostStart = topmostHit(e)
+                if (topmostStart?.isButtonAimSurface() == true) {
+                    activeTouch?.recycle()
+                    activeTouch = null
+                    lastTouchedView = null
+                    return false
+                }
                 // Find the starting control
-                val start = allViews.firstOrNull { it.hitTest(e) }
+                val start = topmostStart
                 if (start == null) {
                     // Leave gestures that begin on an unregistered view (notably Touch Aim)
                     // to normal Android dispatch. Do not adopt one later as it crosses a button.
@@ -71,7 +80,8 @@ class SwipeHandler {
                 }
 
                 // 2) Else: finger moved off the old control; see if it entered a new one
-                val entered = allViews.firstOrNull { it.hitTest(e) }
+                // Button Aim is direct-touch-only in this initial implementation.
+                val entered = topmostHit(e)?.takeUnless { it.isButtonAimSurface() }
                 if (entered != null) {
                     val now = System.currentTimeMillis()
                     val last = lastFiredMap[entered.model.id] ?: 0L
@@ -161,6 +171,17 @@ class SwipeHandler {
         val y = e.rawY - loc[1]
         return x >= 0 && x < width && y >= 0 && y < height
     }
+
+    /** Match Android's normal sibling dispatch order for overlapping controls. */
+    private fun topmostHit(e: MotionEvent): ControlView? = allViews
+        .asSequence()
+        .filter { it.hitTest(e) }
+        .maxByOrNull { view ->
+            (view.parent as? android.view.ViewGroup)?.indexOfChild(view) ?: -1
+        }
+
+    private fun ControlView.isButtonAimSurface(): Boolean =
+        model.type == ControlType.BUTTON && model.buttonAimEnabled
 
     /**
      * Forward a cloned MotionEvent with action translated to *newAction*.

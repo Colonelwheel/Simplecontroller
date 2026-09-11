@@ -398,8 +398,8 @@ def current_release_generation(player_id):
     with release_state_lock:
         return release_generations.get(player_id, 0)
 
-def release_outputs(player_ids, reason="safety cleanup"):
-    """Neutralize receiver-owned outputs and cancel delayed work for selected players."""
+def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
+    """Neutralize receiver-owned outputs after an explicit RELEASE_ALL payload."""
     selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
     if not selected:
         return
@@ -1042,7 +1042,6 @@ def process_command(data, addr, player_id='player1'):
         return
 
     if data == "DISCONNECT":
-        release_outputs((player_id,), reason="DISCONNECT")
         active_connections.pop(addr_key, None)
         return
         
@@ -1300,8 +1299,6 @@ def clean_inactive_connections():
         player_id = active_connections[addr_key]['player_id']
         logger.info(f"Removing inactive connection: {addr_key} ({player_id})")
         del active_connections[addr_key]
-        if not any(conn['player_id'] == player_id for conn in active_connections.values()):
-            release_outputs((player_id,), reason="inactive connection")
 
 def clean_key_states():
     """Clean up any inconsistent keyboard states"""
@@ -1408,7 +1405,6 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
-        release_outputs(tuple(gamepads), reason="receiver shutdown")
         stop_camera_follow_worker()
         print("Server stopped")
         logger.info("Server stopped")

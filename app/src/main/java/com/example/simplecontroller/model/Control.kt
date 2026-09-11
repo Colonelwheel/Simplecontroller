@@ -12,6 +12,15 @@ enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
 enum class TouchStageAction { PRESS, HOLD }
 
 @Serializable
+enum class ButtonAimPayloadTiming { IMMEDIATE, SEND_ON_RELEASE }
+
+@Serializable
+enum class ButtonAimStickProfile { LINEAR, RESPONSE_CURVE }
+
+@Serializable
+enum class ButtonAimMouseProfile { LINEAR_RELATIVE, SMOOTHED_NONLINEAR }
+
+@Serializable
 data class Control(
     val id: String,
     val type: ControlType,
@@ -29,6 +38,19 @@ data class Control(
     /* button-specific */
     var holdToggle: Boolean = false,       // "latch" behaviour
     var holdDurationMs: Long = 500,        // long-press threshold
+
+    /* Button Aim Surface (disabled by default for layout compatibility) */
+    var buttonAimEnabled: Boolean = false,
+    var buttonAimOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    var buttonAimPayloadTiming: ButtonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
+    var buttonAimReleaseDelayMs: Long = 0,
+    var buttonAimSensitivity: Float = 1f,
+    var buttonAimInvertY: Boolean = false,
+    var buttonAimStickProfile: ButtonAimStickProfile = ButtonAimStickProfile.LINEAR,
+    var buttonAimMouseProfile: ButtonAimMouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
+    var buttonAimStickFullDisplacementPx: Float = 220f,
+    var buttonAimStickDeadzonePx: Float = 8f,
+    var buttonAimHaptics: Boolean = true,
 
     /* 2a – mouse-pad one-finger drag */
     /**

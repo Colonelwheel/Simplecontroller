@@ -575,6 +575,7 @@ object SwipeManager {
                 it.stopContinuousSending()
                 it.stopDirectionalCommands()
                 it.releaseTouchAim()
+                it.releaseButtonAim()
             }
         }
     }
@@ -594,6 +595,14 @@ object SwipeManager {
      */
     fun stopAllRepeating() {
         allViews.forEach { it.stopRepeat() }
+    }
+
+    fun stopContinuousSendingForStick(stickName: String) {
+        allViews.forEach { it.stopContinuousSendingForStick(stickName) }
+    }
+
+    fun releaseAllButtonAimSurfaces() {
+        allViews.forEach { it.releaseButtonAim() }
     }
 
     fun releaseAllTouchAim() {

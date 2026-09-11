@@ -11,6 +11,9 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.ButtonAimMouseProfile
+import com.example.simplecontroller.model.ButtonAimPayloadTiming
+import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.TouchAimOutput
 import com.example.simplecontroller.model.TouchStageAction
 import kotlin.math.roundToInt
@@ -49,7 +52,8 @@ class PropertySheetBuilder(
         val stickPlusMode: CheckBox,
         val directionalContainer: LinearLayout,
         val payloadField: AutoCompleteTextView,
-        val touchAim: TouchAimComponents?
+        val touchAim: TouchAimComponents?,
+        val buttonAim: ButtonAimComponents?
     )
 
     private data class TouchAimComponents(
@@ -73,6 +77,20 @@ class PropertySheetBuilder(
         val stickFullSpeed: EditText,
         val invertY: CheckBox,
         val useResponseCurve: CheckBox
+    )
+
+    private data class ButtonAimComponents(
+        val enabled: CheckBox,
+        val aimOutput: Spinner,
+        val payloadTiming: Spinner,
+        val releaseDelayMs: EditText,
+        val sensitivity: EditText,
+        val invertY: CheckBox,
+        val stickProfile: Spinner,
+        val mouseProfile: Spinner,
+        val stickFullDisplacement: EditText,
+        val stickDeadzone: EditText,
+        val haptics: CheckBox
     )
 
     /**
@@ -273,6 +291,12 @@ class PropertySheetBuilder(
             model.swipeActivate,
             model.type == ControlType.BUTTON
         )
+
+        val buttonAimComponents = if (model.type == ControlType.BUTTON) {
+            addButtonAimUI(container)
+        } else {
+            null
+        }
         
         // Stick/Touchpad controls
         val autoCenter = addCheckBox(
@@ -371,7 +395,108 @@ class PropertySheetBuilder(
             nameField, widthSeek, heightSeek, sensitivitySeek,
             holdToggle, autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
-            directionalContainer, payloadField, touchAimComponents
+            directionalContainer, payloadField, touchAimComponents, buttonAimComponents
+        )
+    }
+
+    private fun addButtonAimUI(container: LinearLayout): ButtonAimComponents {
+        addSectionTitle(container, "Button Aim Surface")
+        val enabled = addCheckBox(container, "Aim while pressed", model.buttonAimEnabled)
+        val details = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (model.buttonAimEnabled) View.VISIBLE else View.GONE
+            container.addView(this)
+        }
+
+        val aimOutput = addChoice(
+            details,
+            "Aim output",
+            listOf("Mouse", "Right stick", "Left stick"),
+            when (model.buttonAimOutput) {
+                TouchAimOutput.MOUSE -> 0
+                TouchAimOutput.RIGHT_STICK -> 1
+                TouchAimOutput.LEFT_STICK -> 2
+            }
+        )
+        val payloadTiming = addChoice(
+            details,
+            "Payload timing",
+            listOf("Immediate", "Send on release"),
+            if (model.buttonAimPayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) 0 else 1
+        )
+        details.addView(TextView(context).apply { text = "Delay after release (ms)" })
+        val releaseDelayMs = addTextField(
+            details,
+            model.buttonAimReleaseDelayMs.toString(),
+            "Delay after release (ms)",
+            InputType.TYPE_CLASS_NUMBER
+        )
+        details.addView(TextView(context).apply { text = "Delay applies only to Send on release" })
+        details.addView(createGap())
+        val sensitivity = addDecimalField(details, "Aim sensitivity", model.buttonAimSensitivity)
+        val invertY = addCheckBox(details, "Invert Y", model.buttonAimInvertY)
+
+        val mouseOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            details.addView(this)
+        }
+        val mouseProfile = addChoice(
+            mouseOptions,
+            "Mouse movement profile",
+            listOf("Linear Relative", "Smoothed / Nonlinear"),
+            if (model.buttonAimMouseProfile == ButtonAimMouseProfile.LINEAR_RELATIVE) 0 else 1
+        )
+
+        val stickOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            details.addView(this)
+        }
+        val stickProfile = addChoice(
+            stickOptions,
+            "Stick movement profile",
+            listOf("Linear", "Response Curve"),
+            if (model.buttonAimStickProfile == ButtonAimStickProfile.LINEAR) 0 else 1
+        )
+        val stickFullDisplacement = addDecimalField(
+            stickOptions,
+            "Full stick displacement (px)",
+            model.buttonAimStickFullDisplacementPx
+        )
+        val stickDeadzone = addDecimalField(
+            stickOptions,
+            "Stick dead zone (px)",
+            model.buttonAimStickDeadzonePx
+        )
+        val haptics = addCheckBox(details, "Button Aim haptics", model.buttonAimHaptics)
+
+        fun updateOutputVisibility() {
+            val mouseSelected = aimOutput.selectedItemPosition == 0
+            mouseOptions.visibility = if (mouseSelected) View.VISIBLE else View.GONE
+            stickOptions.visibility = if (mouseSelected) View.GONE else View.VISIBLE
+        }
+        aimOutput.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateOutputVisibility()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        enabled.setOnCheckedChangeListener { _, checked ->
+            details.visibility = if (checked) View.VISIBLE else View.GONE
+        }
+        updateOutputVisibility()
+
+        return ButtonAimComponents(
+            enabled = enabled,
+            aimOutput = aimOutput,
+            payloadTiming = payloadTiming,
+            releaseDelayMs = releaseDelayMs,
+            sensitivity = sensitivity,
+            invertY = invertY,
+            stickProfile = stickProfile,
+            mouseProfile = mouseProfile,
+            stickFullDisplacement = stickFullDisplacement,
+            stickDeadzone = stickDeadzone,
+            haptics = haptics
         )
     }
 
@@ -899,6 +1024,7 @@ class PropertySheetBuilder(
             model.holdToggle = components.holdToggle.isChecked
             model.holdDurationMs = components.holdDurationField.text.toString().toLongOrNull() ?: 400L
             model.swipeActivate = components.swipeActivate.isChecked
+            components.buttonAim?.let(::saveButtonAimProperties)
         }
         
         // Stick/Touchpad properties
@@ -979,6 +1105,45 @@ class PropertySheetBuilder(
             .coerceAtLeast(1f)
         model.touchInvertY = fields.invertY.isChecked
         model.touchUseResponseCurve = fields.useResponseCurve.isChecked
+    }
+
+    private fun saveButtonAimProperties(fields: ButtonAimComponents) {
+        model.buttonAimEnabled = fields.enabled.isChecked
+        model.buttonAimOutput = when (fields.aimOutput.selectedItemPosition) {
+            1 -> TouchAimOutput.RIGHT_STICK
+            2 -> TouchAimOutput.LEFT_STICK
+            else -> TouchAimOutput.MOUSE
+        }
+        model.buttonAimPayloadTiming = if (fields.payloadTiming.selectedItemPosition == 0) {
+            ButtonAimPayloadTiming.IMMEDIATE
+        } else {
+            ButtonAimPayloadTiming.SEND_ON_RELEASE
+        }
+        model.buttonAimReleaseDelayMs = fields.releaseDelayMs.text.toString()
+            .toLongOrNull()
+            ?.coerceAtLeast(0L)
+            ?: model.buttonAimReleaseDelayMs
+        model.buttonAimSensitivity = fields.sensitivity.floatValue(model.buttonAimSensitivity)
+            .coerceAtLeast(0f)
+        model.buttonAimInvertY = fields.invertY.isChecked
+        model.buttonAimStickProfile = if (fields.stickProfile.selectedItemPosition == 0) {
+            ButtonAimStickProfile.LINEAR
+        } else {
+            ButtonAimStickProfile.RESPONSE_CURVE
+        }
+        model.buttonAimMouseProfile = if (fields.mouseProfile.selectedItemPosition == 0) {
+            ButtonAimMouseProfile.LINEAR_RELATIVE
+        } else {
+            ButtonAimMouseProfile.SMOOTHED_NONLINEAR
+        }
+        val fullDisplacement = fields.stickFullDisplacement
+            .floatValue(model.buttonAimStickFullDisplacementPx)
+            .coerceAtLeast(1f)
+        model.buttonAimStickFullDisplacementPx = fullDisplacement
+        model.buttonAimStickDeadzonePx = fields.stickDeadzone
+            .floatValue(model.buttonAimStickDeadzonePx)
+            .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
+        model.buttonAimHaptics = fields.haptics.isChecked
     }
 
     private fun EditText.floatValue(fallback: Float): Float =
