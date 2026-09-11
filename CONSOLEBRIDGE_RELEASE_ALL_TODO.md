@@ -49,7 +49,8 @@ Status: deferred. The production Pico firmware has not been identified or author
 ## One-Shot Alternate Button Phase follow-up (deferred)
 
 - [ ] On the intended production Pico and USB target, verify independent base/alternate payloads,
-  independent Mouse/LS/RS aim settings, retained base holds, overlapping logical outputs, alternate
-  finite-release ordering, recovery/reset gestures, timer cancellation, and explicit `RELEASE_ALL`.
+  independent Mouse/LS/RS aim settings, optional touch-position stick origin, retained base holds,
+  overlapping logical outputs, alternate finite-release ordering, recovery/reset gestures, timer
+  cancellation, and explicit `RELEASE_ALL`.
   Keep this behavior labeled unverified for Pico/ConsoleBridge until that hardware pass is complete;
   no Pico source, protocol, UF2, or flashing work is authorized as part of feature #9.

@@ -50,6 +50,7 @@ data class Control(
     var buttonAimMouseProfile: ButtonAimMouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
     var buttonAimStickFullDisplacementPx: Float = 220f,
     var buttonAimStickDeadzonePx: Float = 8f,
+    var buttonAimStickUsesTouchPosition: Boolean = false,
     var buttonAimHaptics: Boolean = true,
 
     /* One-Shot Alternate Button Phase (disabled by default) */
@@ -65,6 +66,7 @@ data class Control(
     var buttonAimAlternateMouseProfile: ButtonAimMouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
     var buttonAimAlternateStickFullDisplacementPx: Float = 220f,
     var buttonAimAlternateStickDeadzonePx: Float = 8f,
+    var buttonAimAlternateStickUsesTouchPosition: Boolean = false,
     var buttonAimAlternateHaptics: Boolean = true,
 
     /* 2a – mouse-pad one-finger drag */

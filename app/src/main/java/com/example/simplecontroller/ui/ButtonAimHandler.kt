@@ -156,14 +156,31 @@ class ButtonAimHandler(
         setPressed(true)
         if (if (alternate) model.buttonAimAlternateHaptics else model.buttonAimHaptics) vibrate(30L)
 
+        val aimConfig = if (alternate) model.buttonAimAlternateConfig() else model.buttonAimConfig()
         val ownsAim = aimOutput.begin(
             pointerId = activePointerId,
             x = event.getX(event.actionIndex),
             y = event.getY(event.actionIndex),
             eventTime = event.eventTime,
-            newConfig = if (alternate) model.buttonAimAlternateConfig() else model.buttonAimConfig()
+            newConfig = aimConfig
         )
         if (!ownsAim) {
+            cancelUnexpectedGesture()
+            return
+        }
+
+        // Touch Aim-style stick origin: the down coordinate is already meaningful, so send it
+        // immediately instead of waiting for the first MOVE event.
+        if (aimConfig.originMode == AimOriginMode.CONTROL_CENTER &&
+            aimConfig.output.stickName() != null &&
+            !aimOutput.update(
+                activePointerId,
+                event.getX(event.actionIndex),
+                event.getY(event.actionIndex),
+                event.eventTime,
+                forceSend = true
+            )
+        ) {
             cancelUnexpectedGesture()
             return
         }
@@ -636,8 +653,12 @@ private fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
     mouseProfile = buttonAimMouseProfile,
     stickFullDisplacementPx = buttonAimStickFullDisplacementPx,
     stickDeadzonePx = buttonAimStickDeadzonePx,
-    originMode = AimOriginMode.INITIAL_TOUCH,
-    sendNeutralOnBegin = true
+    originMode = if (buttonAimStickUsesTouchPosition) {
+        AimOriginMode.CONTROL_CENTER
+    } else {
+        AimOriginMode.INITIAL_TOUCH
+    },
+    sendNeutralOnBegin = !buttonAimStickUsesTouchPosition
 )
 
 private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfig(
@@ -648,6 +669,10 @@ private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfi
     mouseProfile = buttonAimAlternateMouseProfile,
     stickFullDisplacementPx = buttonAimAlternateStickFullDisplacementPx,
     stickDeadzonePx = buttonAimAlternateStickDeadzonePx,
-    originMode = AimOriginMode.INITIAL_TOUCH,
-    sendNeutralOnBegin = true
+    originMode = if (buttonAimAlternateStickUsesTouchPosition) {
+        AimOriginMode.CONTROL_CENTER
+    } else {
+        AimOriginMode.INITIAL_TOUCH
+    },
+    sendNeutralOnBegin = !buttonAimAlternateStickUsesTouchPosition
 )

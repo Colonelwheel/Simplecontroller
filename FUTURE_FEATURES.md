@@ -129,7 +129,7 @@ Payload and aim output must remain independent. For example, a mouse-button payl
 ### Aim coordinate recommendation
 
 - [ ] For Mouse, use relative deltas from the previous sample. Let the user choose raw Linear Relative movement or the proven TouchAim/touchpad Smoothed/Nonlinear scaling; keep cadence and rate limiting safe in both modes.
-- [ ] For Left/Right Stick, use displacement from the initial finger-down point as the virtual neutral origin rather than the geometric center of the button. Let the user choose the existing normal Linear mapping or Response Curve mapping. This lets the finger start anywhere within the button and avoids an immediate stick jump.
+- [x] For Left/Right Stick, keep displacement from the initial finger-down point as the safe default, with an optional Touch Aim-style setting that maps the touched position within the button directly to the stick. Both modes support Linear or Response Curve mapping.
 - [ ] Clamp stick output, resend it at the established cadence, use ordered stick packets, and explicitly center on every terminal path.
 - [ ] Decide whether return-to-origin centers the stick and whether a configurable floating-origin/recenter behavior is desirable.
 
@@ -163,7 +163,7 @@ Payload and aim output must remain independent. For example, a mouse-button payl
 - [x] Button Aim Surface payloads are user-configurable rather than hard-coded to LT/RT. Base and one-shot alternate payloads are configured independently and may use any normal Button payload, including mouse buttons.
 - [x] Aim movement behavior is selectable. Stick output offers Linear or Response Curve; Mouse output offers Linear Relative or the existing Smoothed/Nonlinear scaling.
 - [x] With `Send payload on release` and Hold Toggle both enabled, a quick release sends a normal press while a long release creates a latch.
-- [x] Stick aiming uses the initial touch point as neutral rather than the button center.
+- [x] Stick aiming defaults to the initial touch point as neutral, with an optional per-phase checkbox to use the touched position as the immediate stick position.
 - [x] The button retains finger ownership outside its bounds and temporarily suppresses global Swipe.
 - [x] On intentional release, send the delayed payload first and then center the aim output immediately afterward.
 - [x] Delayed-payload Button Aim Surfaces initially disable Turbo. Immediate-payload aiming may still support Turbo.

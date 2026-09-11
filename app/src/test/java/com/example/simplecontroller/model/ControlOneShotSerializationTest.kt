@@ -32,6 +32,8 @@ class ControlOneShotSerializationTest {
         assertEquals(ButtonAimPayloadTiming.IMMEDIATE, control.buttonAimAlternatePayloadTiming)
         assertEquals(2000L, control.buttonAimAlternateResetHoldDurationMs)
         assertEquals(TouchAimOutput.MOUSE, control.buttonAimAlternateOutput)
+        assertFalse(control.buttonAimStickUsesTouchPosition)
+        assertFalse(control.buttonAimAlternateStickUsesTouchPosition)
     }
 
     @Test
@@ -45,6 +47,7 @@ class ControlOneShotSerializationTest {
             h = 100f,
             payload = "LT:0.4",
             buttonAimEnabled = true,
+            buttonAimStickUsesTouchPosition = true,
             buttonAimOneShotAlternateEnabled = true,
             buttonAimAlternatePayload = "RT:1.0,X360A",
             buttonAimAlternatePayloadTiming = ButtonAimPayloadTiming.SEND_ON_RELEASE,
@@ -57,6 +60,7 @@ class ControlOneShotSerializationTest {
             buttonAimAlternateMouseProfile = ButtonAimMouseProfile.LINEAR_RELATIVE,
             buttonAimAlternateStickFullDisplacementPx = 310f,
             buttonAimAlternateStickDeadzonePx = 12f,
+            buttonAimAlternateStickUsesTouchPosition = true,
             buttonAimAlternateHaptics = false
         )
 

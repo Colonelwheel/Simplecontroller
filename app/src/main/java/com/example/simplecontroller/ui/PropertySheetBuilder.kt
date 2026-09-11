@@ -90,6 +90,7 @@ class PropertySheetBuilder(
         val mouseProfile: Spinner,
         val stickFullDisplacement: EditText,
         val stickDeadzone: EditText,
+        val stickUsesTouchPosition: CheckBox,
         val haptics: CheckBox,
         val oneShotAlternateEnabled: CheckBox,
         val alternatePayload: AutoCompleteTextView,
@@ -103,6 +104,7 @@ class PropertySheetBuilder(
         val alternateMouseProfile: Spinner,
         val alternateStickFullDisplacement: EditText,
         val alternateStickDeadzone: EditText,
+        val alternateStickUsesTouchPosition: CheckBox,
         val alternateHaptics: CheckBox
     )
 
@@ -480,6 +482,14 @@ class PropertySheetBuilder(
             "Stick dead zone (px)",
             model.buttonAimStickDeadzonePx
         )
+        val stickUsesTouchPosition = addCheckBox(
+            stickOptions,
+            "Use touch position as stick position",
+            model.buttonAimStickUsesTouchPosition
+        )
+        stickOptions.addView(TextView(context).apply {
+            text = "When enabled, touching a corner starts the stick in that corner."
+        })
         val haptics = addCheckBox(details, "Button Aim haptics", model.buttonAimHaptics)
 
         addSectionTitle(details, "One-Shot Alternate")
@@ -597,6 +607,14 @@ class PropertySheetBuilder(
             "Alternate stick dead zone (px)",
             model.buttonAimAlternateStickDeadzonePx
         )
+        val alternateStickUsesTouchPosition = addCheckBox(
+            alternateStickOptions,
+            "Use touch position as alternate stick position",
+            model.buttonAimAlternateStickUsesTouchPosition
+        )
+        alternateStickOptions.addView(TextView(context).apply {
+            text = "When enabled, touching a corner starts the alternate stick in that corner."
+        })
         val alternateHaptics = addCheckBox(
             alternateDetails,
             "Alternate haptics",
@@ -645,6 +663,7 @@ class PropertySheetBuilder(
             mouseProfile = mouseProfile,
             stickFullDisplacement = stickFullDisplacement,
             stickDeadzone = stickDeadzone,
+            stickUsesTouchPosition = stickUsesTouchPosition,
             haptics = haptics,
             oneShotAlternateEnabled = oneShotAlternateEnabled,
             alternatePayload = alternatePayload,
@@ -658,6 +677,7 @@ class PropertySheetBuilder(
             alternateMouseProfile = alternateMouseProfile,
             alternateStickFullDisplacement = alternateStickFullDisplacement,
             alternateStickDeadzone = alternateStickDeadzone,
+            alternateStickUsesTouchPosition = alternateStickUsesTouchPosition,
             alternateHaptics = alternateHaptics
         )
     }
@@ -1309,6 +1329,7 @@ class PropertySheetBuilder(
         model.buttonAimStickDeadzonePx = fields.stickDeadzone
             .floatValue(model.buttonAimStickDeadzonePx)
             .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
+        model.buttonAimStickUsesTouchPosition = fields.stickUsesTouchPosition.isChecked
         model.buttonAimHaptics = fields.haptics.isChecked
 
         val alternatePayload = fields.alternatePayload.text.toString().trim()
@@ -1362,6 +1383,8 @@ class PropertySheetBuilder(
         model.buttonAimAlternateStickDeadzonePx = fields.alternateStickDeadzone
             .floatValue(model.buttonAimAlternateStickDeadzonePx)
             .coerceIn(0f, (alternateFullDisplacement - 1f).coerceAtLeast(0f))
+        model.buttonAimAlternateStickUsesTouchPosition =
+            fields.alternateStickUsesTouchPosition.isChecked
         model.buttonAimAlternateHaptics = fields.alternateHaptics.isChecked
     }
 
