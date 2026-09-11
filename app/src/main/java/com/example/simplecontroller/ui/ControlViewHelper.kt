@@ -40,6 +40,7 @@ class ControlViewHelper(
     private data class StickDirectionCommand(val stickName: String, val x: Float, val y: Float)
 
     private var pulseRepeater: Runnable? = null
+    private var activePulseTrigger: String? = null
     var pulseAlreadyFired = false
     private var isPulseLoopActive = false
     // Handler specifically for pulse feature to ensure we're using the same instance
@@ -76,6 +77,54 @@ class ControlViewHelper(
         label.text = model.name
         label.visibility = if (model.name.isNotEmpty()) View.VISIBLE else View.GONE
     }
+
+    /** Show a transient runtime label without changing the serialized control name. */
+    fun updateLabel(runtimeLabel: String?) {
+        val textToShow = runtimeLabel ?: model.name
+        label.text = textToShow
+        label.visibility = if (textToShow.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    /** Payload transport used only by Button Aim's explicit base/alternate ownership model. */
+    fun createButtonAimPayloadExecutor(): ButtonAimPayloadExecutor =
+        ButtonAimPayloadExecutor(
+            transport = object : ButtonAimPayloadTransport {
+                override fun sendCommand(command: String) = UdpClient.sendCommand(command)
+
+                override fun sendKey(key: String, pressed: Boolean) =
+                    UdpClient.sendKeyCommand(key, pressed)
+
+                override fun sendStickMacro(stickName: String, x: Float, y: Float) =
+                    UdpClient.sendStickMacroPosition(stickName, x, y)
+
+                override fun onCameraFollow(command: String) {
+                    val enabled = when (command) {
+                        "CAMERA_FOLLOW:1" -> true.also(UdpClient::setCameraFollowEnabled)
+                        "CAMERA_FOLLOW:0" -> false.also(UdpClient::setCameraFollowEnabled)
+                        else -> UdpClient.toggleCameraFollow()
+                    }
+                    Toast.makeText(
+                        context,
+                        "Camera Follow ${if (enabled) "ON" else "OFF"}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                override fun onScrollToggle() {
+                    GlobalSettings.scrollMode = !GlobalSettings.scrollMode
+                    Toast.makeText(
+                        context,
+                        if (GlobalSettings.scrollMode) "Scroll mode ON" else "Scroll mode OFF",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+
+                override fun onReleaseAll() {
+                    (context as? MainActivity)?.activateReleaseAll()
+                }
+            },
+            scheduler = HandlerButtonAimPayloadScheduler()
+        )
 
     fun isCameraFollowAction(): Boolean = when (model.payload.trim().uppercase()) {
         "CAMERA_FOLLOW", "CAMERA_FOLLOW:1", "CAMERA_FOLLOW:0" -> true
@@ -241,8 +290,10 @@ class ControlViewHelper(
                     override fun run() {
                         Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
                         UdpClient.sendCommand(downCmd)
+                        activePulseTrigger = trigger
                         pulseHandler.postDelayed({
                             UdpClient.sendCommand(upCmd)
+                            if (activePulseTrigger == trigger) activePulseTrigger = null
                             Log.d("ControlViewHelper", "Pulse (latched) released: $upCmd")
                         }, delayMs / 2)
 
@@ -254,8 +305,10 @@ class ControlViewHelper(
                 // 🔂 Not latched → send once
                 Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
                 UdpClient.sendCommand(downCmd)
+                activePulseTrigger = trigger
                 pulseHandler.postDelayed({
                     UdpClient.sendCommand(upCmd)
+                    if (activePulseTrigger == trigger) activePulseTrigger = null
                     Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
                 }, delayMs)
             }
@@ -347,6 +400,7 @@ class ControlViewHelper(
 
         // Cancel any pending pulse tasks to be absolutely sure
         pulseHandler.removeCallbacksAndMessages(null)
+        activePulseTrigger = null
 
         // Process all commands in the payload
         model.payload.split(',', ' ')
@@ -460,6 +514,8 @@ class ControlViewHelper(
         repeater = null
         uiHandler.removeCallbacksAndMessages(null)
         pulseHandler.removeCallbacksAndMessages(null)
+        activePulseTrigger?.let { UdpClient.sendCommand("$it:0.0") }
+        activePulseTrigger = null
         pulseRepeater = null
         isPulseLoopActive = false
         pulseAlreadyFired = false

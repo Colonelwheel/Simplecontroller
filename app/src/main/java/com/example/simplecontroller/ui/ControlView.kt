@@ -14,6 +14,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.Toast
 import androidx.core.content.ContextCompat
 import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.R
@@ -47,6 +48,7 @@ class ControlView(
     private val mouseClickHandler = Handler(Looper.getMainLooper())
 
     private var wasJustUnlatched = false
+    private var suppressLatchReleaseSideEffect = false
 
 
     /* ───────── member variables ────────── */
@@ -61,7 +63,9 @@ class ControlView(
             field = value
 
             // If we're turning off latched mode, release any held buttons
-            if (oldValue && !value && model.type == ControlType.BUTTON) {
+            if (oldValue && !value && model.type == ControlType.BUTTON &&
+                !suppressLatchReleaseSideEffect
+            ) {
                 Log.d("DEBUG_PULSE", "isLatched setter: unlatching and calling releaseLatched()")
                 uiHelper.releaseLatched()
                 // Double-check that pulse state is reset
@@ -162,6 +166,15 @@ class ControlView(
         }
     }
 
+    private fun setButtonAimLatchedState(value: Boolean) {
+        suppressLatchReleaseSideEffect = true
+        try {
+            isLatched = value
+        } finally {
+            suppressLatchReleaseSideEffect = false
+        }
+    }
+
     /* ───────── init ───────────── */
     init {
         // Configure layout params
@@ -194,17 +207,18 @@ class ControlView(
             ButtonAimHandler(
                 model = model,
                 aimOutput = buttonAimOutput,
+                payloadExecutor = uiHelper.createButtonAimPayloadExecutor(),
                 isLatched = { isLatched },
                 setLatched = {
-                    isLatched = it
+                    setButtonAimLatchedState(it)
                     invalidate()
                 },
                 setPressed = {
                     isPressed = it
                     invalidate()
                 },
-                firePayload = uiHelper::firePayload,
-                releasePayload = uiHelper::releaseLatched,
+                fireLegacyPayload = uiHelper::firePayload,
+                releaseLegacyPayload = uiHelper::releaseLatched,
                 startTurbo = uiHelper::startRepeat,
                 stopTurbo = uiHelper::stopRepeat,
                 isGlobalHold = { GlobalSettings.globalHold },
@@ -214,7 +228,10 @@ class ControlView(
                         model.payload.contains("LT:1.0P", ignoreCase = true)
                 },
                 vibrate = ::triggerStrongVibration,
-                onStateChanged = { invalidate() }
+                onPayloadError = { reason ->
+                    Toast.makeText(context, "One-shot alternate: $reason", Toast.LENGTH_SHORT).show()
+                },
+                onStateChanged = { updateButtonAimPresentation() }
             )
         } else {
             null
@@ -224,6 +241,11 @@ class ControlView(
 
         // Initial UI updates
         uiHelper.updateLabel()
+    }
+
+    private fun updateButtonAimPresentation() {
+        uiHelper.updateLabel(buttonAimHandler?.runtimeLabel())
+        invalidate()
     }
 
     // Clean up when the view is removed
@@ -245,11 +267,16 @@ class ControlView(
                 val aimState = buttonAimHandler?.visualState ?: ButtonAimVisualState.IDLE
                 val activeAimColor = when {
                     !model.buttonAimEnabled -> null
-                    isLatched -> Color.rgb(126, 87, 194)
+                    aimState == ButtonAimVisualState.ALTERNATE_RESET_READY -> Color.rgb(46, 125, 50)
+                    aimState == ButtonAimVisualState.ALTERNATE_RECOVERY -> Color.rgb(198, 40, 40)
+                    aimState == ButtonAimVisualState.ALTERNATE_WAITING_TO_FIRE -> Color.rgb(255, 143, 0)
+                    aimState == ButtonAimVisualState.ALTERNATE_AIMING -> Color.rgb(3, 169, 244)
+                    aimState == ButtonAimVisualState.ALTERNATE_ARMED -> Color.rgb(30, 136, 229)
                     aimState == ButtonAimVisualState.WAITING_TO_FIRE -> Color.rgb(239, 108, 0)
                     aimState == ButtonAimVisualState.LATCH_READY -> Color.rgb(171, 71, 188)
                     aimState == ButtonAimVisualState.ARMED -> Color.rgb(245, 166, 35)
                     aimState == ButtonAimVisualState.AIMING -> Color.rgb(0, 150, 136)
+                    isLatched -> Color.rgb(126, 87, 194)
                     else -> null
                 }
 
@@ -959,9 +986,11 @@ class ControlView(
     }
 
     fun releaseButtonAim() {
-        buttonAimHandler?.takeIf { it.hasRuntimeState() }?.let {
-            it.cancelForSafety()
-            uiHelper.cancelPendingActionsForReleaseAll()
+        buttonAimHandler?.let {
+            if (model.buttonAimEnabled || it.hasRuntimeState()) {
+                it.hardReset()
+                uiHelper.cancelPendingActionsForReleaseAll()
+            }
         }
     }
 
@@ -971,7 +1000,7 @@ class ControlView(
      */
     fun releaseEverythingLocally() {
         val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
-        if (buttonAimOwnedRuntime) buttonAimHandler?.cancelForSafety()
+        if (buttonAimOwnedRuntime) buttonAimHandler?.hardReset()
         holdHandler.removeCallbacksAndMessages(null)
         mouseClickHandler.removeCallbacksAndMessages(null)
         secondTapHoldCheck = null
@@ -997,13 +1026,14 @@ class ControlView(
         wasJustUnlatched = false
 
         val wasLatched = isLatched
+        val wasPressed = isPressed
         isPressed = false
         if (model.type == ControlType.BUTTON) {
             if (buttonAimOwnedRuntime) {
                 // The Button Aim state machine already reconciled its payload exactly once.
             } else if (wasLatched) {
                 isLatched = false
-            } else {
+            } else if (wasPressed) {
                 // A physically held non-latched button still needs its normal release mapping.
                 uiHelper.releaseLatched()
             }
@@ -1020,6 +1050,8 @@ class ControlView(
      * This method is needed by LayoutManager
      */
     fun showProps() {
+        // Reconcile the old runtime payload/config before the dialog mutates the model.
+        releaseButtonAim()
         PropertySheetBuilder(context, model) {
             // After properties are updated:
             releaseButtonAim()

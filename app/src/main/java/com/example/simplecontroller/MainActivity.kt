@@ -413,6 +413,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
                 NetworkClient.ConnectionStatus.CONNECTING -> {
+                    // Release only Button Aim-owned output while the current socket is live.
+                    SwipeManager.releaseAllButtonAimSurfaces()
                     NetworkClient.close()
                 }
 
@@ -453,6 +455,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     private fun connectViaUsbTether() {
         Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
+        SwipeManager.releaseAllButtonAimSurfaces()
         UdpClient.close()
 
         NetworkClient.discoverUsbTetherReceiver { endpoint ->
@@ -580,6 +583,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     .apply()
 
                 // --- Update client and connect (honor toggle) ---
+                // Clear armed phases and held Button Aim payloads before changing endpoints.
+                SwipeManager.releaseAllButtonAimSurfaces()
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
 

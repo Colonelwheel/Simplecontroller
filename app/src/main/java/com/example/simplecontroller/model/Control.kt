@@ -52,6 +52,21 @@ data class Control(
     var buttonAimStickDeadzonePx: Float = 8f,
     var buttonAimHaptics: Boolean = true,
 
+    /* One-Shot Alternate Button Phase (disabled by default) */
+    var buttonAimOneShotAlternateEnabled: Boolean = false,
+    var buttonAimAlternatePayload: String = "",
+    var buttonAimAlternatePayloadTiming: ButtonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
+    var buttonAimAlternateResetHoldDurationMs: Long = 2000L,
+    var buttonAimAlternateDisplayName: String = "",
+    var buttonAimAlternateOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    var buttonAimAlternateSensitivity: Float = 1f,
+    var buttonAimAlternateInvertY: Boolean = false,
+    var buttonAimAlternateStickProfile: ButtonAimStickProfile = ButtonAimStickProfile.LINEAR,
+    var buttonAimAlternateMouseProfile: ButtonAimMouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
+    var buttonAimAlternateStickFullDisplacementPx: Float = 220f,
+    var buttonAimAlternateStickDeadzonePx: Float = 8f,
+    var buttonAimAlternateHaptics: Boolean = true,
+
     /* 2a – mouse-pad one-finger drag */
     /**
      * When **true** this *TOUCHPAD* control automatically sends

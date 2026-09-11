@@ -90,7 +90,20 @@ class PropertySheetBuilder(
         val mouseProfile: Spinner,
         val stickFullDisplacement: EditText,
         val stickDeadzone: EditText,
-        val haptics: CheckBox
+        val haptics: CheckBox,
+        val oneShotAlternateEnabled: CheckBox,
+        val alternatePayload: AutoCompleteTextView,
+        val alternatePayloadTiming: Spinner,
+        val alternateResetHoldDurationMs: EditText,
+        val alternateDisplayName: EditText,
+        val alternateOutput: Spinner,
+        val alternateSensitivity: EditText,
+        val alternateInvertY: CheckBox,
+        val alternateStickProfile: Spinner,
+        val alternateMouseProfile: Spinner,
+        val alternateStickFullDisplacement: EditText,
+        val alternateStickDeadzone: EditText,
+        val alternateHaptics: CheckBox
     )
 
     /**
@@ -469,6 +482,127 @@ class PropertySheetBuilder(
         )
         val haptics = addCheckBox(details, "Button Aim haptics", model.buttonAimHaptics)
 
+        addSectionTitle(details, "One-Shot Alternate")
+        details.addView(TextView(context).apply {
+            text = "Keep this surface on a configured alternate action until its reset hold is completed."
+        })
+        val oneShotAlternateEnabled = addCheckBox(
+            details,
+            "Use one-shot alternate",
+            model.buttonAimOneShotAlternateEnabled
+        )
+        val alternateDetails = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (model.buttonAimOneShotAlternateEnabled) View.VISIBLE else View.GONE
+            details.addView(this)
+        }
+
+        alternateDetails.addView(TextView(context).apply {
+            text = "Alternate payload (supports the same commands and comma-separated combinations as a Button)"
+        })
+        val alternatePayload = addPayloadControl(
+            alternateDetails,
+            model.buttonAimAlternatePayload,
+            "Alternate payload (comma-separated)"
+        )
+        alternateDetails.addView(createGap())
+
+        alternateDetails.addView(TextView(context).apply {
+            text = "Optional alternate display name (the payload is used when blank)"
+        })
+        val alternateDisplayName = addTextField(
+            alternateDetails,
+            model.buttonAimAlternateDisplayName,
+            "Optional alternate display name"
+        )
+
+        val alternatePayloadTiming = addChoice(
+            alternateDetails,
+            "Alternate payload timing",
+            listOf("Immediate", "Send on release"),
+            if (model.buttonAimAlternatePayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) 0 else 1
+        )
+        alternateDetails.addView(TextView(context).apply {
+            text = "Send on release fires on intentional lift and does not inherit the base release delay."
+        })
+        alternateDetails.addView(createGap())
+
+        alternateDetails.addView(TextView(context).apply {
+            text = "Return-to-base hold duration (ms)"
+        })
+        val alternateResetHoldDurationMs = addTextField(
+            alternateDetails,
+            model.buttonAimAlternateResetHoldDurationMs.toString(),
+            "Return-to-base hold duration (ms)",
+            InputType.TYPE_CLASS_NUMBER
+        )
+        alternateDetails.addView(TextView(context).apply {
+            text = "While in alternate mode, hold this long and release to return to the base action."
+        })
+        alternateDetails.addView(createGap())
+
+        addSectionTitle(alternateDetails, "Alternate Aim")
+        alternateDetails.addView(TextView(context).apply {
+            text = "These settings apply only while the one-shot alternate is armed or active."
+        })
+        val alternateOutput = addChoice(
+            alternateDetails,
+            "Alternate aim output",
+            listOf("Mouse", "Right stick", "Left stick"),
+            when (model.buttonAimAlternateOutput) {
+                TouchAimOutput.MOUSE -> 0
+                TouchAimOutput.RIGHT_STICK -> 1
+                TouchAimOutput.LEFT_STICK -> 2
+            }
+        )
+        val alternateSensitivity = addDecimalField(
+            alternateDetails,
+            "Alternate aim sensitivity",
+            model.buttonAimAlternateSensitivity
+        )
+        val alternateInvertY = addCheckBox(
+            alternateDetails,
+            "Alternate invert Y",
+            model.buttonAimAlternateInvertY
+        )
+
+        val alternateMouseOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            alternateDetails.addView(this)
+        }
+        val alternateMouseProfile = addChoice(
+            alternateMouseOptions,
+            "Alternate mouse movement profile",
+            listOf("Linear Relative", "Smoothed / Nonlinear"),
+            if (model.buttonAimAlternateMouseProfile == ButtonAimMouseProfile.LINEAR_RELATIVE) 0 else 1
+        )
+
+        val alternateStickOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            alternateDetails.addView(this)
+        }
+        val alternateStickProfile = addChoice(
+            alternateStickOptions,
+            "Alternate stick movement profile",
+            listOf("Linear", "Response Curve"),
+            if (model.buttonAimAlternateStickProfile == ButtonAimStickProfile.LINEAR) 0 else 1
+        )
+        val alternateStickFullDisplacement = addDecimalField(
+            alternateStickOptions,
+            "Alternate full stick displacement (px)",
+            model.buttonAimAlternateStickFullDisplacementPx
+        )
+        val alternateStickDeadzone = addDecimalField(
+            alternateStickOptions,
+            "Alternate stick dead zone (px)",
+            model.buttonAimAlternateStickDeadzonePx
+        )
+        val alternateHaptics = addCheckBox(
+            alternateDetails,
+            "Alternate haptics",
+            model.buttonAimAlternateHaptics
+        )
+
         fun updateOutputVisibility() {
             val mouseSelected = aimOutput.selectedItemPosition == 0
             mouseOptions.visibility = if (mouseSelected) View.VISIBLE else View.GONE
@@ -480,10 +614,25 @@ class PropertySheetBuilder(
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
+        fun updateAlternateOutputVisibility() {
+            val mouseSelected = alternateOutput.selectedItemPosition == 0
+            alternateMouseOptions.visibility = if (mouseSelected) View.VISIBLE else View.GONE
+            alternateStickOptions.visibility = if (mouseSelected) View.GONE else View.VISIBLE
+        }
+        alternateOutput.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateAlternateOutputVisibility()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
         enabled.setOnCheckedChangeListener { _, checked ->
             details.visibility = if (checked) View.VISIBLE else View.GONE
         }
+        oneShotAlternateEnabled.setOnCheckedChangeListener { _, checked ->
+            alternateDetails.visibility = if (checked) View.VISIBLE else View.GONE
+        }
         updateOutputVisibility()
+        updateAlternateOutputVisibility()
 
         return ButtonAimComponents(
             enabled = enabled,
@@ -496,7 +645,20 @@ class PropertySheetBuilder(
             mouseProfile = mouseProfile,
             stickFullDisplacement = stickFullDisplacement,
             stickDeadzone = stickDeadzone,
-            haptics = haptics
+            haptics = haptics,
+            oneShotAlternateEnabled = oneShotAlternateEnabled,
+            alternatePayload = alternatePayload,
+            alternatePayloadTiming = alternatePayloadTiming,
+            alternateResetHoldDurationMs = alternateResetHoldDurationMs,
+            alternateDisplayName = alternateDisplayName,
+            alternateOutput = alternateOutput,
+            alternateSensitivity = alternateSensitivity,
+            alternateInvertY = alternateInvertY,
+            alternateStickProfile = alternateStickProfile,
+            alternateMouseProfile = alternateMouseProfile,
+            alternateStickFullDisplacement = alternateStickFullDisplacement,
+            alternateStickDeadzone = alternateStickDeadzone,
+            alternateHaptics = alternateHaptics
         )
     }
 
@@ -760,10 +922,14 @@ class PropertySheetBuilder(
     /**
      * Add payload control with autocomplete
      */
-    private fun addPayloadControl(container: LinearLayout): AutoCompleteTextView {
+    private fun addPayloadControl(
+        container: LinearLayout,
+        initialValue: String = model.payload,
+        fieldHint: String = "payload (comma-sep)"
+    ): AutoCompleteTextView {
         return AutoCompleteTextView(context).apply {
-            hint = "payload (comma-sep)"
-            setText(model.payload)
+            hint = fieldHint
+            setText(initialValue)
             inputType = InputType.TYPE_TEXT_FLAG_CAP_WORDS
             
             // Set up autocomplete suggestions
@@ -1144,6 +1310,59 @@ class PropertySheetBuilder(
             .floatValue(model.buttonAimStickDeadzonePx)
             .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
         model.buttonAimHaptics = fields.haptics.isChecked
+
+        val alternatePayload = fields.alternatePayload.text.toString().trim()
+        val requestedOneShot = fields.oneShotAlternateEnabled.isChecked
+        model.buttonAimOneShotAlternateEnabled = requestedOneShot && alternatePayload.isNotEmpty()
+        model.buttonAimAlternatePayload = alternatePayload
+        if (requestedOneShot && alternatePayload.isEmpty()) {
+            Toast.makeText(
+                context,
+                "One-shot alternate was left off because its payload is blank.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        model.buttonAimAlternatePayloadTiming =
+            if (fields.alternatePayloadTiming.selectedItemPosition == 0) {
+                ButtonAimPayloadTiming.IMMEDIATE
+            } else {
+                ButtonAimPayloadTiming.SEND_ON_RELEASE
+            }
+        model.buttonAimAlternateResetHoldDurationMs = fields.alternateResetHoldDurationMs.text
+            .toString()
+            .toLongOrNull()
+            ?.coerceAtLeast(0L)
+            ?: model.buttonAimAlternateResetHoldDurationMs
+        model.buttonAimAlternateDisplayName = fields.alternateDisplayName.text.toString().trim()
+        model.buttonAimAlternateOutput = when (fields.alternateOutput.selectedItemPosition) {
+            1 -> TouchAimOutput.RIGHT_STICK
+            2 -> TouchAimOutput.LEFT_STICK
+            else -> TouchAimOutput.MOUSE
+        }
+        model.buttonAimAlternateSensitivity = fields.alternateSensitivity
+            .floatValue(model.buttonAimAlternateSensitivity)
+            .coerceAtLeast(0f)
+        model.buttonAimAlternateInvertY = fields.alternateInvertY.isChecked
+        model.buttonAimAlternateStickProfile =
+            if (fields.alternateStickProfile.selectedItemPosition == 0) {
+                ButtonAimStickProfile.LINEAR
+            } else {
+                ButtonAimStickProfile.RESPONSE_CURVE
+            }
+        model.buttonAimAlternateMouseProfile =
+            if (fields.alternateMouseProfile.selectedItemPosition == 0) {
+                ButtonAimMouseProfile.LINEAR_RELATIVE
+            } else {
+                ButtonAimMouseProfile.SMOOTHED_NONLINEAR
+            }
+        val alternateFullDisplacement = fields.alternateStickFullDisplacement
+            .floatValue(model.buttonAimAlternateStickFullDisplacementPx)
+            .coerceAtLeast(1f)
+        model.buttonAimAlternateStickFullDisplacementPx = alternateFullDisplacement
+        model.buttonAimAlternateStickDeadzonePx = fields.alternateStickDeadzone
+            .floatValue(model.buttonAimAlternateStickDeadzonePx)
+            .coerceIn(0f, (alternateFullDisplacement - 1f).coerceAtLeast(0f))
+        model.buttonAimAlternateHaptics = fields.alternateHaptics.isChecked
     }
 
     private fun EditText.floatValue(fallback: Float): Float =
