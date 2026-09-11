@@ -37,6 +37,8 @@ class ControlViewHelper(
     private val parentView: ControlView,
     private val onDeleteRequested: (Control) -> Unit
 ) {
+    private data class StickDirectionCommand(val stickName: String, val x: Float, val y: Float)
+
     private var pulseRepeater: Runnable? = null
     var pulseAlreadyFired = false
     private var isPulseLoopActive = false
@@ -50,6 +52,7 @@ class ControlViewHelper(
 
     // For turbo/repeat functionality
     private var repeater: Runnable? = null
+    private var cameraFollowHandledForPress = false
 
     // UI elements
     private val label = TextView(context).apply {
@@ -73,6 +76,13 @@ class ControlViewHelper(
         label.text = model.name
         label.visibility = if (model.name.isNotEmpty()) View.VISIBLE else View.GONE
     }
+
+    fun isCameraFollowAction(): Boolean = when (model.payload.trim().uppercase()) {
+        "CAMERA_FOLLOW", "CAMERA_FOLLOW:1", "CAMERA_FOLLOW:0" -> true
+        else -> false
+    }
+
+    fun isReleaseAllAction(): Boolean = model.payload.trim().equals("RELEASE_ALL", ignoreCase = true)
 
     /**
      * Show the property sheet for this control
@@ -167,6 +177,28 @@ class ControlViewHelper(
     private fun sendCommand(command: String) {
         Log.d("ControlViewHelper", "sendCommand() called with: '$command'")
 
+        val upperCommand = command.trim().uppercase()
+        if (upperCommand == "CAMERA_FOLLOW" ||
+            upperCommand == "CAMERA_FOLLOW:1" ||
+            upperCommand == "CAMERA_FOLLOW:0"
+        ) {
+            // Turbo and hold callbacks may call firePayload repeatedly. Camera Follow is
+            // intentionally handled only once until this physical press is released.
+            if (cameraFollowHandledForPress) return
+            cameraFollowHandledForPress = true
+            val enabled = when (upperCommand) {
+                "CAMERA_FOLLOW:1" -> true.also { UdpClient.setCameraFollowEnabled(it) }
+                "CAMERA_FOLLOW:0" -> false.also { UdpClient.setCameraFollowEnabled(it) }
+                else -> UdpClient.toggleCameraFollow()
+            }
+            Toast.makeText(
+                context,
+                "Camera Follow ${if (enabled) "ON" else "OFF"}",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
+        }
+
         // ───────────────── Scroll-mode toggle ─────────────────
         if (command == "SCROLL_MODE_TOGGLE") {
             GlobalSettings.scrollMode = !GlobalSettings.scrollMode
@@ -232,6 +264,12 @@ class ControlViewHelper(
         }
         // ──────────────────────────────────────────────────────
 
+        parseStickDirectionCommand(command)?.let { stickCommand ->
+            Log.d("ControlViewHelper", "Sending stick direction command via UdpClient: $command")
+            UdpClient.sendStickMacroPosition(stickCommand.stickName, stickCommand.x, stickCommand.y)
+            return
+        }
+
         val isXboxCommand = command.startsWith("X360")
         val isMouseCommand = command.startsWith("MOUSE_")
         val isTouchpadCommand = command.startsWith("TOUCHPAD:")
@@ -276,7 +314,7 @@ class ControlViewHelper(
             // 👇 NEW: Only auto-release if turbo is on OR the finger isn't actually held down.
             val shouldAutoRelease = !isLatchedNow && (GlobalSettings.globalTurbo || !fingerPressed)
             if (shouldAutoRelease) {
-                Handler(Looper.getMainLooper()).postDelayed({
+                uiHandler.postDelayed({
                     Log.d("ControlViewHelper", "Sending delayed key release for: '$command'")
                     UdpClient.sendKeyCommand(command, false)
                 }, 100)
@@ -293,6 +331,7 @@ class ControlViewHelper(
     fun releaseLatched() {
         Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
+        cameraFollowHandledForPress = false
 
         // Cancel any repeating pulse trigger using the same handler that created it
         pulseRepeater?.let {
@@ -315,8 +354,19 @@ class ControlViewHelper(
             .forEach { raw ->
                 val cmd = raw.trim()
                 Log.d("ControlViewHelper", "Processing release for command: '$cmd'")
+                val stickCommand = parseStickDirectionCommand(cmd)
 
                 when {
+                    // Stick direction button payloads -> center the stick on lift
+                    stickCommand != null -> {
+                        Log.d("ControlViewHelper", "Sending stick direction release: ${stickCommand.stickName}:0.00,0.00")
+                        UdpClient.sendStickMacroPosition(stickCommand.stickName, 0f, 0f)
+                    }
+
+                    cmd.equals("RELEASE_ALL", ignoreCase = true) -> Unit
+
+                    cmd.startsWith("CAMERA_FOLLOW", ignoreCase = true) -> Unit
+
                     // Xbox buttons → explicit *_RELEASE
                     cmd.startsWith("X360") -> {
                         val releaseCmd = if (cmd.endsWith("_HOLD")) {
@@ -360,6 +410,27 @@ class ControlViewHelper(
             }
     }
 
+    private fun parseStickDirectionCommand(command: String): StickDirectionCommand? {
+        val match = Regex("""(?i)^(LS|RS):([A-Z]+)([0-9]{1,3})?$""")
+            .matchEntire(command.trim())
+            ?: return null
+        val stickName = match.groupValues[1].uppercase()
+        val direction = match.groupValues[2].uppercase()
+        val amount = ((match.groupValues[3].toFloatOrNull() ?: 100f).coerceIn(0f, 100f)) / 100f
+        val (x, y) = when (direction) {
+            "R", "RIGHT" -> 1f to 0f
+            "L", "LEFT" -> -1f to 0f
+            "U", "UP" -> 0f to -1f
+            "D", "DOWN" -> 0f to 1f
+            "UR" -> 1f to -1f
+            "UL" -> -1f to -1f
+            "BR" -> 1f to 1f
+            "BL" -> -1f to 1f
+            else -> return null
+        }
+        return StickDirectionCommand(stickName, x * amount, y * amount)
+    }
+
     /**
      * Start repeating the payload (for turbo mode)
      */
@@ -380,6 +451,20 @@ class ControlViewHelper(
     fun stopRepeat() {
         repeater?.let { uiHandler.removeCallbacks(it) }
         repeater = null
+        cameraFollowHandledForPress = false
+    }
+
+    /** Cancel every delayed/repeating action owned by this helper without changing settings. */
+    fun cancelPendingActionsForReleaseAll() {
+        repeater?.let { uiHandler.removeCallbacks(it) }
+        repeater = null
+        uiHandler.removeCallbacksAndMessages(null)
+        pulseHandler.removeCallbacksAndMessages(null)
+        pulseRepeater = null
+        isPulseLoopActive = false
+        pulseAlreadyFired = false
+        allowPulseLoop = false
+        cameraFollowHandledForPress = false
     }
 }
 
@@ -454,7 +539,8 @@ object SwipeManager {
      */
     fun registerControl(view: ControlView) {
         allViews.add(view)
-        swipeHandler.registerView(view)
+        // Touch Aim keeps the original MotionEvent so contact geometry is not discarded.
+        if (view.model.type != ControlType.TOUCH_AIM) swipeHandler.registerView(view)
     }
 
     /**
@@ -488,6 +574,7 @@ object SwipeManager {
             if (editMode) {
                 it.stopContinuousSending()
                 it.stopDirectionalCommands()
+                it.releaseTouchAim()
             }
         }
     }
@@ -509,6 +596,16 @@ object SwipeManager {
         allViews.forEach { it.stopRepeat() }
     }
 
+    fun releaseAllTouchAim() {
+        allViews.forEach { it.releaseTouchAim() }
+    }
+
+    /** Release all runtime output state while preserving layouts and global settings. */
+    fun releaseEverythingLocally() {
+        swipeHandler.cancelActiveTouch()
+        allViews.toList().forEach { it.releaseEverythingLocally() }
+    }
+
     /**
      * Clean up any active touch state when swipe is disabled
      */
@@ -522,7 +619,9 @@ object SwipeManager {
      */
     fun recenterAllSticks() {
         allViews.forEach { view ->
-            if (view.model.type == ControlType.STICK) {
+            if (view.model.type == ControlType.STICK ||
+                view.model.type == ControlType.CURVED_STICK
+            ) {
                 // Stop any continuous sending or directional commands
                 view.stopContinuousSending()
                 view.stopDirectionalCommands()
@@ -532,7 +631,7 @@ object SwipeManager {
                     // For directional sticks, we just stop any active commands
                 } else {
                     // For analog sticks, send center position (0,0)
-                    NetworkClient.send("${view.model.payload}:0.00,0.00")
+                    UdpClient.sendStickPosition(view.model.payload, 0f, 0f)
                 }
             }
         }

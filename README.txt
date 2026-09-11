@@ -54,7 +54,7 @@ The Android app does not directly control the PC by itself. The Windows receiver
 
 ## This is a local-network app
 
-Simple Controller is intended to work on your local Wi-Fi network. Your Android device and Windows PC usually need to be connected to the same Wi-Fi/router.
+Simple Controller is intended to work on a local connection between your Android device and Windows PC. Usually that means the same Wi-Fi/router. It can also work over Android USB tethering when Wi-Fi/router internet is down, as long as the Windows receiver is allowed through Firewall.
 
 For best results:
 
@@ -104,9 +104,10 @@ You need:
    * A phone or tablet with a working touchscreen.
    * The device must be able to install the Simple Controller APK.
 
-3. **A Wi-Fi network**
+3. **A local network path**
 
    * The Android device and Windows PC should usually be on the same Wi-Fi network.
+   * Android USB tethering can also provide a direct local path to the PC.
 
 ---
 
@@ -275,9 +276,9 @@ Only use this method if the release instructions say to.
 
    `pip install -r requirements.txt`
 
-5. Start the receiver using the command provided by the developer. It may look something like:
+5. Start the receiver using the command provided by the developer. For the current Python receiver, use:
 
-   `python server.py`
+   `python simple_controller_receiver.py`
 
 6. Leave the command window open while using Simple Controller.
 
@@ -315,27 +316,29 @@ If ViGEm is not installed, controller mode may silently fail or games may not se
 
 ---
 
-# 10. Finding Your PC’s IP Address
+# 10. Receiver Auto-Detection and IP Address
 
-The Android app needs to know where to send input. Usually, this means entering your Windows PC’s local IP address.
+The Android app needs to know where to send input. Current versions first try the saved address, then auto-detect `simple_controller_receiver.py` on Wi-Fi or Android USB tethering. In many cases you can leave the IP field alone and just tap Connect.
 
 ## Easy method
 
-The Windows receiver may display your IP address automatically.
+Start `simple_controller_receiver.py` on Windows, allow Firewall access on private networks, then tap Connect in the Android app.
+
+The receiver also displays the IP address and port it is listening on.
 
 Look for something like:
 
-`PC IP: 192.168.1.25`
+`IP Address: 192.168.1.25`
 
 or
 
-`Listening on 192.168.1.25`
+`Port:       9001`
 
-Use that number in the Android app.
+Use those values manually only if auto-detection does not connect.
 
 ## Manual method
 
-If the receiver does not show the IP address:
+If auto-detection does not work:
 
 1. On Windows, press the Start button.
 
@@ -369,7 +372,7 @@ Example:
 
 `192.168.1.25`
 
-That is the address to enter into the Simple Controller Android app.
+That is the address to enter into the Simple Controller Android app. The current receiver port is `9001`.
 
 ---
 
@@ -378,20 +381,19 @@ That is the address to enter into the Simple Controller Android app.
 ## On the Windows PC
 
 1. Connect the PC to your Wi-Fi or Ethernet network.
-2. Open the Simple Controller receiver/server.
+2. Open `simple_controller_receiver.py` or the packaged Simple Controller receiver.
 3. Allow Windows Firewall access if prompted.
 4. Keep the receiver window open.
-5. Note the IP address and port number shown by the receiver.
+5. Note the IP address and port number shown by the receiver only if manual entry is needed.
 
 ## On the Android device
 
-1. Connect the Android device to the same Wi-Fi network as the PC.
+1. Connect the Android device to the same Wi-Fi network as the PC, or enable Android USB tethering to the PC.
 2. Open Simple Controller.
 3. Go to the connection/settings area.
-4. Enter the PC IP address.
-5. Enter the port number if the app asks for one.
-6. Tap connect, start, save, or the equivalent button.
-7. Try pressing a button in the app.
+4. Tap Connect.
+5. If auto-detection does not work, enter the PC IP address and port `9001`.
+6. Try pressing a button in the app.
 
 If everything is working, you should see activity in the Windows receiver, or the PC should respond to the input.
 
@@ -2132,10 +2134,10 @@ For the smoothest first-time setup, do it in this order:
 2. Install the included ViGEm driver if using controller mode.
 3. Install or open the Windows receiver.
 4. Allow Windows Firewall access.
-5. Find the PC IP address.
-6. Install the Android APK.
-7. Connect the Android device to the same Wi-Fi.
-8. Enter the PC IP address in the Android app.
+5. Install the Android APK.
+6. Connect the Android device to the same Wi-Fi, or use Android USB tethering.
+7. Tap Connect and let the app auto-detect the receiver.
+8. If auto-detection fails, enter the PC IP address and port `9001`.
 9. Test in Notepad or on the desktop.
 10. Test in the game.
 11. Create or adjust a profile.
@@ -2259,8 +2261,8 @@ Do not try to configure everything at once. First get basic movement working, th
 Check:
 
 * Is the Windows receiver open?
-* Are the phone and PC on the same Wi-Fi?
-* Did you enter the correct PC IP address?
+* Are the phone and PC on the same Wi-Fi, or connected with Android USB tethering?
+* If manual mode is needed, did you enter the correct PC IP address?
 * Did Windows Firewall block the receiver?
 * Is the port number correct?
 * Is the game or target window active?
@@ -2357,9 +2359,9 @@ Local IP addresses can change after restarting your router, PC, or Wi-Fi.
 
 If the app suddenly stops connecting:
 
-1. Check the PC IP address again.
-2. Update the IP address in the Android app.
-3. Try connecting again.
+1. Start `simple_controller_receiver.py`.
+2. Tap Connect again so the app can auto-detect the receiver.
+3. If auto-detection fails, check the PC IP address and enter it manually with port `9001`.
 
 ---
 
@@ -2389,7 +2391,7 @@ Check:
 * Is the phone connected to a VPN?
 * Is the PC on Ethernet while the phone is on Wi-Fi? This is usually okay, but some routers separate them.
 
-Try temporarily disabling VPNs and using the main home Wi-Fi network.
+Try temporarily disabling VPNs and using the main home Wi-Fi network. If router internet is down or the router is isolating devices, enable Android USB tethering and tap Connect again so the app can discover the receiver on the tethered link.
 
 ---
 
@@ -2466,7 +2468,7 @@ If you need help, provide the following information:
 10. Whether mouse movement works
 11. Any error message shown by the PC receiver
 12. Whether Windows Firewall asked for permission
-13. Whether the phone and PC are on the same Wi-Fi network
+13. Whether the phone and PC are on the same Wi-Fi network or Android USB tethering
 14. The exact payload/command you typed into the button
 
 This information makes it much easier to figure out what is wrong.
@@ -2481,9 +2483,9 @@ For most users, the setup is:
 2. Install the included ViGEm driver if you want controller mode.
 3. Start the Simple Controller receiver on Windows.
 4. Allow Windows Firewall access on your private network.
-5. Make sure the phone and PC are on the same Wi-Fi.
-6. Enter the PC IP address in the app.
-7. Connect.
+5. Make sure the phone and PC are on the same Wi-Fi, or connect them with Android USB tethering.
+6. Tap Connect and let the app auto-detect the receiver.
+7. Enter the PC IP address and port `9001` only if auto-detection fails.
 8. Test in Notepad or on the desktop.
 9. Create or choose a profile.
 10. Add buttons/sticks/touchpads.
@@ -2499,7 +2501,7 @@ Simple Controller must have both parts running: the Android app and the Windows 
 
 Use this when sharing the app with someone:
 
-“Simple Controller has two parts: the Android app and the Windows receiver. Install the APK on your Android device, run the receiver on your Windows PC, make sure both devices are on the same Wi-Fi, then enter the PC’s IP address in the app. If you want Xbox-controller input, install the included ViGEm driver from the GitHub/download package. Start by testing a simple keyboard button like `w` or `space` in Notepad before trying a game. Buttons can send one command or multiple commands separated by commas, like `shift,w` or `LT:1.0,RT:1.0`.”
+“Simple Controller has two parts: the Android app and the Windows receiver. Install the APK on your Android device, run the receiver on your Windows PC, make sure both devices are on the same Wi-Fi or connected with Android USB tethering, then tap Connect so the app can auto-detect the receiver. If you want Xbox-controller input, install the included ViGEm driver from the GitHub/download package. Start by testing a simple keyboard button like `w` or `space` in Notepad before trying a game. Buttons can send one command or multiple commands separated by commas, like `shift,w` or `LT:1.0,RT:1.0`.”
 
 ---
 
@@ -2561,7 +2563,7 @@ For the best experience:
 
 * Start the PC receiver before the game.
 * Install ViGEm before using controller mode.
-* Use the same Wi-Fi network for the phone and PC.
+* Use the same Wi-Fi network for the phone and PC, or Android USB tethering when Wi-Fi/router internet is down.
 * Test in Notepad before troubleshooting a game.
 * Use Ethernet for the PC if possible.
 * Keep the phone plugged in during long sessions.

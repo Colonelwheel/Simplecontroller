@@ -5,7 +5,6 @@ import android.os.Looper
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
-import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
@@ -94,10 +93,10 @@ class DirectionalStickHandler(
                             UdpClient.sendCommand(finalCmd)
                         } catch (e: Exception) {
                             // Fall back to TCP if UDP fails
-                            NetworkClient.send(finalCmd)
+                            UdpClient.sendCommand(finalCmd)
                         }
                     } else {
-                        NetworkClient.send(finalCmd)
+                        UdpClient.sendCommand(finalCmd)
                     }
                 }
             update()
@@ -154,17 +153,23 @@ class DirectionalStickHandler(
      * @param y Normalized Y position (-1 to 1)
      * @param action The motion event action (e.g., ACTION_UP, ACTION_MOVE)
      */
-    fun handleDirectionalStick(x: Float, y: Float, action: Int) {
+    fun handleDirectionalStick(
+        x: Float,
+        y: Float,
+        action: Int,
+        analogX: Float = x,
+        analogY: Float = y
+    ) {
         // Store last position
         lastStickX = x
         lastStickY = y
 
-        // For move events with significant motion, also send raw position via UDP
+        // For move events with significant motion, also send the selected analog position via UDP
         // This helps with smoother transitions between directional zones
         if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
             // Only send this for actual STICK type controls, not buttons
-            if (model.type == ControlType.STICK) {
-                UdpClient.sendStickPosition(model.payload, x, y)
+            if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+                UdpClient.sendStickPosition(model.payload, analogX, analogY)
             }
         }
 
@@ -209,10 +214,10 @@ class DirectionalStickHandler(
                             UdpClient.sendCommand(finalCmd)
                         } catch (e: Exception) {
                             // Fall back to TCP if UDP fails
-                            NetworkClient.send(finalCmd)
+                            UdpClient.sendCommand(finalCmd)
                         }
                     } else {
-                        NetworkClient.send(finalCmd)
+                        UdpClient.sendCommand(finalCmd)
                     }
                 }
             update()
@@ -322,7 +327,7 @@ class DirectionalStickHandler(
                                 if (useUdp) {
                                     UdpClient.sendCommand(finalCmd)
                                 } else {
-                                    NetworkClient.send(finalCmd)
+                                    UdpClient.sendCommand(finalCmd)
                                 }
                             }
                     }
@@ -350,7 +355,7 @@ class DirectionalStickHandler(
                                 if (useUdp) {
                                     UdpClient.sendCommand(finalCmd)
                                 } else {
-                                    NetworkClient.send(finalCmd)
+                                    UdpClient.sendCommand(finalCmd)
                                 }
                             }
                     }
@@ -378,7 +383,7 @@ class DirectionalStickHandler(
                                 if (useUdp) {
                                     UdpClient.sendCommand(finalCmd)
                                 } else {
-                                    NetworkClient.send(finalCmd)
+                                    UdpClient.sendCommand(finalCmd)
                                 }
                             }
                     }
@@ -406,7 +411,7 @@ class DirectionalStickHandler(
                                 if (useUdp) {
                                     UdpClient.sendCommand(finalCmd)
                                 } else {
-                                    NetworkClient.send(finalCmd)
+                                    UdpClient.sendCommand(finalCmd)
                                 }
                             }
                     }
@@ -440,7 +445,7 @@ class DirectionalStickHandler(
         sendingRightSuperBoost = false
 
         // Only send stop command for actual stick controls
-        if (model.type == ControlType.STICK) {
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
             // Also send a final zero position via UDP to ensure server knows we've stopped
             UdpClient.sendStickPosition(model.id, 0f, 0f)
         }

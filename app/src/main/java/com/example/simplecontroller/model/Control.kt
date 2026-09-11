@@ -3,7 +3,13 @@ package com.example.simplecontroller.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ControlType { BUTTON, STICK, TOUCHPAD, RECENTER }   // ← keep the names you already use
+enum class ControlType { BUTTON, STICK, CURVED_STICK, TOUCHPAD, TOUCH_AIM, RECENTER }
+
+@Serializable
+enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
+
+@Serializable
+enum class TouchStageAction { PRESS, HOLD }
 
 @Serializable
 data class Control(
@@ -105,13 +111,37 @@ data class Control(
     /**
      * Comma-separated commands to send when the stick exceeds the super threshold.
      */
-    var superThresholdPayload: String = ""
+    var superThresholdPayload: String = "",
+
+    /* Touch Aim: continuous aim plus cumulative contact stages */
+    var touchAimOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    var touchUseSize: Boolean = true,
+    var touchUseMajor: Boolean = true,
+    var touchUseMinor: Boolean = true,
+    var touchSizeScale: Float = 100f,
+    var touchScoreSmoothing: Float = 0.35f,
+    var touchLowThreshold: Float = 2.0f,
+    var touchMediumThreshold: Float = 4.0f,
+    var touchHighThreshold: Float = 5.2f,
+    var touchHysteresis: Float = 0.25f,
+    var touchLowPayload: String = "",
+    var touchMediumPayload: String = "LT:1.0",
+    var touchHighPayload: String = "RT:1.0",
+    var touchLowAction: TouchStageAction = TouchStageAction.PRESS,
+    var touchMediumAction: TouchStageAction = TouchStageAction.HOLD,
+    var touchHighAction: TouchStageAction = TouchStageAction.HOLD,
+    var touchKeepLowerHolds: Boolean = true,
+    var touchStickFullSpeed: Float = 900f,
+    var touchInvertY: Boolean = false,
+    var touchUseResponseCurve: Boolean = false
 )
 
 /* helper when we auto-create new controls */
 fun ControlType.defaultPayload(): String = when (this) {
     ControlType.BUTTON   -> "BUTTON_PRESSED"
     ControlType.STICK    -> "STICK"
+    ControlType.CURVED_STICK -> "STICK"
     ControlType.TOUCHPAD -> "TOUCHPAD"
+    ControlType.TOUCH_AIM -> "TOUCH_AIM"
     ControlType.RECENTER -> "RECENTER"
 }

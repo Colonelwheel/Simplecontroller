@@ -5,7 +5,6 @@ import android.os.Looper
 import android.util.Log
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
-import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
@@ -25,7 +24,7 @@ class ContinuousSender(
     private var lastStickY = 0f
 
     // Throttle sending frequency
-    private val sendIntervalMs = 10L  // ~100 FPS (down from 16ms)
+    private val sendIntervalMs = 16L  // ~100 FPS (up from 10ms)
     private var lastSendTimeMs = 0L
 
     // Use UDP by default for faster transmission
@@ -57,7 +56,7 @@ class ContinuousSender(
                     }
                 } else {
                     // Fallback to TCP - format remains the same for both types
-                    NetworkClient.send("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
+                    UdpClient.sendCommand("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
                 }
                 lastSendTimeMs = currentTimeMs
             }
@@ -124,6 +123,17 @@ class ContinuousSender(
         // Note: we no longer reset lastStickX/Y here – they’re kept for restart.
     }
 
+    /** Emergency cleanup always centers, including intentionally non-auto-centering sticks. */
+    fun stopAndCenter() {
+        continuousSender?.let { uiHandler.removeCallbacks(it) }
+        continuousSender = null
+        lastStickX = 0f
+        lastStickY = 0f
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+            sendCenter()
+        }
+    }
+
 
     /**
      * Is continuous sending currently active?
@@ -137,6 +147,10 @@ class ContinuousSender(
      * This gives finer control near center, more speed at edges
      */
     private fun applyResponseCurve(value: Float): Float {
+        // Response Curve Stick values are already shaped in ControlView. Passing them
+        // through here avoids applying the curve twice during non-auto-center resends.
+        if (model.type == ControlType.CURVED_STICK) return value
+
         // Square response curve with sign preservation
         return value * abs(value)
     }

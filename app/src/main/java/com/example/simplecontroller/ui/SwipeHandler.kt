@@ -40,16 +40,24 @@ class SwipeHandler {
 
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                activeTouch = MotionEvent.obtain(e)
-
                 // Find the starting control
                 val start = allViews.firstOrNull { it.hitTest(e) }
+                if (start == null) {
+                    // Leave gestures that begin on an unregistered view (notably Touch Aim)
+                    // to normal Android dispatch. Do not adopt one later as it crosses a button.
+                    activeTouch?.recycle()
+                    activeTouch = null
+                    lastTouchedView = null
+                    return false
+                }
+
+                activeTouch = MotionEvent.obtain(e)
                 lastTouchedView = start
 
                 // Send DOWN to it (with local coords)
                 start?.forwardEvent(e, MotionEvent.ACTION_DOWN)
 
-                return start != null
+                return true
             }
 
             MotionEvent.ACTION_MOVE -> {
@@ -71,7 +79,10 @@ class SwipeHandler {
                         // Wrap up previous control before switching
                         lastTouchedView?.let { prev ->
                             // Sticks / Touchpads take over their own sending while we swipe away
-                            if (prev.model.type == ControlType.STICK || prev.model.type == ControlType.TOUCHPAD) {
+                            if (prev.model.type == ControlType.STICK ||
+                                prev.model.type == ControlType.CURVED_STICK ||
+                                prev.model.type == ControlType.TOUCHPAD
+                            ) {
                                 prev.startContinuousSending()
                             }
                             // Give it a clamped UP so directional sticks capture the last vector
@@ -127,6 +138,14 @@ class SwipeHandler {
     }
 
     fun setEditMode(enabled: Boolean) { editMode = enabled }
+
+    /** Drop gesture ownership without changing whether Swipe remains enabled. */
+    fun cancelActiveTouch() {
+        activeTouch?.recycle()
+        activeTouch = null
+        lastTouchedView = null
+        lastFiredMap.clear()
+    }
 
     fun getAllViews(): Set<ControlView> = allViews
 

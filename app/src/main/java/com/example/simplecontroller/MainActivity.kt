@@ -1,9 +1,18 @@
 package com.example.simplecontroller
 
+import android.annotation.SuppressLint
 import android.content.Context
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.os.Bundle
+import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.provider.Settings
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.Menu
@@ -30,6 +39,7 @@ import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
 import com.example.simplecontroller.ui.ThemeManager
 import com.example.simplecontroller.ui.UIComponentBuilder
+import com.example.simplecontroller.ui.ReleaseAllCoordinator
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -38,6 +48,11 @@ import android.widget.CheckBox
 import android.view.ViewGroup
 
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
+
+    private companion object {
+        const val USB_TETHER_RETURN_PENDING = "usbTetherReturnPending"
+        const val TETHER_SETTINGS_ACTION = "android.settings.TETHER_SETTINGS"
+    }
 
     /* ---------- persisted "current layout" name ---------- */
     private val prefs by lazy { getSharedPreferences("layout", MODE_PRIVATE) }
@@ -70,6 +85,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /* ---------- connection UI ---------- */
     private lateinit var connectionStatusText: TextView
     private lateinit var btnConnect: Button
+    private lateinit var btnReleaseAll: Button
+    private val releaseFeedbackHandler = Handler(Looper.getMainLooper())
 
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
@@ -132,6 +149,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // 7. Render current layout
         layoutManager.spawnControlViews()
+        btnReleaseAll.bringToFront()
 
         // 8. Setup window insets handling for split screen
         setupWindowInsetsHandling()
@@ -167,15 +185,27 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun onStart() {
         super.onStart()
 
-        // Only auto-connect if auto-reconnect is enabled
-        if (networkPrefs.getBoolean("autoReconnect", false)) {
+        // Returning from tether settings is handled by USB discovery in onResume().
+        // Do not briefly start the saved manual connection first.
+        val usbTetherReturnPending =
+            networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)
+        if (networkPrefs.getBoolean("autoReconnect", false) && !usbTetherReturnPending) {
             NetworkClient.start()
         }
     }
 
     override fun onPause() {
         super.onPause()
+        activateReleaseAll(showFeedback = false)
         saveControls(this, layoutName, controls)   // auto-persist
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)) {
+            networkPrefs.edit().remove(USB_TETHER_RETURN_PENDING).apply()
+            connectViaUsbTether()
+        }
     }
 
     override fun onStop() {
@@ -189,6 +219,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     // Override dispatchTouchEvent to handle swipe mode
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // The built-in safety control always wins over Swipe hit-testing, even if a
+        // user control occupies the same screen coordinates.
+        if (::btnReleaseAll.isInitialized && isInsideView(ev, btnReleaseAll)) {
+            return super.dispatchTouchEvent(ev)
+        }
+
         // When swipe mode is active and we're not in edit mode, handle with SwipeManager
         if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
             // If the manager processes it, we're done
@@ -208,6 +244,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var turboSpeedControl: Pair<EditText, ImageButton>
     private var turboSpeed = 16L // Default speed in milliseconds (≈60 Hz)
 
+    // Release All intentionally fires on ACTION_DOWN; a normal click listener remains
+    // installed for accessibility services that invoke performClick directly.
+    @SuppressLint("ClickableViewAccessibility")
     private fun setupUI() {
         /* --- Edit toggle ------------------------------------------------ */
         uiBuilder.addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
@@ -224,6 +263,43 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             64                          // Vertical margin
         ) {
             showConnectionSettingsDialog()
+        }
+
+        /* --- Always-available emergency release ------------------------- */
+        btnReleaseAll = uiBuilder.addCornerButton(
+            "RELEASE ALL",
+            Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL,
+            16,
+            16
+        ) {
+            // Accessibility services invoke click directly. Physical touch is handled
+            // on ACTION_DOWN below so a release never waits for finger-up.
+            activateReleaseAll()
+        }.apply {
+            alpha = 1f
+            contentDescription = "Release all SimpleController outputs"
+            backgroundTintList = ContextCompat.getColorStateList(
+                this@MainActivity,
+                R.color.status_error
+            )
+            minWidth = (180 * resources.displayMetrics.density).toInt()
+            minHeight = (56 * resources.displayMetrics.density).toInt()
+            elevation = 24 * resources.displayMetrics.density
+
+            setOnTouchListener { view, event ->
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        view.isPressed = true
+                        activateReleaseAll()
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        view.isPressed = false
+                        true
+                    }
+                    else -> true
+                }
+            }
         }
 
         /* --- Switches --------------------------------------------------- */
@@ -315,6 +391,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             NetworkClient.connectionStatus.collectLatest { status ->
                 updateConnectionStatusUI(status)
                 updatePlayerRoleIndicator()
+                if (status == NetworkClient.ConnectionStatus.CONNECTED) {
+                    UdpClient.resendCameraFollowState()
+                }
             }
         }
 
@@ -374,10 +453,66 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         btnConnect.setOnClickListener {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
-                NetworkClient.ConnectionStatus.CONNECTING -> NetworkClient.close()
+                NetworkClient.ConnectionStatus.CONNECTING -> {
+                    activateReleaseAll(showFeedback = false)
+                    NetworkClient.close()
+                }
 
                 else -> showConnectionSettingsDialog()
             }
+        }
+    }
+
+    private fun openUsbTetherSettings() {
+        networkPrefs.edit().putBoolean(USB_TETHER_RETURN_PENDING, true).apply()
+
+        val settingsIntents = listOf(
+            Intent(TETHER_SETTINGS_ACTION),
+            Intent(Settings.ACTION_WIRELESS_SETTINGS)
+        )
+        var launched = false
+        for (intent in settingsIntents) {
+            try {
+                startActivity(intent)
+                launched = true
+                break
+            } catch (_: ActivityNotFoundException) {
+                // Try the broader wireless settings screen on devices without a tether shortcut.
+            } catch (_: SecurityException) {
+                // Some manufacturers expose the action but prevent third-party launching.
+            }
+        }
+
+        if (!launched) {
+            networkPrefs.edit().remove(USB_TETHER_RETURN_PENDING).apply()
+            Toast.makeText(
+                this,
+                "Unable to open tether settings on this device.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun connectViaUsbTether() {
+        Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
+        UdpClient.close()
+
+        NetworkClient.discoverUsbTetherReceiver { endpoint ->
+            if (endpoint == null) return@discoverUsbTetherReceiver
+
+            val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
+            // Use the discovered endpoint only for this runtime connection. The saved
+            // manual host, port, and ConsoleBridge choice remain untouched.
+            UdpClient.setConsoleBridgeEnabled(false)
+            NetworkClient.updateSettings(endpoint.host, endpoint.port, autoReconnect)
+            UdpClient.initialize(endpoint.host, endpoint.port)
+            NetworkClient.start()
+
+            Toast.makeText(
+                this,
+                "USB receiver found at ${endpoint.host}:${endpoint.port}",
+                Toast.LENGTH_SHORT
+            ).show()
         }
     }
 
@@ -421,6 +556,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val editHost = dialogView.findViewById<EditText>(R.id.editServerHost)
         val editPort = dialogView.findViewById<EditText>(R.id.editServerPort)
         val checkAutoReconnect = dialogView.findViewById<CheckBox>(R.id.checkboxAutoReconnect)
+        val buttonUsbTetherMode =
+            dialogView.findViewById<Button>(R.id.buttonUsbTetherMode)
 
         // --- CBv0 toggle checkbox (added next to Auto Reconnect) ---
         val checkUseCbv0 = CheckBox(this).apply {
@@ -469,6 +606,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 val autoReconnect = checkAutoReconnect.isChecked
                 val useCbv0Checked = checkUseCbv0.isChecked  // <-- the new checkbox
 
+                // Clear the old endpoint before changing player/transport settings.
+                activateReleaseAll(showFeedback = false)
+
                 // Player role from radio buttons
                 val playerRole = if (radioPlayer1.isChecked)
                     NetworkClient.PlayerRole.PLAYER1
@@ -505,6 +645,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(
             ContextCompat.getColor(this, R.color.primary_blue)
         )
+        buttonUsbTetherMode.setOnClickListener {
+            dialog.dismiss()
+            openUsbTetherSettings()
+        }
     }
 
     /**
@@ -542,7 +686,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val options = arrayOf(
             "Button",
             "Stick",
+            "Response Curve Stick",
             "TouchPad",
+            "Touch Aim",
             "Re-center Button",
             "--- Layouts ---",
             "Xbox Controller Layout",
@@ -557,12 +703,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 when (i) {
                     0 -> layoutManager.createControl(ControlType.BUTTON)
                     1 -> layoutManager.createControl(ControlType.STICK)
-                    2 -> layoutManager.createControl(ControlType.TOUCHPAD)
-                    3 -> layoutManager.createControl(ControlType.RECENTER)
-                    4 -> {} // This is just a divider item
-                    5 -> createXboxControllerLayout()
-                    6 -> createPlayer1XboxLayout()
-                    7 -> createPlayer2XboxLayout()
+                    2 -> layoutManager.createControl(ControlType.CURVED_STICK)
+                    3 -> layoutManager.createControl(ControlType.TOUCHPAD)
+                    4 -> layoutManager.createControl(ControlType.TOUCH_AIM)
+                    5 -> layoutManager.createControl(ControlType.RECENTER)
+                    6 -> {} // This is just a divider item
+                    7 -> createXboxControllerLayout()
+                    8 -> createPlayer1XboxLayout()
+                    9 -> createPlayer2XboxLayout()
                 }
             }
             .create()
@@ -619,6 +767,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     override fun onLayoutLoaded(layoutName: String) {
         this.layoutName = layoutName
+        btnReleaseAll.bringToFront()
     }
 
     /**
@@ -634,6 +783,52 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun clearControlViews() {
         canvas.children.filter { it.tag == "control" }.toList()
             .forEach { canvas.removeView(it) }
+    }
+
+    /** Public so an assignable RELEASE_ALL ControlView uses the same safety path. */
+    fun activateReleaseAll(showFeedback: Boolean = true) {
+        if (showFeedback) {
+            triggerReleaseAllHaptic()
+            releaseFeedbackHandler.removeCallbacksAndMessages(null)
+            btnReleaseAll.text = "RELEASED"
+            releaseFeedbackHandler.postDelayed({ btnReleaseAll.text = "RELEASE ALL" }, 1200L)
+        }
+
+        ReleaseAllCoordinator.releaseAll { status ->
+            if (!showFeedback) return@releaseAll
+            runOnUiThread {
+                val message = when (status) {
+                    ReleaseAllCoordinator.ReceiverStatus.PENDING ->
+                        "Android outputs cleared; awaiting receiver confirmation"
+                    ReleaseAllCoordinator.ReceiverStatus.CONFIRMED ->
+                        "Receiver confirmed: all outputs released"
+                    ReleaseAllCoordinator.ReceiverStatus.UNAVAILABLE ->
+                        "Android outputs cleared — receiver confirmation unavailable"
+                    ReleaseAllCoordinator.ReceiverStatus.CONSOLEBRIDGE_UNAVAILABLE ->
+                        "Android outputs cleared — Pico release is not implemented yet"
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun triggerReleaseAllHaptic() {
+        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        if (!vibrator.hasVibrator()) return
+        val pattern = longArrayOf(0L, 35L, 45L, 90L)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(pattern, -1)
+        }
+    }
+
+    private fun isInsideView(event: MotionEvent, view: View): Boolean {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return event.rawX >= location[0] && event.rawX < location[0] + view.width &&
+            event.rawY >= location[1] && event.rawY < location[1] + view.height
     }
 
     /**

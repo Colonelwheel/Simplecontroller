@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.net.SocketException
 import java.net.SocketTimeoutException
 
@@ -28,6 +29,13 @@ object NetworkClient {
         PLAYER1,
         PLAYER2
     }
+
+    data class ReceiverEndpoint(val host: String, val port: Int)
+
+    private const val USB_DISCOVERY_REQUEST = "SIMPLE_CONTROLLER_DISCOVER"
+    private const val USB_DISCOVERY_RESPONSE_PREFIX = "SIMPLE_CONTROLLER_HERE:"
+    private const val CURRENT_RECEIVER_PORT = 42734
+    private const val USB_DISCOVERY_TIMEOUT_MS = 12_000L
 
     // Current player selection
     private var currentPlayerRole = PlayerRole.PLAYER1
@@ -67,6 +75,13 @@ object NetworkClient {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var socket: DatagramSocket? = null
     private var serverAddress: InetAddress? = null
+
+    private val releaseHandler = Handler(Looper.getMainLooper())
+    private var pendingReleaseCommand: String? = null
+    private var pendingReleaseAcknowledgement: String? = null
+    private var releaseRetryRunnable: Runnable? = null
+    private var releaseTimeoutRunnable: Runnable? = null
+    private var releaseResultCallback: ((Boolean) -> Unit)? = null
 
     /**
      * Configure socket for minimal latency
@@ -170,6 +185,131 @@ object NetworkClient {
         }
     }
 
+    /**
+     * Discover the Python receiver over the active USB-tether network.
+     * Manual host/port settings are not changed unless a receiver explicitly replies.
+     */
+    fun discoverUsbTetherReceiver(onResult: (ReceiverEndpoint?) -> Unit) {
+        close()
+        _lastErrorMessage.value = null
+        _connectionStatus.value = ConnectionStatus.CONNECTING
+
+        scope.launch {
+            val endpoint = try {
+                findUsbTetherReceiver()
+            } catch (e: Exception) {
+                Log.e("NetworkClient", "USB tether discovery failed", e)
+                null
+            }
+
+            if (endpoint == null) {
+                _connectionStatus.value = ConnectionStatus.ERROR
+                _lastErrorMessage.value =
+                    "USB receiver not found. Check USB tethering, the PC receiver, and Windows Firewall."
+            } else {
+                // Let the normal connection path take over using the verified endpoint.
+                _connectionStatus.value = ConnectionStatus.DISCONNECTED
+            }
+
+            withContext(Dispatchers.Main.immediate) {
+                onResult(endpoint)
+            }
+        }
+    }
+
+    private suspend fun findUsbTetherReceiver(): ReceiverEndpoint? {
+        val deadline = System.currentTimeMillis() + USB_DISCOVERY_TIMEOUT_MS
+        val requestBytes = USB_DISCOVERY_REQUEST.toByteArray()
+
+        DatagramSocket().use { discoverySocket ->
+            discoverySocket.broadcast = true
+
+            while (System.currentTimeMillis() < deadline) {
+                val ports = linkedSetOf(portNumber, CURRENT_RECEIVER_PORT, 9001)
+                    .filter { it in 1..65535 }
+
+                usbTetherBroadcastAddresses().forEach { address ->
+                    ports.forEach { port ->
+                        runCatching {
+                            discoverySocket.send(
+                                DatagramPacket(requestBytes, requestBytes.size, address, port)
+                            )
+                        }.onFailure {
+                            Log.d("NetworkClient", "USB discovery send skipped for $address:$port")
+                        }
+                    }
+                }
+
+                val receiveUntil = minOf(deadline, System.currentTimeMillis() + 900L)
+                while (System.currentTimeMillis() < receiveUntil) {
+                    val remaining = (receiveUntil - System.currentTimeMillis())
+                        .coerceIn(1L, 900L)
+                    discoverySocket.soTimeout = remaining.toInt()
+
+                    val responseBytes = ByteArray(256)
+                    val response = DatagramPacket(responseBytes, responseBytes.size)
+                    try {
+                        discoverySocket.receive(response)
+                    } catch (_: SocketTimeoutException) {
+                        break
+                    }
+
+                    val message = String(response.data, 0, response.length).trim()
+                    if (!message.startsWith(USB_DISCOVERY_RESPONSE_PREFIX)) continue
+
+                    val advertisedPort = message
+                        .substringAfter(USB_DISCOVERY_RESPONSE_PREFIX)
+                        .toIntOrNull()
+                        ?.takeIf { it in 1..65535 }
+                        ?: continue
+                    val discoveredHost = response.address.hostAddress ?: continue
+                    Log.i(
+                        "NetworkClient",
+                        "Found USB tether receiver at $discoveredHost:$advertisedPort"
+                    )
+                    return ReceiverEndpoint(discoveredHost, advertisedPort)
+                }
+
+                delay(250L)
+            }
+        }
+
+        return null
+    }
+
+    private fun usbTetherBroadcastAddresses(): Set<InetAddress> {
+        val addresses = linkedSetOf<InetAddress>()
+
+        runCatching {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                val network = interfaces.nextElement()
+                val name = network.name.lowercase()
+                val looksLikeUsb = name.contains("rndis") ||
+                    name.contains("usb") ||
+                    name.contains("ncm") ||
+                    name.contains("tether") ||
+                    name.startsWith("eth")
+                if (!looksLikeUsb || !network.isUp || network.isLoopback) continue
+
+                network.interfaceAddresses.forEach { interfaceAddress ->
+                    interfaceAddress.broadcast?.let(addresses::add)
+                }
+            }
+        }.onFailure {
+            Log.d("NetworkClient", "Could not enumerate USB network interfaces: ${it.message}")
+        }
+
+        // Common Android USB-tether subnets cover devices that hide interface details.
+        listOf(
+            "192.168.42.255",
+            "192.168.137.255",
+            "192.168.234.255"
+        ).forEach { addresses.add(InetAddress.getByName(it)) }
+
+        return addresses
+    }
+
     /** Start listening for server responses */
     private fun startListening() {
         scope.launch {
@@ -212,6 +352,14 @@ object NetworkClient {
     /** Handle messages from the server */
     private fun handleServerMessage(message: String) {
         when {
+            message.trim() == pendingReleaseAcknowledgement -> {
+                val acknowledgement = message.trim()
+                releaseHandler.post {
+                    if (pendingReleaseAcknowledgement == acknowledgement) {
+                        finishReleaseRequest(acknowledged = true)
+                    }
+                }
+            }
             message.startsWith("PONG") -> {
                 // Heartbeat response, connection is still alive
                 Log.d("NetworkClient", "Received heartbeat response")
@@ -232,10 +380,73 @@ object NetworkClient {
 
     /** Close the connection */
     fun close() {
+        // onPause/onStop can arrive before the main-thread retry runnable gets a turn.
+        // Flush the already-prepared idempotent barrier before closing the socket.
+        pendingReleaseCommand?.let { command ->
+            repeat(RELEASE_CLOSE_FLUSH_COUNT) {
+                runCatching { sendRaw(command) }
+            }
+        }
+        if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+            runCatching { sendRaw("DISCONNECT") }
+        }
         reconnectHandler.removeCallbacks(reconnectRunnable)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        finishReleaseRequest(acknowledged = false)
         reconnectAttempts = 0
         closeConnection()
+    }
+
+    /**
+     * Retry the same idempotent RELEASE_ALL command and wait briefly for its exact ACK.
+     * Repeated taps replace only the UI callback; receiver duplicates remain harmless.
+     */
+    fun requestReleaseAll(
+        command: String,
+        expectedAcknowledgement: String,
+        onResult: (Boolean) -> Unit
+    ) {
+        if (_connectionStatus.value != ConnectionStatus.CONNECTED) {
+            onResult(false)
+            return
+        }
+
+        finishReleaseRequest(acknowledged = false, notify = false)
+        pendingReleaseCommand = command
+        pendingReleaseAcknowledgement = expectedAcknowledgement
+        releaseResultCallback = onResult
+
+        var attempts = 0
+        releaseRetryRunnable = object : Runnable {
+            override fun run() {
+                if (pendingReleaseAcknowledgement != expectedAcknowledgement) return
+                send(command)
+                attempts++
+                if (attempts < RELEASE_RETRY_COUNT) {
+                    releaseHandler.postDelayed(this, RELEASE_RETRY_INTERVAL_MS)
+                } else {
+                    releaseTimeoutRunnable = Runnable {
+                        if (pendingReleaseAcknowledgement == expectedAcknowledgement) {
+                            finishReleaseRequest(acknowledged = false)
+                        }
+                    }.also {
+                        releaseHandler.postDelayed(it, RELEASE_ACK_TIMEOUT_MS)
+                    }
+                }
+            }
+        }.also { releaseHandler.post(it) }
+    }
+
+    private fun finishReleaseRequest(acknowledged: Boolean, notify: Boolean = true) {
+        releaseRetryRunnable?.let { releaseHandler.removeCallbacks(it) }
+        releaseTimeoutRunnable?.let { releaseHandler.removeCallbacks(it) }
+        releaseRetryRunnable = null
+        releaseTimeoutRunnable = null
+        pendingReleaseCommand = null
+        pendingReleaseAcknowledgement = null
+        val callback = releaseResultCallback
+        releaseResultCallback = null
+        if (notify) callback?.invoke(acknowledged)
     }
 
     /** Internal method to close socket */
@@ -317,4 +528,9 @@ object NetworkClient {
             Log.w("NetworkClient", "Cannot send when not connected")
         }
     }
+
+    private const val RELEASE_RETRY_COUNT = 5
+    private const val RELEASE_CLOSE_FLUSH_COUNT = 3
+    private const val RELEASE_RETRY_INTERVAL_MS = 60L
+    private const val RELEASE_ACK_TIMEOUT_MS = 300L
 }

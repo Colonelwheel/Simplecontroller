@@ -75,27 +75,34 @@ class LayoutManager(
      * Create a new control of the specified type
      */
     fun createControl(type: ControlType) {
-        val w = if (type == ControlType.BUTTON) 140f else 220f
+        val w = when (type) {
+            ControlType.BUTTON -> 140f
+            ControlType.TOUCH_AIM -> 500f
+            else -> 220f
+        }
+        val h = if (type == ControlType.TOUCH_AIM) 320f else w
         val id = "${type.name.lowercase()}_${System.currentTimeMillis()}"
 
         // Calculate center position
         val cw = (canvas.width.takeIf { it > 0 } ?: canvas.measuredWidth).coerceAtLeast(1)
         val ch = (canvas.height.takeIf { it > 0 } ?: canvas.measuredHeight).coerceAtLeast(1)
         val x0 = ((cw - w) / 2f).coerceAtLeast(80f)
-        val y0 = ((ch - w) / 2f).coerceAtLeast(80f)
+        val y0 = ((ch - h) / 2f).coerceAtLeast(80f)
 
         // Create control model with default payload
         val payload = when(type) {
             ControlType.BUTTON -> "X360"
             ControlType.STICK -> "STICK"
+            ControlType.CURVED_STICK -> "STICK"
             ControlType.TOUCHPAD -> "TOUCHPAD"
+            ControlType.TOUCH_AIM -> "TOUCH_AIM"
             ControlType.RECENTER -> "RECENTER"
         }
 
         // Create control model
         val c = Control(
             id = id, type = type,
-            x = x0, y = y0, w = w, h = w,
+            x = x0, y = y0, w = w, h = h,
             payload = payload
         )
         controls.add(c)

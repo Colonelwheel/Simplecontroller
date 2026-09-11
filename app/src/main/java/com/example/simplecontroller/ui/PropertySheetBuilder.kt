@@ -11,7 +11,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.TouchAimOutput
+import com.example.simplecontroller.model.TouchStageAction
 import kotlin.math.roundToInt
+import kotlin.math.max
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
 import com.example.simplecontroller.MainActivity
@@ -45,7 +48,31 @@ class PropertySheetBuilder(
         val directionalMode: CheckBox,
         val stickPlusMode: CheckBox,
         val directionalContainer: LinearLayout,
-        val payloadField: AutoCompleteTextView
+        val payloadField: AutoCompleteTextView,
+        val touchAim: TouchAimComponents?
+    )
+
+    private data class TouchAimComponents(
+        val aimOutput: Spinner,
+        val useSize: CheckBox,
+        val useMajor: CheckBox,
+        val useMinor: CheckBox,
+        val sizeScale: EditText,
+        val smoothing: EditText,
+        val lowThreshold: EditText,
+        val mediumThreshold: EditText,
+        val highThreshold: EditText,
+        val hysteresis: EditText,
+        val lowPayload: EditText,
+        val mediumPayload: EditText,
+        val highPayload: EditText,
+        val lowAction: Spinner,
+        val mediumAction: Spinner,
+        val highAction: Spinner,
+        val keepLowerHolds: CheckBox,
+        val stickFullSpeed: EditText,
+        val invertY: CheckBox,
+        val useResponseCurve: CheckBox
     )
 
     /**
@@ -199,13 +226,28 @@ class PropertySheetBuilder(
         val (widthSeek, heightSeek) = addSizeControls(container)
         
         // Sensitivity (for stick/touchpad)
-        val sensitivitySeek = if (model.type != ControlType.BUTTON) {
+        val sensitivitySeek = if (
+            model.type == ControlType.STICK ||
+            model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.TOUCHPAD ||
+            model.type == ControlType.TOUCH_AIM
+        ) {
             addSeekBarWithLabel(
                 container, 
-                "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}",
+                if (model.type == ControlType.CURVED_STICK) {
+                    "Curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                } else {
+                    "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                },
                 500,
                 (model.sensitivity * 100).roundToInt(),
-                { "Sensitivity: ${it / 100f}" }
+                {
+                    if (model.type == ControlType.CURVED_STICK) {
+                        "Curve sensitivity: ${it / 100f}"
+                    } else {
+                        "Sensitivity: ${it / 100f}"
+                    }
+                }
             )
         } else null
         
@@ -237,7 +279,9 @@ class PropertySheetBuilder(
             container,
             "Auto-center",
             model.autoCenter,
-            model.type != ControlType.BUTTON
+            model.type == ControlType.STICK ||
+                model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.TOUCHPAD
         )
         
         // Touchpad-specific controls
@@ -270,9 +314,15 @@ class PropertySheetBuilder(
             setupMutuallyExclusiveOptions(holdLeftWhileTouch, doubleTapClickLock)
             setupMutuallyExclusiveOptions(toggleLeftClick, doubleTapClickLock)
         }
+
+        val touchAimComponents = if (model.type == ControlType.TOUCH_AIM) {
+            addTouchAimUI(container)
+        } else {
+            null
+        }
         
         // Directional mode (for sticks)
-        val isStick = model.type == ControlType.STICK
+        val isStick = model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK
         val directionalMode = addCheckBox(
             container,
             "Directional mode (WASD style)",
@@ -315,13 +365,144 @@ class PropertySheetBuilder(
         
         // Payload field
         val payloadField = addPayloadControl(container)
+        payloadField.visibility = if (model.type == ControlType.TOUCH_AIM) View.GONE else View.VISIBLE
         
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivitySeek,
             holdToggle, autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
-            directionalContainer, payloadField
+            directionalContainer, payloadField, touchAimComponents
         )
+    }
+
+    private fun addTouchAimUI(container: LinearLayout): TouchAimComponents {
+        addSectionTitle(container, "Aim")
+        val aimOutput = addChoice(
+            container,
+            "Aim output",
+            listOf("Mouse", "Right stick", "Left stick"),
+            when (model.touchAimOutput) {
+                TouchAimOutput.MOUSE -> 0
+                TouchAimOutput.RIGHT_STICK -> 1
+                TouchAimOutput.LEFT_STICK -> 2
+            }
+        )
+        val invertY = addCheckBox(container, "Invert Y", model.touchInvertY)
+        val useResponseCurve = addCheckBox(
+            container,
+            "Response-curve sensitivity (stick output only)",
+            model.touchUseResponseCurve
+        )
+        val stickFullSpeed = addDecimalField(
+            container,
+            "Stick full speed (px/sec)",
+            model.touchStickFullSpeed
+        )
+
+        addSectionTitle(container, "Contact score")
+        val useSize = addCheckBox(container, "Use Size", model.touchUseSize)
+        val useMajor = addCheckBox(container, "Use TouchMajor", model.touchUseMajor)
+        val useMinor = addCheckBox(container, "Use TouchMinor", model.touchUseMinor)
+        val sizeScale = addDecimalField(container, "Size multiplier", model.touchSizeScale)
+        val smoothing = addDecimalField(container, "Score smoothing (0.05-1.0)", model.touchScoreSmoothing)
+
+        addSectionTitle(container, "Thresholds")
+        val lowThreshold = addDecimalField(container, "Low ON", model.touchLowThreshold)
+        val mediumThreshold = addDecimalField(container, "Medium ON", model.touchMediumThreshold)
+        val highThreshold = addDecimalField(container, "High ON", model.touchHighThreshold)
+        val hysteresis = addDecimalField(container, "Hysteresis", model.touchHysteresis)
+        val keepLowerHolds = addCheckBox(
+            container,
+            "Keep lower holds at higher levels",
+            model.touchKeepLowerHolds
+        )
+
+        addSectionTitle(container, "Low level")
+        val lowPayload = addCommandField(container, "Commands", model.touchLowPayload)
+        val lowAction = addActionChoice(container, model.touchLowAction)
+
+        addSectionTitle(container, "Medium level")
+        val mediumPayload = addCommandField(container, "Commands", model.touchMediumPayload)
+        val mediumAction = addActionChoice(container, model.touchMediumAction)
+
+        addSectionTitle(container, "High level")
+        val highPayload = addCommandField(container, "Commands", model.touchHighPayload)
+        val highAction = addActionChoice(container, model.touchHighAction)
+
+        return TouchAimComponents(
+            aimOutput = aimOutput,
+            useSize = useSize,
+            useMajor = useMajor,
+            useMinor = useMinor,
+            sizeScale = sizeScale,
+            smoothing = smoothing,
+            lowThreshold = lowThreshold,
+            mediumThreshold = mediumThreshold,
+            highThreshold = highThreshold,
+            hysteresis = hysteresis,
+            lowPayload = lowPayload,
+            mediumPayload = mediumPayload,
+            highPayload = highPayload,
+            lowAction = lowAction,
+            mediumAction = mediumAction,
+            highAction = highAction,
+            keepLowerHolds = keepLowerHolds,
+            stickFullSpeed = stickFullSpeed,
+            invertY = invertY,
+            useResponseCurve = useResponseCurve
+        )
+    }
+
+    private fun addChoice(
+        container: LinearLayout,
+        label: String,
+        choices: List<String>,
+        selection: Int
+    ): Spinner {
+        container.addView(TextView(context).apply { text = label })
+        return Spinner(context).apply {
+            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, choices)
+            setSelection(selection.coerceIn(choices.indices))
+            container.addView(this)
+            container.addView(createGap())
+        }
+    }
+
+    private fun addActionChoice(container: LinearLayout, action: TouchStageAction): Spinner =
+        addChoice(
+            container,
+            "Action",
+            listOf("Press once", "Hold"),
+            if (action == TouchStageAction.PRESS) 0 else 1
+        )
+
+    private fun addDecimalField(
+        container: LinearLayout,
+        label: String,
+        value: Float
+    ): EditText {
+        container.addView(TextView(context).apply { text = label })
+        return EditText(context).apply {
+            setText("%.3f".format(value))
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            container.addView(this)
+            container.addView(createGap())
+        }
+    }
+
+    private fun addCommandField(
+        container: LinearLayout,
+        label: String,
+        value: String
+    ): EditText {
+        container.addView(TextView(context).apply { text = label })
+        return EditText(context).apply {
+            setText(value)
+            hint = "Comma-separated commands"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+            container.addView(this)
+            container.addView(createGap())
+        }
     }
     
     /**
@@ -386,7 +567,9 @@ class PropertySheetBuilder(
      */
     private fun addSizeControls(container: LinearLayout): Pair<SeekBar, SeekBar> {
         // Determine max size based on control type - touchpads can be much larger
-        val maxSize = if (model.type == ControlType.TOUCHPAD) 1200 else 600
+        val maxSize = if (
+            model.type == ControlType.TOUCHPAD || model.type == ControlType.TOUCH_AIM
+        ) 1200 else 600
         
         // Width control
         val widthText = TextView(context)
@@ -461,7 +644,12 @@ class PropertySheetBuilder(
             // Set up autocomplete suggestions
             val suggestions = arrayOf(
                 "A_PRESSED", "B_PRESSED", "X_PRESSED", "Y_PRESSED",
-                "START", "SELECT", "UP", "DOWN", "LEFT", "RIGHT"
+                "START", "SELECT", "UP", "DOWN", "LEFT", "RIGHT",
+                "X360A", "X360B", "X360X", "X360Y",
+                "X360LB", "X360RB", "X360START", "X360BACK",
+                "X360UP", "X360DOWN", "X360LEFT", "X360RIGHT",
+                "X360LS", "X360RS",
+                "CAMERA_FOLLOW", "RELEASE_ALL"
             )
             setAdapter(
                 ArrayAdapter(
@@ -693,6 +881,18 @@ class PropertySheetBuilder(
         model.w = components.widthSeek.progress.toFloat().coerceAtLeast(40f)
         model.h = components.heightSeek.progress.toFloat().coerceAtLeast(40f)
         model.payload = components.payloadField.text.toString().trim()
+        if (model.type == ControlType.BUTTON &&
+            model.name.isBlank() &&
+            model.payload.startsWith("CAMERA_FOLLOW", ignoreCase = true)
+        ) {
+            model.name = "Camera Follow"
+        }
+        if (model.type == ControlType.BUTTON &&
+            model.name.isBlank() &&
+            model.payload.equals("RELEASE_ALL", ignoreCase = true)
+        ) {
+            model.name = "Release All"
+        }
         
         // Button-specific properties
         if (model.type == ControlType.BUTTON) {
@@ -713,9 +913,13 @@ class PropertySheetBuilder(
             model.toggleLeftClick = components.toggleLeftClick.isChecked
             model.doubleTapClickLock = components.doubleTapClickLock.isChecked   // NEW
         }
+
+        if (model.type == ControlType.TOUCH_AIM) {
+            components.touchAim?.let(::saveTouchAimProperties)
+        }
         
         // Stick-specific directional mode properties
-        if (model.type == ControlType.STICK) {
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
             model.directionalMode = components.directionalMode.isChecked
             model.stickPlusMode = components.stickPlusMode.isChecked
             
@@ -742,6 +946,46 @@ class PropertySheetBuilder(
             it.invalidate()
         }
     }
+
+    private fun saveTouchAimProperties(fields: TouchAimComponents) {
+        model.touchAimOutput = when (fields.aimOutput.selectedItemPosition) {
+            1 -> TouchAimOutput.RIGHT_STICK
+            2 -> TouchAimOutput.LEFT_STICK
+            else -> TouchAimOutput.MOUSE
+        }
+        model.touchUseSize = fields.useSize.isChecked
+        model.touchUseMajor = fields.useMajor.isChecked
+        model.touchUseMinor = fields.useMinor.isChecked
+        model.touchSizeScale = fields.sizeScale.floatValue(model.touchSizeScale).coerceAtLeast(0f)
+        model.touchScoreSmoothing = fields.smoothing.floatValue(model.touchScoreSmoothing)
+            .coerceIn(0.05f, 1f)
+
+        val low = fields.lowThreshold.floatValue(model.touchLowThreshold).coerceAtLeast(0f)
+        val medium = max(fields.mediumThreshold.floatValue(model.touchMediumThreshold), low + 0.01f)
+        val high = max(fields.highThreshold.floatValue(model.touchHighThreshold), medium + 0.01f)
+        model.touchLowThreshold = low
+        model.touchMediumThreshold = medium
+        model.touchHighThreshold = high
+        model.touchHysteresis = fields.hysteresis.floatValue(model.touchHysteresis).coerceAtLeast(0f)
+
+        model.touchLowPayload = fields.lowPayload.text.toString().trim()
+        model.touchMediumPayload = fields.mediumPayload.text.toString().trim()
+        model.touchHighPayload = fields.highPayload.text.toString().trim()
+        model.touchLowAction = fields.lowAction.selectedAction()
+        model.touchMediumAction = fields.mediumAction.selectedAction()
+        model.touchHighAction = fields.highAction.selectedAction()
+        model.touchKeepLowerHolds = fields.keepLowerHolds.isChecked
+        model.touchStickFullSpeed = fields.stickFullSpeed.floatValue(model.touchStickFullSpeed)
+            .coerceAtLeast(1f)
+        model.touchInvertY = fields.invertY.isChecked
+        model.touchUseResponseCurve = fields.useResponseCurve.isChecked
+    }
+
+    private fun EditText.floatValue(fallback: Float): Float =
+        text.toString().toFloatOrNull() ?: fallback
+
+    private fun Spinner.selectedAction(): TouchStageAction =
+        if (selectedItemPosition == 0) TouchStageAction.PRESS else TouchStageAction.HOLD
     
     /**
      * Update directional mode settings from UI components

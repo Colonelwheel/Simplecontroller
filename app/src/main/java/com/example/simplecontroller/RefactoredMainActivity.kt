@@ -168,14 +168,16 @@ class RefactoredMainActivity : AppCompatActivity(), LayoutManager.LayoutCallback
      * Show picker dialog to add a new control
      */
     private fun showAddPicker() {
-        val types = arrayOf("Button", "Stick", "TouchPad")
+        val types = arrayOf("Button", "Stick", "Response Curve Stick", "TouchPad", "Touch Aim")
         AlertDialog.Builder(this)
             .setTitle("Add control…")
             .setItems(types) { _, i ->
                 val type = when (i) {
                     0 -> ControlType.BUTTON
                     1 -> ControlType.STICK
-                    else -> ControlType.TOUCHPAD
+                    2 -> ControlType.CURVED_STICK
+                    3 -> ControlType.TOUCHPAD
+                    else -> ControlType.TOUCH_AIM
                 }
                 layoutManager.createControl(type)
             }

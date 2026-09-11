@@ -19,7 +19,6 @@ import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.R
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
-import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
@@ -62,7 +61,7 @@ class ControlView(
             field = value
 
             // If we're turning off latched mode, release any held buttons
-            if (oldValue && !value) {
+            if (oldValue && !value && model.type == ControlType.BUTTON) {
                 Log.d("DEBUG_PULSE", "isLatched setter: unlatching and calling releaseLatched()")
                 uiHelper.releaseLatched()
                 // Double-check that pulse state is reset
@@ -123,6 +122,7 @@ class ControlView(
     private val uiHelper: ControlViewHelper
     private val directionalHandler: DirectionalStickHandler
     private val continuousSender: ContinuousSender
+    private val touchAimHandler: TouchAimHandler?
 
     // Paint for drawing the control
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -172,8 +172,16 @@ class ControlView(
 
         directionalHandler = DirectionalStickHandler(model, uiHandler)
         continuousSender = ContinuousSender(model, uiHandler)
+        touchAimHandler = if (model.type == ControlType.TOUCH_AIM) {
+            TouchAimHandler(
+                model = model,
+                onStateChanged = { invalidate() },
+                controlSize = { width.toFloat() to height.toFloat() }
+            )
+        } else {
+            null
+        }
 
-        // Register with SwipeManager
         SwipeManager.registerControl(this)
 
         // Initial UI updates
@@ -182,19 +190,7 @@ class ControlView(
 
     // Clean up when the view is removed
     override fun onDetachedFromWindow() {
-        // Release mouse button if needed for touchpad
-        if (model.type == ControlType.TOUCHPAD && leftHeld) {
-            UdpClient.sendCommand("MOUSE_LEFT_UP")
-            leftHeld = false
-        }
-
-        // Stop any ongoing actions
-        stopRepeat()
-        stopContinuousSending()
-        stopDirectionalCommands()
-
-        // Cancel any pending mouse click handlers
-        mouseClickHandler.removeCallbacksAndMessages(null)
+        releaseEverythingLocally()
 
         // Unregister from SwipeManager
         SwipeManager.unregisterControl(this)
@@ -238,7 +234,7 @@ class ControlView(
                     c.drawCircle(width / 2f, height / 2f, radius, paint)
                 }
             }
-            ControlType.STICK -> {
+            ControlType.STICK, ControlType.CURVED_STICK -> {
                 // Background of the stick area with theme colors
                 paint.style = Style.FILL
                 paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
@@ -254,7 +250,44 @@ class ControlView(
                 paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
                 c.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
             }
+            ControlType.TOUCH_AIM -> drawTouchAim(c)
         }
+    }
+
+    private fun drawTouchAim(canvas: Canvas) {
+        val level = touchAimHandler?.currentLevel ?: TouchContactLevel.AIM_ONLY
+        val levelColor = when (level) {
+            TouchContactLevel.AIM_ONLY -> Color.rgb(47, 126, 150)
+            TouchContactLevel.LOW -> Color.rgb(54, 156, 112)
+            TouchContactLevel.MEDIUM -> Color.rgb(232, 169, 52)
+            TouchContactLevel.HIGH -> Color.rgb(218, 73, 73)
+        }
+
+        paint.style = Style.FILL
+        paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), paint)
+
+        paint.style = Style.STROKE
+        paint.strokeWidth = 5f
+        paint.color = levelColor
+        canvas.drawRect(2.5f, 2.5f, width - 2.5f, height - 2.5f, paint)
+
+        val cx = width / 2f
+        val cy = height / 2f
+        val reticleRadius = min(width, height) * 0.07f
+        paint.strokeWidth = 3f
+        canvas.drawCircle(cx, cy, reticleRadius, paint)
+        canvas.drawLine(cx - reticleRadius * 1.6f, cy, cx + reticleRadius * 1.6f, cy, paint)
+        canvas.drawLine(cx, cy - reticleRadius * 1.6f, cx, cy + reticleRadius * 1.6f, paint)
+
+        paint.style = Style.FILL
+        paint.textAlign = Paint.Align.CENTER
+        paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
+        paint.textSize = (min(width, height) * 0.09f).coerceIn(20f, 42f)
+        val score = touchAimHandler?.currentScore ?: 0f
+        canvas.drawText("${level.displayName}  ${"%.2f".format(score)}", cx, height - 14f, paint)
+        paint.textAlign = Paint.Align.LEFT
+        paint.typeface = android.graphics.Typeface.DEFAULT
     }
 
     private val gestureDetector = GestureDetector(context, object : SimpleOnGestureListener() {
@@ -272,7 +305,7 @@ class ControlView(
         }
 
         // Normal game mode
-        if (GlobalSettings.globalSwipe) {
+        if (GlobalSettings.globalSwipe && model.type != ControlType.TOUCH_AIM) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                 // Avoid rapid repeat unless turbo is on — handled inside playTouch now
                 playTouch(e)
@@ -312,6 +345,13 @@ class ControlView(
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    // The safety payload is an immediate action, never a hold/turbo/latch input.
+                    if (uiHelper.isReleaseAllAction()) {
+                        (context as? MainActivity)?.activateReleaseAll()
+                            ?: ReleaseAllCoordinator.releaseAll()
+                        return
+                    }
+
                     // Trigger strong vibration for button press
                     triggerStrongVibration(30) // Short 30ms vibration
 
@@ -340,7 +380,10 @@ class ControlView(
                     isPressed = true  // ✅ This tracks "I'm still pressing"
                     invalidate() // ✅ Trigger redraw immediately for visual feedback
 
-                    if (GlobalSettings.globalTurbo) {
+                    if (uiHelper.isCameraFollowAction()) {
+                        // This is a state toggle, not a holdable or repeatable command.
+                        uiHelper.firePayload()
+                    } else if (GlobalSettings.globalTurbo) {
                         uiHelper.startRepeat()
                     } else {
                         // Handle global hold mode (instant latch) for non-toggle buttons
@@ -370,6 +413,12 @@ class ControlView(
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (uiHelper.isReleaseAllAction()) {
+                        isPressed = false
+                        invalidate()
+                        return
+                    }
+
                     stopRepeat()
                     isPressed = false  // ✅ Cancel any pending delayed latch
                     invalidate() // ✅ Trigger redraw to remove pressed visual state
@@ -425,7 +474,7 @@ class ControlView(
             }
 
             /* ----- STICK ----- */
-            ControlType.STICK -> {
+            ControlType.STICK, ControlType.CURVED_STICK -> {
                 // Stop continuous sending when touching the stick again
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                     stopContinuousSending()
@@ -637,6 +686,14 @@ class ControlView(
                     }
                 }
             }
+
+            /* ----- TOUCH AIM: relative aim plus contact levels ----- */
+            ControlType.TOUCH_AIM -> {
+                isPressed = e.actionMasked != MotionEvent.ACTION_UP &&
+                        e.actionMasked != MotionEvent.ACTION_CANCEL
+                touchAimHandler?.onTouch(e)
+                invalidate()
+            }
         }
     }
 
@@ -670,8 +727,20 @@ class ControlView(
 
         val cx = width/2f
         val cy = height/2f
-        val nx = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f) * model.sensitivity
-        val ny = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f) * model.sensitivity
+        val rawX = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f)
+        val rawY = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f)
+        val nx = if (model.type == ControlType.CURVED_STICK) {
+            StickResponseCurve.apply(rawX, model.sensitivity)
+        } else {
+            rawX * model.sensitivity
+        }
+        val ny = if (model.type == ControlType.CURVED_STICK) {
+            StickResponseCurve.apply(rawY, model.sensitivity)
+        } else {
+            rawY * model.sensitivity
+        }
+        val isStickControl =
+            model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK
 
         // Only snap if snapEnabled is true AND the control's autoCenter is true AND it's an UP/CANCEL event
         val isLift = e.actionMasked == MotionEvent.ACTION_UP ||
@@ -680,22 +749,32 @@ class ControlView(
         val shouldSnap = model.autoCenter && isLift                    // ← no global flag
 
         val (sx, sy) = if (shouldSnap) 0f to 0f else nx to ny
+        // Boost/super-boost thresholds on the curved type follow physical travel,
+        // independent of curve sensitivity. Existing Stick threshold behavior is untouched.
+        val directionalX = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawX else sx
+        val directionalY = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawY else sy
 
         // Store last position for continuous sending if needed
         continuousSender.setLastPosition(sx, sy)
 
         // Handle different stick modes
-        if (model.type == ControlType.STICK) {
+        if (isStickControl) {
             when {
                 model.directionalMode -> {
                     // Pure directional mode - only send button commands
-                    directionalHandler.handleDirectionalStick(sx, sy, e.actionMasked)
+                    directionalHandler.handleDirectionalStick(
+                        directionalX,
+                        directionalY,
+                        e.actionMasked,
+                        analogX = sx,
+                        analogY = sy
+                    )
                 }
                 model.stickPlusMode -> {
                     // Stick+ mode - send analog via UDP helper (correct tag + player prefix),
                     // then layer the directional keys on top
                     UdpClient.sendStickPosition(model.payload, sx, sy)
-                    directionalHandler.handleStickPlusMode(sx, sy, e.actionMasked)
+                    directionalHandler.handleStickPlusMode(directionalX, directionalY, e.actionMasked)
                 }
                 else -> {
                     // Regular analog stick/pad mode (use UDP stick helper so tags/prefixes are correct)
@@ -704,14 +783,14 @@ class ControlView(
             }
         } else {
             // Touchpad mode
-            NetworkClient.send("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+            UdpClient.sendCommand("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
         }
 
         // If auto-center triggered, ensure continuous sending is stopped and send final 0,0
         if (shouldSnap) {
             stopContinuousSending()
             // Ensure a final 0,0 position is sent for auto-center sticks
-            if (model.type == ControlType.STICK) {
+            if (isStickControl) {
                 UdpClient.sendStickPosition(model.payload, 0f, 0f)
             }
         }
@@ -720,7 +799,7 @@ class ControlView(
         // start continuous sending of the last position ONLY FOR STICKS in ANALOG mode
         if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) &&
             !shouldSnap &&
-            model.type == ControlType.STICK &&  // Only for sticks, not touchpads
+            isStickControl &&  // Only for sticks, not touchpads
             !model.directionalMode &&  // Only for analog sticks, not directional ones
             !model.autoCenter) {
 
@@ -750,6 +829,11 @@ class ControlView(
         continuousSender.stopContinuousSending()
     }
 
+    /** Stop the sender and force its remembered coordinate to neutral for safety cleanup. */
+    private fun stopContinuousSendingAndCenter() {
+        continuousSender.stopAndCenter()
+    }
+
     /**
      * Stop directional commands
      */
@@ -762,6 +846,59 @@ class ControlView(
      */
     fun stopRepeat() {
         uiHelper.stopRepeat()
+    }
+
+    fun releaseTouchAim() {
+        touchAimHandler?.let {
+            it.releaseAll()
+            isPressed = false
+            invalidate()
+        }
+    }
+
+    /**
+     * Clear every held, delayed, latched, or repeating state owned by this view.
+     * This deliberately leaves the serialized model and all global settings unchanged.
+     */
+    fun releaseEverythingLocally() {
+        holdHandler.removeCallbacksAndMessages(null)
+        mouseClickHandler.removeCallbacksAndMessages(null)
+        secondTapHoldCheck = null
+        pendingSingleTap = null
+
+        stopRepeat()
+        uiHelper.cancelPendingActionsForReleaseAll()
+        stopContinuousSendingAndCenter()
+        stopDirectionalCommands()
+        touchAimHandler?.releaseAll()
+
+        if (leftHeld) UdpClient.sendCommand("MOUSE_LEFT_UP")
+        leftHeld = false
+        fingerIsDown = false
+        touchInitialized = false
+        touchPreviousDx = 0f
+        touchPreviousDy = 0f
+        suppressNextUpClick = false
+        awaitingSecondTap = false
+        lastTapWasClean = false
+        lastTapTime = 0L
+        wasJustUnlatched = false
+
+        val wasLatched = isLatched
+        isPressed = false
+        if (model.type == ControlType.BUTTON) {
+            if (wasLatched) {
+                isLatched = false
+            } else {
+                // A physically held non-latched button still needs its normal release mapping.
+                uiHelper.releaseLatched()
+            }
+        } else {
+            // Specialized stick/touch handlers already neutralized these controls.
+            // Do not reinterpret a non-button payload name as a keyboard key.
+            isLatched = false
+        }
+        invalidate()
     }
 
     /**
