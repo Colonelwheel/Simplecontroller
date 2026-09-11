@@ -233,6 +233,13 @@ active_connections = {}
 # This prevents old UDP packets from overriding newer positions.
 latest_stick_packets = {}
 
+# RELEASE_ALL uses the Android process session/sequence as a barrier. Any older
+# packet that arrives afterward is ignored instead of reactivating an output.
+release_barriers = {}
+release_state_lock = threading.RLock()
+release_generations = {player_id: 0 for player_id in gamepads}
+pending_button_release_timers = {player_id: set() for player_id in gamepads}
+
 class StabilitySmoother:
     """Mouse movement smoother focused on stability over responsiveness"""
     def __init__(self):
@@ -382,6 +389,81 @@ def release_xbox_button(button, player_id='player1'):
     except Exception as e:
         logger.error(f"Failed to release button for {player_id}: {str(e)}")
 
+def output_packet_is_current(session_id, sequence):
+    """Return False only when a packet predates this session's release barrier."""
+    with release_state_lock:
+        return sequence > release_barriers.get(session_id, -1)
+
+def current_release_generation(player_id):
+    with release_state_lock:
+        return release_generations.get(player_id, 0)
+
+def release_outputs(player_ids, reason="safety cleanup"):
+    """Neutralize receiver-owned outputs and cancel delayed work for selected players."""
+    selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
+    if not selected:
+        return
+
+    with release_state_lock:
+        timers = []
+        keys_to_release = set()
+        for player_id in selected:
+            release_generations[player_id] = release_generations.get(player_id, 0) + 1
+            timers.extend(pending_button_release_timers.setdefault(player_id, set()))
+            pending_button_release_timers[player_id].clear()
+            keys_to_release.update(key_states.setdefault(player_id, {}).keys())
+            key_states[player_id].clear()
+            button_states.setdefault(player_id, {}).clear()
+            mouse_states.setdefault(
+                player_id,
+                {'left_down': False, 'is_touchpad_active': False}
+            ).update(left_down=False, is_touchpad_active=False)
+
+    for timer in timers:
+        timer.cancel()
+
+    for key in keys_to_release:
+        try:
+            keyboard.release(key.lower())
+        except Exception as e:
+            logger.warning(f"Failed to release key {key}: {e}")
+
+    # Mouse output is shared by Windows, so idempotently release every supported button.
+    for mouse_button in ("left", "right", "middle"):
+        try:
+            pyautogui.mouseUp(button=mouse_button)
+        except Exception as e:
+            logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
+
+    smoother.end_touch()
+
+    for player_id in selected:
+        camera_follow_last_input_at[player_id] = 0.0
+        camera_follow_input_lost[player_id] = True
+        try:
+            with camera_follow_output_locks[player_id]:
+                # Keep Camera Follow calculation and virtual-pad reset atomic so a
+                # value calculated just before RELEASE_ALL cannot land afterward.
+                camera_follow_states[player_id].clear_inputs()
+                gamepad = gamepads[player_id]
+                gamepad.reset()
+                gamepad.update()
+                camera_follow_last_right_output[player_id] = (0.0, 0.0, "neutral")
+        except Exception as e:
+            logger.error(f"Failed to reset virtual gamepad for {player_id}: {e}")
+
+    logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
+
+def release_all_outputs(session_id, sequence):
+    """Apply each global release identity once; duplicates still receive an ACK."""
+    with release_state_lock:
+        if sequence <= release_barriers.get(session_id, -1):
+            return False
+        release_barriers[session_id] = sequence
+
+    release_outputs(tuple(gamepads), reason="RELEASE_ALL")
+    return True
+
 # Helper functions
 def normalize_value(value):
     """Convert string or float to normalized float (-1.0 to 1.0)"""
@@ -466,22 +548,22 @@ def apply_camera_follow_output(player_id, now=None, force=False):
     if player_id not in gamepads or player_id not in camera_follow_states:
         return
 
-    x, y, source = camera_follow_states[player_id].step(now)
-    previous_x, previous_y, previous_source = camera_follow_last_right_output[player_id]
-    changed = (
-        abs(x - previous_x) > 0.0001
-        or abs(y - previous_y) > 0.0001
-        or source != previous_source
-    )
-    if not force and not changed:
-        return
-
     try:
         with camera_follow_output_locks[player_id]:
+            x, y, source = camera_follow_states[player_id].step(now)
+            previous_x, previous_y, previous_source = camera_follow_last_right_output[player_id]
+            changed = (
+                abs(x - previous_x) > 0.0001
+                or abs(y - previous_y) > 0.0001
+                or source != previous_source
+            )
+            if not force and not changed:
+                return
+
             gamepad = gamepads[player_id]
             gamepad.right_joystick_float(x_value_float=x, y_value_float=-y)
             gamepad.update()
-        camera_follow_last_right_output[player_id] = (x, y, source)
+            camera_follow_last_right_output[player_id] = (x, y, source)
     except Exception as e:
         logger.error(f"Failed to apply right-stick output for {player_id}: {e}")
 
@@ -500,8 +582,9 @@ def clear_camera_follow_player(player_id):
     """Clear generated/manual/macro RS state after input loss or disconnect."""
     if player_id not in camera_follow_states:
         return
-    camera_follow_states[player_id].clear_inputs()
-    apply_camera_follow_output(player_id, force=True)
+    with camera_follow_output_locks[player_id]:
+        camera_follow_states[player_id].clear_inputs()
+        apply_camera_follow_output(player_id, force=True)
 
 def camera_follow_worker():
     while not camera_follow_stop_event.wait(CAMERA_FOLLOW_UPDATE_INTERVAL_SECONDS):
@@ -811,8 +894,13 @@ def handle_button_press(command, player_id='player1'):
 
             # Only auto‑release if not a HOLD command
             if not command.endswith("_HOLD"):
+                release_generation = current_release_generation(player_id)
+                release_timer = None
+
                 def do_release():
                     try:
+                        if current_release_generation(player_id) != release_generation:
+                            return
                         gamepad.release_button(button=btn)
                         gamepad.update()
                     except Exception as e:
@@ -824,8 +912,15 @@ def handle_button_press(command, player_id='player1'):
                         except Exception:
                             pass
 
+                        with release_state_lock:
+                            pending_button_release_timers.setdefault(player_id, set()).discard(
+                                release_timer
+                            )
+
                 release_timer = threading.Timer(0.1, do_release)
                 release_timer.daemon = True
+                with release_state_lock:
+                    pending_button_release_timers.setdefault(player_id, set()).add(release_timer)
                 release_timer.start()
                 logger.info(f"Scheduled auto-release for {player_id} {command}")
             else:
@@ -846,12 +941,34 @@ def handle_button_press(command, player_id='player1'):
         logger.error(f"Failed to process command for {player_id}: {command} - {str(e)}")
         return False
 
-def process_timed_sequence(commands, player_id='player1'):
+def process_timed_sequence(commands, player_id='player1', release_generation=None):
     """Process a sequence of commands with timing delays"""
     try:
+        if release_generation is None:
+            release_generation = current_release_generation(player_id)
+
         for cmd in commands:
+            if current_release_generation(player_id) != release_generation:
+                logger.info(f"Cancelled delayed command sequence for {player_id}")
+                return
+
             cmd = cmd.strip()
             if cmd:  # Skip empty commands
+                if cmd.startswith("WAIT_"):
+                    try:
+                        wait_seconds = max(0, int(cmd.split("_", 1)[1])) / 1000.0
+                    except (ValueError, IndexError):
+                        logger.warning(f"Invalid wait command from {player_id}: {cmd}")
+                        continue
+
+                    deadline = time.monotonic() + wait_seconds
+                    while time.monotonic() < deadline:
+                        if current_release_generation(player_id) != release_generation:
+                            logger.info(f"Cancelled delayed command sequence for {player_id}")
+                            return
+                        time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+                    continue
+
                 # Process command and wait for completion
                 handle_button_press(cmd, player_id)
     except Exception as e:
@@ -884,6 +1001,38 @@ def process_command(data, addr, player_id='player1'):
         player_id, data = data.split(":", 1)       # now data begins with DELTA:/TOUCHPAD:/POS:
         active_connections[addr_key]['player_id'] = player_id
 
+    if data.startswith("RELEASE_ALL:"):
+        parts = data.split(":", 2)
+        if len(parts) != 3:
+            logger.warning(f"Bad RELEASE_ALL packet: {data}")
+            return None
+        _, session_id, seq_text = parts
+        try:
+            sequence = int(seq_text)
+        except ValueError:
+            logger.warning(f"Bad RELEASE_ALL sequence: {data}")
+            return None
+        release_all_outputs(session_id, sequence)
+        return f"RELEASE_ALL_ACK:{session_id}:{sequence}"
+
+    # Generic ordered output. Ordering is used only as a RELEASE_ALL barrier;
+    # ordinary commands retain their existing behavior even if UDP reorders them.
+    if data.startswith("OUTPUT:"):
+        parts = data.split(":", 3)
+        if len(parts) != 4:
+            logger.warning(f"Bad ordered output packet: {data}")
+            return None
+        _, session_id, seq_text, output_command = parts
+        try:
+            sequence = int(seq_text)
+        except ValueError:
+            logger.warning(f"Bad ordered output sequence: {data}")
+            return None
+        if not output_packet_is_current(session_id, sequence):
+            logger.debug(f"Dropped pre-release output packet: {session_id}:{sequence}")
+            return None
+        data = output_command
+
     if player_id in camera_follow_last_input_at:
         camera_follow_last_input_at[player_id] = time.monotonic()
         camera_follow_input_lost[player_id] = False
@@ -893,9 +1042,7 @@ def process_command(data, addr, player_id='player1'):
         return
 
     if data == "DISCONNECT":
-        clear_camera_follow_player(player_id)
-        camera_follow_last_input_at[player_id] = 0.0
-        camera_follow_input_lost[player_id] = True
+        release_outputs((player_id,), reason="DISCONNECT")
         active_connections.pop(addr_key, None)
         return
         
@@ -1069,6 +1216,12 @@ def process_command(data, addr, player_id='player1'):
             previous = latest_stick_packets.get(state_key)
 
             # Ignore old or duplicate packets from the same app session
+            if not output_packet_is_current(session_id, seq):
+                logger.debug(
+                    f"Dropped pre-release {player_id} {stick_type} stick packet: seq={seq}"
+                )
+                return None
+
             if previous is not None and previous["session"] == session_id:
                 if seq <= previous["seq"]:
                     logger.debug(
@@ -1116,9 +1269,10 @@ def process_command(data, addr, player_id='player1'):
         commands = data.split(",")
         
         # Process each command in sequence
+        release_generation = current_release_generation(player_id)
         threading.Thread(
             target=process_timed_sequence, 
-            args=(commands, player_id), 
+            args=(commands, player_id, release_generation),
             daemon=True
         ).start()
         logger.info(f"Started command sequence with {len(commands)} commands for {player_id}")
@@ -1147,7 +1301,7 @@ def clean_inactive_connections():
         logger.info(f"Removing inactive connection: {addr_key} ({player_id})")
         del active_connections[addr_key]
         if not any(conn['player_id'] == player_id for conn in active_connections.values()):
-            clear_camera_follow_player(player_id)
+            release_outputs((player_id,), reason="inactive connection")
 
 def clean_key_states():
     """Clean up any inconsistent keyboard states"""
@@ -1254,6 +1408,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
+        release_outputs(tuple(gamepads), reason="receiver shutdown")
         stop_camera_follow_worker()
         print("Server stopped")
         logger.info("Server stopped")
