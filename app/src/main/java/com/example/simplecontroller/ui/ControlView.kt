@@ -127,6 +127,9 @@ class ControlView(
     private val directionalHandler: DirectionalStickHandler
     private val continuousSender: ContinuousSender
     private val touchAimHandler: TouchAimHandler?
+    private val autoTapPayloadExecutor: ButtonAimPayloadExecutor?
+    private val autoTapController: ButtonAutoTapController?
+    private var autoTapLease: ButtonAimPayloadLease? = null
     private val buttonAimOutput = AimOutputSession(
         ownerToken = Any(),
         controlSize = { width.toFloat() to height.toFloat() },
@@ -190,6 +193,46 @@ class ControlView(
         // Create helper instances
         uiHelper = ControlViewHelper(context, model, this) {
             (context as? MainActivity)?.removeControl(model)
+        }
+
+        autoTapPayloadExecutor = if (model.type == ControlType.BUTTON) {
+            uiHelper.createButtonAimPayloadExecutor()
+        } else {
+            null
+        }
+        autoTapController = autoTapPayloadExecutor?.let { executor ->
+            ButtonAutoTapController(
+                scheduler = HandlerButtonAimPayloadScheduler(),
+                pressPayload = {
+                    when (val result = executor.activate(
+                        ButtonAimPayloadOwner.BASE,
+                        model.payload,
+                        ButtonAimPulseMode.ONCE
+                    )) {
+                        is ButtonAimPayloadActivationResult.Activated -> {
+                            autoTapLease = result.lease
+                            true
+                        }
+                        ButtonAimPayloadActivationResult.ReleaseAll -> false
+                        is ButtonAimPayloadActivationResult.Invalid -> {
+                            Toast.makeText(
+                                context,
+                                "Auto-tap: ${result.reason}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            false
+                        }
+                    }
+                },
+                releasePayload = {
+                    executor.release(autoTapLease)
+                    autoTapLease = null
+                },
+                onStateChanged = {
+                    uiHelper.updateLabel()
+                    invalidate()
+                }
+            )
         }
 
         directionalHandler = DirectionalStickHandler(model, uiHandler)
@@ -266,6 +309,7 @@ class ControlView(
                 val cornerRadius = min(width, height) / 3f
                 val aimState = buttonAimHandler?.visualState ?: ButtonAimVisualState.IDLE
                 val activeAimColor = when {
+                    autoTapController?.isActive == true -> Color.rgb(0, 150, 136)
                     !model.buttonAimEnabled -> null
                     aimState == ButtonAimVisualState.ALTERNATE_RESET_READY -> Color.rgb(46, 125, 50)
                     aimState == ButtonAimVisualState.ALTERNATE_RECOVERY -> Color.rgb(198, 40, 40)
@@ -435,6 +479,25 @@ class ControlView(
                         return
                     }
 
+                    if (model.autoTapEnabled) {
+                        autoTapUnsupportedPayloadReason(model.payload)?.let { reason ->
+                            Toast.makeText(context, reason, Toast.LENGTH_SHORT).show()
+                            return
+                        }
+                        val wasActive = autoTapController?.isActive == true
+                        val nowActive = autoTapController?.toggle(model.autoTapIntervalMs) == true
+                        isPressed = false
+                        triggerStrongVibration(
+                            when {
+                                wasActive -> 35L
+                                nowActive -> 70L
+                                else -> 35L
+                            }
+                        )
+                        invalidate()
+                        return
+                    }
+
                     // Trigger strong vibration for button press
                     triggerStrongVibration(30) // Short 30ms vibration
 
@@ -497,6 +560,12 @@ class ControlView(
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (uiHelper.isReleaseAllAction()) {
+                        isPressed = false
+                        invalidate()
+                        return
+                    }
+
+                    if (model.autoTapEnabled) {
                         isPressed = false
                         invalidate()
                         return
@@ -977,6 +1046,12 @@ class ControlView(
         uiHelper.stopRepeat()
     }
 
+    fun releaseAutoTap() {
+        autoTapController?.stop()
+        autoTapPayloadExecutor?.releaseAllLeases()
+        autoTapLease = null
+    }
+
     fun releaseTouchAim() {
         touchAimHandler?.let {
             it.releaseAll()
@@ -1006,6 +1081,7 @@ class ControlView(
         secondTapHoldCheck = null
         pendingSingleTap = null
 
+        releaseAutoTap()
         stopRepeat()
         uiHelper.cancelPendingActionsForReleaseAll()
         stopContinuousSendingAndCenter()
@@ -1051,9 +1127,11 @@ class ControlView(
      */
     fun showProps() {
         // Reconcile the old runtime payload/config before the dialog mutates the model.
+        releaseAutoTap()
         releaseButtonAim()
         PropertySheetBuilder(context, model) {
             // After properties are updated:
+            releaseAutoTap()
             releaseButtonAim()
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.width = model.w.toInt()

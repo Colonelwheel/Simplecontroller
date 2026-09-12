@@ -42,6 +42,8 @@ class PropertySheetBuilder(
         val heightSeek: SeekBar,
         val sensitivitySeek: SeekBar?,
         val holdToggle: CheckBox,
+        val autoTapEnabled: CheckBox,
+        val autoTapIntervalMs: EditText,
         val autoCenter: CheckBox,
         val holdDurationField: EditText,
         val swipeActivate: CheckBox,
@@ -308,10 +310,44 @@ class PropertySheetBuilder(
             model.type == ControlType.BUTTON
         )
 
+        val autoTapEnabled = addCheckBox(
+            container,
+            "Toggle auto-tap",
+            model.autoTapEnabled,
+            model.type == ControlType.BUTTON
+        )
+        val autoTapIntervalMs = addTextField(
+            container,
+            model.autoTapIntervalMs.toString(),
+            "Auto-tap interval (ms, minimum 16)",
+            InputType.TYPE_CLASS_NUMBER,
+            model.type == ControlType.BUTTON && model.autoTapEnabled
+        )
+
         val buttonAimComponents = if (model.type == ControlType.BUTTON) {
-            addButtonAimUI(container)
+            addButtonAimUI(container) { checked ->
+                if (checked) autoTapEnabled.isChecked = false
+            }
         } else {
             null
+        }
+
+        if (model.type == ControlType.BUTTON) {
+            autoTapEnabled.setOnCheckedChangeListener { _, checked ->
+                autoTapIntervalMs.visibility = if (checked) View.VISIBLE else View.GONE
+                if (checked) {
+                    holdToggle.isChecked = false
+                    buttonAimComponents?.enabled?.isChecked = false
+                }
+            }
+            holdToggle.setOnCheckedChangeListener { _, checked ->
+                if (checked) autoTapEnabled.isChecked = false
+            }
+            when {
+                buttonAimComponents?.enabled?.isChecked == true ->
+                    autoTapEnabled.isChecked = false
+                autoTapEnabled.isChecked -> holdToggle.isChecked = false
+            }
         }
         
         // Stick/Touchpad controls
@@ -409,13 +445,17 @@ class PropertySheetBuilder(
         
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivitySeek,
-            holdToggle, autoCenter, holdDurationField, swipeActivate,
+            holdToggle, autoTapEnabled, autoTapIntervalMs,
+            autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField, touchAimComponents, buttonAimComponents
         )
     }
 
-    private fun addButtonAimUI(container: LinearLayout): ButtonAimComponents {
+    private fun addButtonAimUI(
+        container: LinearLayout,
+        onEnabledChanged: (Boolean) -> Unit = {}
+    ): ButtonAimComponents {
         addSectionTitle(container, "Button Aim Surface")
         val enabled = addCheckBox(container, "Aim while pressed", model.buttonAimEnabled)
         val details = LinearLayout(context).apply {
@@ -660,6 +700,7 @@ class PropertySheetBuilder(
         }
         enabled.setOnCheckedChangeListener { _, checked ->
             details.visibility = if (checked) View.VISIBLE else View.GONE
+            onEnabledChanged(checked)
         }
         oneShotAlternateEnabled.setOnCheckedChangeListener { _, checked ->
             alternateDetails.visibility = if (checked) View.VISIBLE else View.GONE
@@ -1225,6 +1266,23 @@ class PropertySheetBuilder(
         if (model.type == ControlType.BUTTON) {
             model.holdToggle = components.holdToggle.isChecked
             model.holdDurationMs = components.holdDurationField.text.toString().toLongOrNull() ?: 400L
+            val autoTapRequested = components.autoTapEnabled.isChecked
+            val autoTapBlockedByAim = components.buttonAim?.enabled?.isChecked == true
+            val autoTapPayloadError = autoTapUnsupportedPayloadReason(model.payload)
+            model.autoTapEnabled = autoTapRequested && !autoTapBlockedByAim &&
+                autoTapPayloadError == null
+            model.autoTapIntervalMs = components.autoTapIntervalMs.text.toString()
+                .toLongOrNull()
+                ?.coerceAtLeast(ButtonAutoTapController.MIN_INTERVAL_MS)
+                ?: model.autoTapIntervalMs
+            if (autoTapRequested && (autoTapBlockedByAim || autoTapPayloadError != null)) {
+                Toast.makeText(
+                    context,
+                    autoTapPayloadError
+                        ?: "Toggle auto-tap is available only when Aim while pressed is off.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
             model.swipeActivate = components.swipeActivate.isChecked
             components.buttonAim?.let(::saveButtonAimProperties)
         }

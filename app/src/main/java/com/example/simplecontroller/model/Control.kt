@@ -38,6 +38,8 @@ data class Control(
     /* button-specific */
     var holdToggle: Boolean = false,       // "latch" behaviour
     var holdDurationMs: Long = 500,        // long-press threshold
+    var autoTapEnabled: Boolean = false,
+    var autoTapIntervalMs: Long = 100L,
 
     /* Button Aim Surface (disabled by default for layout compatibility) */
     var buttonAimEnabled: Boolean = false,

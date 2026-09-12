@@ -31,6 +31,20 @@ Likely touchpoints: `TouchDiagnosticActivity.kt`, `TouchAimHandler.kt`, `Control
 
 Likely touchpoints: `UdpClient.kt`, `ControlView.kt`, `ControlViewHelper.kt`, `TouchAimHandler.kt`, `simple_controller_receiver.py`, and receiver tests.
 
+### Ordinary Button Toggle Auto-Tap
+
+- [x] Add a disabled-by-default per-button `Toggle auto-tap` option.
+- [x] Start with an immediate finite tap and repeat at a configurable per-button interval.
+- [x] Stop on the next tap, `RELEASE_ALL`, app pause, edit mode, removal, profile/property changes,
+  connection loss, and deliberate disconnect.
+- [x] Give active Auto-tap a distinct visual state and prevent stale timer callbacks from restarting it.
+- [x] Keep it independent from global Turbo and mutually exclusive with per-button Hold Toggle and
+  Button Aim Surface.
+- [x] Emit matched press/release output for Xbox, keyboard, mouse, trigger, stick-direction, and
+  multi-command button payloads.
+- [x] Exclude state-toggle payloads such as `RELEASE_ALL`, Camera Follow, and Scroll Mode Toggle.
+- [ ] Verify timing and cancellation on the intended Pico/ConsoleBridge hardware.
+
 ### Sticky action layers
 
 - [ ] Allow a one-finger tap to activate/deactivate a named alternate mapping layer without holding a modifier.

@@ -190,9 +190,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onPause() {
         super.onPause()
-        // Cancel only Button Aim gesture state. Global RELEASE_ALL is intentionally reserved
-        // for an explicit control payload and is not triggered automatically on app pause.
+        // Cancel timed button state that must not continue in the background. Global RELEASE_ALL
+        // is intentionally reserved for an explicit control payload and is not sent on app pause.
         SwipeManager.releaseAllButtonAimSurfaces()
+        SwipeManager.releaseAllAutoTapButtons()
         saveControls(this, layoutName, controls)   // auto-persist
     }
 
@@ -343,9 +344,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 if (previousStatus == NetworkClient.ConnectionStatus.CONNECTED &&
                     status != NetworkClient.ConnectionStatus.CONNECTED
                 ) {
-                    // Cancel armed/delayed Button Aim state locally. In particular, a payload
-                    // released during a network outage must not fire after reconnection.
+                    // Cancel armed/delayed Button Aim and Auto-tap state locally. In particular,
+                    // a scheduled payload must not fire after reconnection.
                     SwipeManager.releaseAllButtonAimSurfaces()
+                    SwipeManager.releaseAllAutoTapButtons()
                 }
                 previousStatus = status
                 updateConnectionStatusUI(status)
@@ -413,8 +415,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
                 NetworkClient.ConnectionStatus.CONNECTING -> {
-                    // Release only Button Aim-owned output while the current socket is live.
+                    // Release timed button-owned output while the current socket is live.
                     SwipeManager.releaseAllButtonAimSurfaces()
+                    SwipeManager.releaseAllAutoTapButtons()
                     NetworkClient.close()
                 }
 
@@ -456,6 +459,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private fun connectViaUsbTether() {
         Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
         SwipeManager.releaseAllButtonAimSurfaces()
+        SwipeManager.releaseAllAutoTapButtons()
         UdpClient.close()
 
         NetworkClient.discoverUsbTetherReceiver { endpoint ->
@@ -583,8 +587,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     .apply()
 
                 // --- Update client and connect (honor toggle) ---
-                // Clear armed phases and held Button Aim payloads before changing endpoints.
+                // Clear timed/armed button phases and their held payloads before changing endpoints.
                 SwipeManager.releaseAllButtonAimSurfaces()
+                SwipeManager.releaseAllAutoTapButtons()
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
 

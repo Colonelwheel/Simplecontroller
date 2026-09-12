@@ -628,6 +628,7 @@ object SwipeManager {
         swipeHandler.setEditMode(editMode)
         allViews.forEach {
             if (editMode) {
+                it.releaseAutoTap()
                 it.stopContinuousSending()
                 it.stopDirectionalCommands()
                 it.releaseTouchAim()
@@ -659,6 +660,10 @@ object SwipeManager {
 
     fun releaseAllButtonAimSurfaces() {
         allViews.forEach { it.releaseButtonAim() }
+    }
+
+    fun releaseAllAutoTapButtons() {
+        allViews.forEach { it.releaseAutoTap() }
     }
 
     fun releaseAllTouchAim() {

@@ -54,3 +54,10 @@ Status: deferred. The production Pico firmware has not been identified or author
   Base-unlatch delay, recovery/reset gestures, timer cancellation, and explicit `RELEASE_ALL`.
   Keep this behavior labeled unverified for Pico/ConsoleBridge until that hardware pass is complete;
   no Pico source, protocol, UF2, or flashing work is authorized as part of feature #9.
+
+## Ordinary Button Toggle Auto-Tap follow-up (deferred)
+
+- [ ] On the intended production Pico and USB target, verify configurable Auto-tap cadence, explicit
+  press/release ordering for every supported payload family, multi-command payloads, rate limits,
+  second-tap cancellation, stale-timer suppression, and immediate local cancellation by `RELEASE_ALL`.
+  No Pico source, protocol, UF2, or flashing work is authorized as part of the Android feature.

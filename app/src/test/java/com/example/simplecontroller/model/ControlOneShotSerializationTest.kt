@@ -27,6 +27,8 @@ class ControlOneShotSerializationTest {
 
         val control = json.decodeFromString<Control>(oldJson)
 
+        assertFalse(control.autoTapEnabled)
+        assertEquals(100L, control.autoTapIntervalMs)
         assertFalse(control.buttonAimOneShotAlternateEnabled)
         assertEquals("", control.buttonAimAlternatePayload)
         assertEquals(ButtonAimPayloadTiming.IMMEDIATE, control.buttonAimAlternatePayloadTiming)
@@ -47,6 +49,8 @@ class ControlOneShotSerializationTest {
             w = 100f,
             h = 100f,
             payload = "LT:0.4",
+            autoTapEnabled = true,
+            autoTapIntervalMs = 175L,
             buttonAimEnabled = true,
             buttonAimStickUsesTouchPosition = true,
             buttonAimOneShotAlternateEnabled = true,

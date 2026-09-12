@@ -2,6 +2,34 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-12 Ordinary Button Toggle Auto-Tap
+
+Ordinary Button controls have an optional per-control `Toggle auto-tap` mode. The first tap starts
+an immediate finite press/release loop; the next tap stops it. `Auto-tap interval` is measured from
+the start of one press to the start of the next, defaults to 100 ms, and is clamped to a minimum of
+16 ms. Each press lasts at most 50 ms and always ends before the next press begins.
+
+Auto-tap is separate from global Turbo and takes priority over global Hold/Turbo for that control.
+The property sheet keeps Auto-tap mutually exclusive with per-button Hold Toggle and Button Aim
+Surface. The running state uses a distinct green fill. `RELEASE_ALL`, app pause, edit mode, profile
+or property changes, control removal, connection loss, and deliberate disconnect all cancel its
+timers and release its current finite press. Canceled callbacks use a generation guard and cannot
+restart the loop later.
+
+The loop uses the existing owned-payload executor so Xbox buttons, keyboard keys, mouse buttons,
+triggers, stick-direction macros, and multi-command payloads receive explicit matching releases.
+State-toggle payloads (`RELEASE_ALL`, Camera Follow, and Scroll Mode Toggle) are deliberately not
+eligible for Auto-tap. No Windows receiver or Pico firmware change is required by the Android
+implementation; Pico/ConsoleBridge behavior remains deferred for hardware verification.
+
+Primary files:
+
+- `app/src/main/java/com/example/simplecontroller/model/Control.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/ButtonAutoTapController.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/ControlView.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/PropertySheetBuilder.kt`
+- `app/src/test/java/com/example/simplecontroller/ui/ButtonAutoTapControllerTest.kt`
+
 ## 2026-09-08 Camera Follow, TouchAim, Packet Ordering, and Packaging Handoff
 
 This is the newest operational handoff and supersedes older port/build guidance below where the two conflict. The Camera Follow feature was tested end-to-end by the user and reported to work well.
