@@ -58,6 +58,7 @@ data class Control(
     var buttonAimAlternatePayload: String = "",
     var buttonAimAlternatePayloadTiming: ButtonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
     var buttonAimAlternateResetHoldDurationMs: Long = 2000L,
+    var buttonAimAlternateBaseUnlatchDelayMs: Long = 0L,
     var buttonAimAlternateDisplayName: String = "",
     var buttonAimAlternateOutput: TouchAimOutput = TouchAimOutput.MOUSE,
     var buttonAimAlternateSensitivity: Float = 1f,

@@ -31,6 +31,7 @@ class ControlOneShotSerializationTest {
         assertEquals("", control.buttonAimAlternatePayload)
         assertEquals(ButtonAimPayloadTiming.IMMEDIATE, control.buttonAimAlternatePayloadTiming)
         assertEquals(2000L, control.buttonAimAlternateResetHoldDurationMs)
+        assertEquals(0L, control.buttonAimAlternateBaseUnlatchDelayMs)
         assertEquals(TouchAimOutput.MOUSE, control.buttonAimAlternateOutput)
         assertFalse(control.buttonAimStickUsesTouchPosition)
         assertFalse(control.buttonAimAlternateStickUsesTouchPosition)
@@ -52,6 +53,7 @@ class ControlOneShotSerializationTest {
             buttonAimAlternatePayload = "RT:1.0,X360A",
             buttonAimAlternatePayloadTiming = ButtonAimPayloadTiming.SEND_ON_RELEASE,
             buttonAimAlternateResetHoldDurationMs = 2750L,
+            buttonAimAlternateBaseUnlatchDelayMs = 140L,
             buttonAimAlternateDisplayName = "Fire",
             buttonAimAlternateOutput = TouchAimOutput.LEFT_STICK,
             buttonAimAlternateSensitivity = 1.7f,

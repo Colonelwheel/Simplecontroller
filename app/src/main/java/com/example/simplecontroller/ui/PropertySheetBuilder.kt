@@ -96,6 +96,7 @@ class PropertySheetBuilder(
         val alternatePayload: AutoCompleteTextView,
         val alternatePayloadTiming: Spinner,
         val alternateResetHoldDurationMs: EditText,
+        val alternateBaseUnlatchDelayMs: EditText,
         val alternateDisplayName: EditText,
         val alternateOutput: Spinner,
         val alternateSensitivity: EditText,
@@ -551,6 +552,20 @@ class PropertySheetBuilder(
         })
         alternateDetails.addView(createGap())
 
+        alternateDetails.addView(TextView(context).apply {
+            text = "Base unlatch delay after alternate release (ms)"
+        })
+        val alternateBaseUnlatchDelayMs = addTextField(
+            alternateDetails,
+            model.buttonAimAlternateBaseUnlatchDelayMs.toString(),
+            "Base unlatch delay (ms)",
+            InputType.TYPE_CLASS_NUMBER
+        )
+        alternateDetails.addView(TextView(context).apply {
+            text = "After a reset gesture releases the alternate, keep a latched Base payload held for this additional time."
+        })
+        alternateDetails.addView(createGap())
+
         addSectionTitle(alternateDetails, "Alternate Aim")
         alternateDetails.addView(TextView(context).apply {
             text = "These settings apply only while the one-shot alternate is armed or active."
@@ -669,6 +684,7 @@ class PropertySheetBuilder(
             alternatePayload = alternatePayload,
             alternatePayloadTiming = alternatePayloadTiming,
             alternateResetHoldDurationMs = alternateResetHoldDurationMs,
+            alternateBaseUnlatchDelayMs = alternateBaseUnlatchDelayMs,
             alternateDisplayName = alternateDisplayName,
             alternateOutput = alternateOutput,
             alternateSensitivity = alternateSensitivity,
@@ -1354,6 +1370,11 @@ class PropertySheetBuilder(
             .toLongOrNull()
             ?.coerceAtLeast(0L)
             ?: model.buttonAimAlternateResetHoldDurationMs
+        model.buttonAimAlternateBaseUnlatchDelayMs = fields.alternateBaseUnlatchDelayMs.text
+            .toString()
+            .toLongOrNull()
+            ?.coerceAtLeast(0L)
+            ?: model.buttonAimAlternateBaseUnlatchDelayMs
         model.buttonAimAlternateDisplayName = fields.alternateDisplayName.text.toString().trim()
         model.buttonAimAlternateOutput = when (fields.alternateOutput.selectedItemPosition) {
             1 -> TouchAimOutput.RIGHT_STICK

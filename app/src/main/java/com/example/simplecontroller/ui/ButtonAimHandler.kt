@@ -45,7 +45,8 @@ class ButtonAimHandler(
         BASE_WAITING_TO_FIRE,
         ALTERNATE_IMMEDIATE_ACTIVE,
         ALTERNATE_DELAYED_ARMED,
-        ALTERNATE_FINITE_RELEASE
+        ALTERNATE_FINITE_RELEASE,
+        WAITING_FOR_BASE_UNLATCH
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -61,6 +62,7 @@ class ButtonAimHandler(
     private var recoveryResetRunnable: Runnable? = null
     private var delayedFireRunnable: Runnable? = null
     private var finiteReleaseRunnable: Runnable? = null
+    private var baseUnlatchRunnable: Runnable? = null
 
     var visualState: ButtonAimVisualState = ButtonAimVisualState.IDLE
         private set
@@ -70,7 +72,8 @@ class ButtonAimHandler(
             gestureState != GestureState.IDLE || legacyPayloadHeld || legacyTurboActive ||
             baseLease != null || alternateLease != null ||
             payloadExecutor.activeLeaseCount() != 0 || delayedFireRunnable != null ||
-            finiteReleaseRunnable != null || recoveryResetRunnable != null || aimOutput.isActive()
+            finiteReleaseRunnable != null || baseUnlatchRunnable != null ||
+            recoveryResetRunnable != null || aimOutput.isActive()
 
     fun runtimeLabel(): String? = if (phaseState.phase == OneShotAlternatePhase.BASE) {
         null
@@ -134,6 +137,7 @@ class ButtonAimHandler(
         when (gestureState) {
             GestureState.BASE_WAITING_TO_FIRE -> cancelBaseGesture()
             GestureState.ALTERNATE_FINITE_RELEASE -> finishPendingAlternateRelease()
+            GestureState.WAITING_FOR_BASE_UNLATCH -> finishPendingBaseUnlatch()
             GestureState.IDLE -> Unit
             else -> cancelUnexpectedGesture()
         }
@@ -260,7 +264,8 @@ class ButtonAimHandler(
     private fun updateGesture(event: MotionEvent) {
         if (gestureState == GestureState.IDLE ||
             gestureState == GestureState.BASE_WAITING_TO_FIRE ||
-            gestureState == GestureState.ALTERNATE_FINITE_RELEASE
+            gestureState == GestureState.ALTERNATE_FINITE_RELEASE ||
+            gestureState == GestureState.WAITING_FOR_BASE_UNLATCH
         ) return
 
         val pointerIndex = event.findPointerIndex(activePointerId)
@@ -302,7 +307,8 @@ class ButtonAimHandler(
             GestureState.ALTERNATE_DELAYED_ARMED -> completeDelayedAlternate()
             GestureState.IDLE,
             GestureState.BASE_WAITING_TO_FIRE,
-            GestureState.ALTERNATE_FINITE_RELEASE -> cancelUnexpectedGesture()
+            GestureState.ALTERNATE_FINITE_RELEASE,
+            GestureState.WAITING_FOR_BASE_UNLATCH -> cancelUnexpectedGesture()
         }
     }
 
@@ -381,10 +387,10 @@ class ButtonAimHandler(
 
     private fun completeImmediateAlternate() {
         val returnToBase = shouldReturnToBaseAfterAlternateGesture()
-        releaseAlternateForCompletion(returnToBase)
+        val waitForBaseUnlatch = releaseAlternateForCompletion(returnToBase)
         aimOutput.finish(flushMouse = false)
         resetGestureOnly(preservePresentation = true)
-        finishAlternatePhase(returnToBase)
+        if (waitForBaseUnlatch) scheduleBaseUnlatch() else finishAlternatePhase(returnToBase)
     }
 
     private fun completeDelayedAlternate() {
@@ -414,9 +420,13 @@ class ButtonAimHandler(
         finiteReleaseRunnable = Runnable {
             finiteReleaseRunnable = null
             if (gestureState != GestureState.ALTERNATE_FINITE_RELEASE) return@Runnable
-            releaseAlternateForCompletion(returnToBase)
-            gestureState = GestureState.IDLE
-            finishAlternatePhase(returnToBase)
+            val waitForBaseUnlatch = releaseAlternateForCompletion(returnToBase)
+            if (waitForBaseUnlatch) {
+                scheduleBaseUnlatch()
+            } else {
+                gestureState = GestureState.IDLE
+                finishAlternatePhase(returnToBase)
+            }
         }.also { handler.postDelayed(it, FINITE_PRESS_DURATION_MS) }
     }
 
@@ -552,14 +562,30 @@ class ButtonAimHandler(
         finiteReleaseRunnable = null
         if (gestureState != GestureState.ALTERNATE_FINITE_RELEASE) return
         val returnToBase = shouldReturnToBaseAfterAlternateGesture()
-        releaseAlternateForCompletion(returnToBase)
-        gestureState = GestureState.IDLE
-        finishAlternatePhase(returnToBase)
+        val waitForBaseUnlatch = releaseAlternateForCompletion(returnToBase)
+        if (waitForBaseUnlatch) {
+            scheduleBaseUnlatch()
+        } else {
+            gestureState = GestureState.IDLE
+            finishAlternatePhase(returnToBase)
+        }
     }
 
-    /** Avoid a one-frame base restoration when normal completion is releasing both owners. */
-    private fun releaseAlternateForCompletion(returnToBase: Boolean) {
+    /** Returns true when a latched Base must remain held for its configured extra delay. */
+    private fun releaseAlternateForCompletion(returnToBase: Boolean): Boolean {
+        val shouldDelayBaseUnlatch = returnToBase && isLatched() &&
+            payloadExecutor.activeLeaseCount(ButtonAimPayloadOwner.BASE) > 0 &&
+            model.buttonAimAlternateBaseUnlatchDelayMs > 0L
+
+        if (shouldDelayBaseUnlatch) {
+            payloadExecutor.release(alternateLease)
+            alternateLease = null
+            return true
+        }
+
         if (returnToBase) {
+            // With no configured delay, release atomically to avoid briefly restoring an
+            // overlapping Base trigger/stick value between Alternate and neutral.
             payloadExecutor.releaseTogether(alternateLease, baseLease)
             alternateLease = null
             baseLease = null
@@ -567,6 +593,28 @@ class ButtonAimHandler(
             payloadExecutor.release(alternateLease)
             alternateLease = null
         }
+        return false
+    }
+
+    private fun scheduleBaseUnlatch() {
+        gestureState = GestureState.WAITING_FOR_BASE_UNLATCH
+        setVisualState(ButtonAimVisualState.ALTERNATE_RESET_READY)
+        baseUnlatchRunnable = Runnable {
+            baseUnlatchRunnable = null
+            if (gestureState != GestureState.WAITING_FOR_BASE_UNLATCH) return@Runnable
+            gestureState = GestureState.IDLE
+            finishAlternatePhase(returnToBase = true)
+        }.also {
+            handler.postDelayed(it, model.buttonAimAlternateBaseUnlatchDelayMs.coerceAtLeast(0L))
+        }
+    }
+
+    private fun finishPendingBaseUnlatch() {
+        baseUnlatchRunnable?.let(handler::removeCallbacks)
+        baseUnlatchRunnable = null
+        if (gestureState != GestureState.WAITING_FOR_BASE_UNLATCH) return
+        gestureState = GestureState.IDLE
+        finishAlternatePhase(returnToBase = true)
     }
 
     private fun releaseBaseOwnership() {
@@ -589,10 +637,12 @@ class ButtonAimHandler(
         recoveryResetRunnable?.let(handler::removeCallbacks)
         delayedFireRunnable?.let(handler::removeCallbacks)
         finiteReleaseRunnable?.let(handler::removeCallbacks)
+        baseUnlatchRunnable?.let(handler::removeCallbacks)
         holdThresholdRunnable = null
         recoveryResetRunnable = null
         delayedFireRunnable = null
         finiteReleaseRunnable = null
+        baseUnlatchRunnable = null
     }
 
     private fun resetGestureOnly(preservePresentation: Boolean = false) {

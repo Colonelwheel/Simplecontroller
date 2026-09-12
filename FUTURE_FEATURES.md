@@ -190,6 +190,7 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [ ] `Alternate payload` field.
 - [ ] `Alternate send timing`: Immediate or On release.
 - [ ] `Alternate reset hold duration`, defaulting to 2,000 ms.
+- [x] Optional `Base unlatch delay after alternate release`, defaulting to 0 ms.
 - [ ] Optional alternate name, color, and haptic pattern so the armed state is unmistakable.
 - [ ] Initially reuse the base Button Aim Surface output, sensitivity, inversion, response curve, and displacement settings.
 - [ ] Consider independent alternate aim settings only if a real use case requires them; avoid duplicating every property initially.
@@ -218,7 +219,7 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 
 - [ ] With alternate timing set to On release, aim during the alternate gesture without sending its payload.
 - [ ] On intentional lift, send the alternate payload first and center/stop aim immediately afterward, following the Button Aim Surface release-order decision.
-- [ ] A reset-duration alternate gesture remains a valid RT gesture. Immediate RT stays held until release; On-release RT fires normally on release. After RT completes, release any latched base payload and reset the surface to unlatched Base.
+- [ ] A reset-duration alternate gesture remains a valid RT gesture. Immediate RT stays held until release; On-release RT fires normally on release. After RT completes, keep any latched base payload held for the optional configured unlatch delay, then release it and reset the surface to unlatched Base.
 - [ ] Never fire a delayed alternate payload on `ACTION_CANCEL`, app pause, edit-mode entry, control deletion, connection loss, invalid pointer ownership, or an unsuccessful base activation.
 
 ### Visual, haptic, and reset behavior
@@ -250,6 +251,7 @@ This should be a separate optional state layered onto Button Aim Surface rather 
 - [x] Resetting a canceled alternate requires holding the surface for at least 2 seconds by default, then releasing; the duration is adjustable.
 - [x] Reaching the alternate reset duration only arms the reset; it does not switch back to LT until release.
 - [x] The long reset gesture does not suppress RT. Immediate RT remains active during the hold, while delayed RT fires normally on release; RT completes before the surface returns to unlatched LT.
+- [x] A separate optional delay can keep the latched Base payload held after the alternate finishes releasing; 0 ms preserves immediate unlatching.
 
 ## General implementation safeguards
 
