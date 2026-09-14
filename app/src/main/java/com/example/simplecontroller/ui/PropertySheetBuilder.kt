@@ -98,6 +98,9 @@ class PropertySheetBuilder(
         val stickFullSpeed: EditText,
         val invertY: CheckBox,
         val useResponseCurve: CheckBox,
+        val stickUsesTouchPosition: CheckBox,
+        val stickFullDisplacement: EditText,
+        val stickDeadzone: EditText,
         val aimPayload: EditText,
         val shootPayload: EditText,
         val keepAimPayload: CheckBox,
@@ -895,16 +898,73 @@ class PropertySheetBuilder(
             }
         )
         val invertY = addCheckBox(container, "Invert Y", model.touchInvertY)
+        val stickAimContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            container.addView(this)
+        }
         val useResponseCurve = addCheckBox(
-            container,
+            stickAimContainer,
             "Stick aiming style: Response curve (off = Linear)",
             model.touchUseResponseCurve
         )
+        val centerStickContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            stickAimContainer.addView(this)
+        }
         val stickFullSpeed = addDecimalField(
-            container,
+            centerStickContainer,
             "Stick full speed (px/sec)",
             model.touchStickFullSpeed
         )
+        val stickUsesTouchPosition = addCheckBox(
+            stickAimContainer,
+            "Use touch position as stick position",
+            model.touchAimStickUsesTouchPosition
+        )
+        stickAimContainer.addView(TextView(context).apply {
+            text = "On: the TouchAim surface center is neutral. Off: wherever your finger first lands is neutral."
+            setTextColor(ThemeManager.getTextColor(context))
+        })
+        val relativeStickContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            stickAimContainer.addView(this)
+        }
+        val stickFullDisplacement = addDecimalField(
+            relativeStickContainer,
+            "Full displacement (px)",
+            model.touchAimStickFullDisplacementPx
+        )
+        val stickDeadzone = addDecimalField(
+            relativeStickContainer,
+            "Deadzone (px)",
+            model.touchAimStickDeadzonePx
+        )
+        relativeStickContainer.addView(TextView(context).apply {
+            text = "Full displacement is the finger travel needed for 100% stick output. Deadzone is movement ignored near the initial touch."
+            setTextColor(ThemeManager.getTextColor(context))
+        })
+        fun updateStickAimVisibility() {
+            val isStickOutput = aimOutput.selectedItemPosition != 0
+            stickAimContainer.visibility = if (isStickOutput) View.VISIBLE else View.GONE
+            centerStickContainer.visibility = if (isStickOutput &&
+                stickUsesTouchPosition.isChecked
+            ) View.VISIBLE else View.GONE
+            relativeStickContainer.visibility = if (isStickOutput &&
+                !stickUsesTouchPosition.isChecked
+            ) View.VISIBLE else View.GONE
+        }
+        aimOutput.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long
+            ) = updateStickAimVisibility()
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        stickUsesTouchPosition.setOnCheckedChangeListener { _, _ -> updateStickAimVisibility() }
+        updateStickAimVisibility()
 
         val twoStateContainer = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -1094,6 +1154,9 @@ class PropertySheetBuilder(
             stickFullSpeed = stickFullSpeed,
             invertY = invertY,
             useResponseCurve = useResponseCurve,
+            stickUsesTouchPosition = stickUsesTouchPosition,
+            stickFullDisplacement = stickFullDisplacement,
+            stickDeadzone = stickDeadzone,
             aimPayload = aimPayload,
             shootPayload = shootPayload,
             keepAimPayload = keepAimPayload,
@@ -1453,8 +1516,8 @@ class PropertySheetBuilder(
                             "Warning: this is an experimental best guess rated Unreliable. Apply it only as a starting point, then edit the thresholds and smoothing cautiously.\n\n"
                         else -> ""
                     }) +
-                        "Calibration only keeps this control's current Aim output, both sensitivities, payloads, and Shoot action. " +
-                        "Apply all also replaces those settings with the saved profile values."
+                        "Calibration only keeps this control's current aiming settings, sensitivities, payloads, and Shoot action. " +
+                        "Apply all also replaces those settings, including stick origin, displacement, and deadzone, with the saved profile values."
                 )
                 .setPositiveButton("Calibration only") { _, _ ->
                     if (applyCalibrationDetectionOnly(profile)) finishCalibrationApply(actionDialog, propertyDialog)
@@ -2171,6 +2234,14 @@ class PropertySheetBuilder(
             .coerceAtLeast(1f)
         model.touchInvertY = fields.invertY.isChecked
         model.touchUseResponseCurve = fields.useResponseCurve.isChecked
+        model.touchAimStickUsesTouchPosition = fields.stickUsesTouchPosition.isChecked
+        val fullDisplacement = fields.stickFullDisplacement
+            .floatValue(model.touchAimStickFullDisplacementPx)
+            .coerceAtLeast(1f)
+        model.touchAimStickFullDisplacementPx = fullDisplacement
+        model.touchAimStickDeadzonePx = fields.stickDeadzone
+            .floatValue(model.touchAimStickDeadzonePx)
+            .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
 
         model.touchAimAimPayload = fields.aimPayload.text.toString().trim()
         model.touchAimShootPayload = fields.shootPayload.text.toString().trim()

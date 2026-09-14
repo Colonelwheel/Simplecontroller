@@ -29,6 +29,9 @@ class TouchAimCalibrationProfileTest {
         assertFalse(control.touchAimManualThresholdsInitialized)
         assertEquals(5.2f, control.touchAimManualShootOnThreshold)
         assertEquals(4.95f, control.touchAimManualShootOffThreshold)
+        assertTrue(control.touchAimStickUsesTouchPosition)
+        assertEquals(220f, control.touchAimStickFullDisplacementPx)
+        assertEquals(8f, control.touchAimStickDeadzonePx)
     }
 
     @Test
@@ -36,6 +39,9 @@ class TouchAimCalibrationProfileTest {
         val control = control().copy(
             touchAimMode = TouchAimMode.CALIBRATED_TWO_STATE,
             touchAimShootSensitivity = 0.42f,
+            touchAimStickUsesTouchPosition = false,
+            touchAimStickFullDisplacementPx = 175f,
+            touchAimStickDeadzonePx = 4f,
             touchAimShootBehavior = TouchAimShootBehavior.PRESS_ON_RETURN_TO_AIM,
             touchAimSensorTransforms = listOf(
                 TouchAimSensorTransform(TouchAimSensor.TOUCH_MAJOR, 3f, 1.2f)
@@ -43,6 +49,9 @@ class TouchAimCalibrationProfileTest {
         )
         val decoded = json.decodeFromString<Control>(json.encodeToString(Control.serializer(), control))
         assertEquals(0.42f, decoded.touchAimShootSensitivity)
+        assertFalse(decoded.touchAimStickUsesTouchPosition)
+        assertEquals(175f, decoded.touchAimStickFullDisplacementPx)
+        assertEquals(4f, decoded.touchAimStickDeadzonePx)
         assertEquals(TouchAimShootBehavior.PRESS_ON_RETURN_TO_AIM, decoded.touchAimShootBehavior)
         assertEquals(TouchAimSensor.TOUCH_MAJOR, decoded.touchAimSensorTransforms.single().sensor)
     }
@@ -81,6 +90,9 @@ class TouchAimCalibrationProfileTest {
         assertEquals(TouchAimMode.CALIBRATED_TWO_STATE, control.touchAimMode)
         assertEquals(profile.id, control.touchAimAppliedCalibrationId)
         assertEquals(0.55f, control.touchAimShootSensitivity)
+        assertFalse(control.touchAimStickUsesTouchPosition)
+        assertEquals(180f, control.touchAimStickFullDisplacementPx)
+        assertEquals(5f, control.touchAimStickDeadzonePx)
         assertEquals("RT:1.0", control.touchAimShootPayload)
         assertEquals(7f, control.touchAimManualShootOnThreshold)
         assertEquals(6.5f, control.touchAimManualShootOffThreshold)
@@ -178,6 +190,9 @@ class TouchAimCalibrationProfileTest {
         passSummaries = emptyList(),
         aimOutput = TouchAimOutput.RIGHT_STICK,
         aimSensitivity = 1f,
+        stickUsesTouchPosition = false,
+        stickFullDisplacementPx = 180f,
+        stickDeadzonePx = 5f,
         shootSensitivity = 0.55f,
         aimPayload = "LT:1.0",
         shootPayload = "RT:1.0",

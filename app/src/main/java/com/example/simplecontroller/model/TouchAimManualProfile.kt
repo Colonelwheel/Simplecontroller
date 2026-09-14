@@ -49,6 +49,9 @@ data class TouchAimManualProfile(
     val stickFullSpeed: Float,
     val invertY: Boolean,
     val useResponseCurve: Boolean,
+    val stickUsesTouchPosition: Boolean = true,
+    val stickFullDisplacementPx: Float = 220f,
+    val stickDeadzonePx: Float = 8f,
     val threeStage: TouchAimManualThreeStageSettings? = null,
     val twoState: TouchAimManualTwoStateSettings? = null
 ) {
@@ -65,7 +68,10 @@ data class TouchAimManualProfile(
         }
         if (!aimSensitivity.isFinite() || aimSensitivity !in 0f..5f ||
             !sizeScale.isFinite() || sizeScale < 0f ||
-            !stickFullSpeed.isFinite() || stickFullSpeed < 1f) {
+            !stickFullSpeed.isFinite() || stickFullSpeed < 1f ||
+            !stickFullDisplacementPx.isFinite() || stickFullDisplacementPx < 1f ||
+            !stickDeadzonePx.isFinite() || stickDeadzonePx < 0f ||
+            stickDeadzonePx >= stickFullDisplacementPx) {
             return "The saved manual aim values are invalid."
         }
         val payloads = listOfNotNull(
@@ -126,6 +132,9 @@ data class TouchAimManualProfile(
         control.touchStickFullSpeed = stickFullSpeed
         control.touchInvertY = invertY
         control.touchUseResponseCurve = useResponseCurve
+        control.touchAimStickUsesTouchPosition = stickUsesTouchPosition
+        control.touchAimStickFullDisplacementPx = stickFullDisplacementPx
+        control.touchAimStickDeadzonePx = stickDeadzonePx
         when (mode) {
             TouchAimMode.MANUAL_THREE_STAGE -> checkNotNull(threeStage).also { settings ->
                 control.touchScoreSmoothing = settings.scoreSmoothing
@@ -187,6 +196,9 @@ fun Control.captureManualTouchAimProfile(
         stickFullSpeed = touchStickFullSpeed,
         invertY = touchInvertY,
         useResponseCurve = touchUseResponseCurve,
+        stickUsesTouchPosition = touchAimStickUsesTouchPosition,
+        stickFullDisplacementPx = touchAimStickFullDisplacementPx,
+        stickDeadzonePx = touchAimStickDeadzonePx,
         threeStage = if (touchAimMode == TouchAimMode.MANUAL_THREE_STAGE) {
             TouchAimManualThreeStageSettings(
                 touchScoreSmoothing,

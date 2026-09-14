@@ -186,6 +186,10 @@ data class Control(
     var touchStickFullSpeed: Float = 900f,
     var touchInvertY: Boolean = false,
     var touchUseResponseCurve: Boolean = false,
+    /** True keeps the control center as neutral; false makes the initial touch neutral. */
+    var touchAimStickUsesTouchPosition: Boolean = true,
+    var touchAimStickFullDisplacementPx: Float = 220f,
+    var touchAimStickDeadzonePx: Float = 8f,
 
     /* Touch Aim two-state modes (opt-in; old layouts remain manual three-stage) */
     var touchAimMode: TouchAimMode = TouchAimMode.MANUAL_THREE_STAGE,

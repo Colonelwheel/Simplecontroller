@@ -34,7 +34,10 @@ class ControlSettingsProfilesTest {
             touchKeepLowerHolds = false,
             touchStickFullSpeed = 750f,
             touchInvertY = true,
-            touchUseResponseCurve = true
+            touchUseResponseCurve = true,
+            touchAimStickUsesTouchPosition = false,
+            touchAimStickFullDisplacementPx = 165f,
+            touchAimStickDeadzonePx = 3f
         )
         val captured = requireNotNull(source.captureManualTouchAimProfile(ID1, "Three", 10L))
         val profile = json.decodeFromString<TouchAimManualProfile>(
@@ -62,6 +65,9 @@ class ControlSettingsProfilesTest {
         assertEquals(TouchAimOutput.RIGHT_STICK, target.touchAimOutput)
         assertEquals(.72f, target.sensitivity)
         assertTrue(target.touchUseResponseCurve)
+        assertFalse(target.touchAimStickUsesTouchPosition)
+        assertEquals(165f, target.touchAimStickFullDisplacementPx)
+        assertEquals(3f, target.touchAimStickDeadzonePx)
         assertEquals("target", target.id)
         assertEquals(91f, target.x)
         assertEquals(600f, target.w)

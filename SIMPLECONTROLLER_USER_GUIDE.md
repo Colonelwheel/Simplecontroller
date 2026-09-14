@@ -412,6 +412,22 @@ One possible idea is normal aim at Low, `LT:1.0` aim-down-sights at Medium, and 
 
 The Galaxy S22 does not provide useful pressure values for this purpose, so Touch Aim uses touch geometry rather than pressure. Geometry still overlaps between stages and can shift while the finger moves. Treat this as an experimental feature, tune it slowly, and keep a Release All Button available while testing.
 
+### TouchAim stick origin
+
+For Right-stick or Left-stick output, **Use touch position as stick position** selects how a gesture
+begins:
+
+- **On (existing behavior):** the center of the TouchAim surface is neutral. Touching away from its
+  center can immediately produce stick output.
+- **Off:** wherever the finger first lands becomes neutral. Movement is relative to that initial
+  touch, like Button Aim with touch-position mode off.
+
+With the setting off, **Full displacement** is the finger travel needed for 100% stick output and
+**Deadzone** is the travel ignored around the initial touch. Raise displacement for finer control;
+lower it if full-speed turning requires too much travel. Raise deadzone to suppress drift or jitter;
+lower it if aiming feels sticky. These controls are hidden for Mouse output because mouse aiming is
+already relative. Existing and older layouts default to the original surface-center behavior.
+
 ### Calibrated two-state Aim / Shoot mode
 
 Edit a Touch Aim control and tap **Calibrate TouchAim** to calibrate only these two intended states:
@@ -448,6 +464,7 @@ Two-state settings include:
 - whether the Aim payload stays held while shooting;
 - normal Aim sensitivity and a separate **Shoot aim sensitivity** for finer control after Shoot is
   confirmed;
+- surface-center or initial-touch stick origin, with displacement and deadzone for initial-touch;
 - separate Shoot-on and Shoot-off thresholds, smoothing, and confirmation times.
 
 The property sheet hides settings that do not belong to the selected mode. Manual three-stage shows
@@ -480,7 +497,8 @@ screen, control-position, sensor-normalization, threshold, timing, reliability, 
 pass information. Applying a profile copies its settings into that one control; renaming or deleting
 the saved profile does not silently change the working control.
 When loading a profile, choose **Calibration only** to retain the control's current output,
-sensitivities, payloads, and Shoot behavior, or explicitly choose **Apply all saved settings**.
+stick origin, sensitivities, payloads, and Shoot behavior, or explicitly choose **Apply all saved
+settings** to restore those saved values too.
 
 The original manual Low/Medium/High three-stage mode remains available in the Touch Aim properties.
 There is also an explicit **Manual two-state** mode. It averages the checked Size, TouchMajor, and

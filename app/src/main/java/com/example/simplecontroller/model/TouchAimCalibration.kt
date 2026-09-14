@@ -102,6 +102,9 @@ data class TouchAimCalibrationProfile(
     val passSummaries: List<TouchAimPassSummary>,
     val aimOutput: TouchAimOutput,
     val aimSensitivity: Float = 1f,
+    val stickUsesTouchPosition: Boolean = true,
+    val stickFullDisplacementPx: Float = 220f,
+    val stickDeadzonePx: Float = 8f,
     val shootSensitivity: Float = 1f,
     val aimPayload: String,
     val shootPayload: String,
@@ -134,6 +137,9 @@ fun TouchAimCalibrationProfile.isApplicable(allowUnreliableBestGuess: Boolean = 
         enterShootConfirmationMs in 1L..2000L &&
         returnToAimConfirmationMs in 1L..2000L &&
         aimSensitivity.isFinite() && aimSensitivity >= 0f &&
+        stickFullDisplacementPx.isFinite() && stickFullDisplacementPx >= 1f &&
+        stickDeadzonePx.isFinite() && stickDeadzonePx >= 0f &&
+        stickDeadzonePx < stickFullDisplacementPx &&
         shootSensitivity.isFinite() && shootSensitivity >= 0f
 
 /** Returns false without changing the control if the saved detector is not safe to run. */
@@ -153,6 +159,9 @@ fun TouchAimCalibrationProfile.applyTo(
     control.touchAimReturnToAimConfirmationMs = returnToAimConfirmationMs
     control.touchAimOutput = aimOutput
     control.sensitivity = aimSensitivity
+    control.touchAimStickUsesTouchPosition = stickUsesTouchPosition
+    control.touchAimStickFullDisplacementPx = stickFullDisplacementPx
+    control.touchAimStickDeadzonePx = stickDeadzonePx
     control.touchAimShootSensitivity = shootSensitivity
     control.touchAimAimPayload = aimPayload
     control.touchAimShootPayload = shootPayload

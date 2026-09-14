@@ -179,6 +179,7 @@ Editable control properties include:
 - Mouse or right-stick aim output.
 - Aim sensitivity and optional Y inversion.
 - Right-stick finger speed corresponding to full deflection.
+- Optional initial-touch neutral origin for stick output, with full-displacement and deadzone values.
 - Inclusion of Size, TouchMajor, and TouchMinor in the contact score.
 - Size multiplier and score smoothing.
 - Low, medium, and high ON thresholds.
@@ -291,7 +292,9 @@ Two-state runtime settings include independent Shoot-on/Shoot-off thresholds, sm
 return confirmation times, an optional Aim payload, a Shoot payload, and whether the Aim payload
 stays active during Shoot. Aim output can still be Mouse, Right stick, or Left stick. **Shoot aim
 sensitivity** is separate from normal Aim sensitivity so a confirmed Shoot state can use finer aim
-control without changing the lower Aim state.
+control without changing the lower Aim state. Stick output can use the TouchAim surface center or
+the initial finger contact as neutral; initial-touch mode uses configurable displacement and
+deadzone values and applies to every TouchAim state without interrupting Aim/Shoot transitions.
 
 Shoot activation choices are:
 

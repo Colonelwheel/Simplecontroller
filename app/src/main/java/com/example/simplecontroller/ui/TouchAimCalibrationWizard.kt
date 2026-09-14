@@ -530,6 +530,12 @@ class TouchAimCalibrationWizard(
             passSummaries = rec.passSummaries,
             aimOutput = existingProfile?.aimOutput ?: model.touchAimOutput,
             aimSensitivity = existingProfile?.aimSensitivity ?: model.sensitivity,
+            stickUsesTouchPosition = existingProfile?.stickUsesTouchPosition
+                ?: model.touchAimStickUsesTouchPosition,
+            stickFullDisplacementPx = existingProfile?.stickFullDisplacementPx
+                ?: model.touchAimStickFullDisplacementPx,
+            stickDeadzonePx = existingProfile?.stickDeadzonePx
+                ?: model.touchAimStickDeadzonePx,
             shootSensitivity = existingProfile?.shootSensitivity ?: model.touchAimShootSensitivity,
             aimPayload = existingProfile?.aimPayload ?: model.touchAimAimPayload,
             shootPayload = existingProfile?.shootPayload ?: model.touchAimShootPayload,

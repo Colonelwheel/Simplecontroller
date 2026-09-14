@@ -136,20 +136,7 @@ class TouchAimHandler(
             x = event.getX(event.actionIndex),
             y = event.getY(event.actionIndex),
             eventTime = event.eventTime,
-            newConfig = AimOutputConfig(
-                output = model.touchAimOutput,
-                sensitivity = model.sensitivity,
-                invertY = model.touchInvertY,
-                stickProfile = if (model.touchUseResponseCurve) {
-                    ButtonAimStickProfile.RESPONSE_CURVE
-                } else {
-                    ButtonAimStickProfile.LINEAR
-                },
-                mouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
-                stickFullDisplacementPx = 1f,
-                stickDeadzonePx = 0f,
-                originMode = AimOriginMode.CONTROL_CENTER
-            )
+            newConfig = model.touchAimConfig()
         )
         if (isTwoStateMode()) {
             if (!aimStarted) {
@@ -574,3 +561,23 @@ class TouchAimHandler(
         private const val MIN_HYSTERESIS_GAP = 0.01f
     }
 }
+
+internal fun Control.touchAimConfig(): AimOutputConfig = AimOutputConfig(
+    output = touchAimOutput,
+    sensitivity = sensitivity,
+    invertY = touchInvertY,
+    stickProfile = if (touchUseResponseCurve) {
+        ButtonAimStickProfile.RESPONSE_CURVE
+    } else {
+        ButtonAimStickProfile.LINEAR
+    },
+    mouseProfile = ButtonAimMouseProfile.SMOOTHED_NONLINEAR,
+    stickFullDisplacementPx = touchAimStickFullDisplacementPx,
+    stickDeadzonePx = touchAimStickDeadzonePx,
+    originMode = if (touchAimStickUsesTouchPosition) {
+        AimOriginMode.CONTROL_CENTER
+    } else {
+        AimOriginMode.INITIAL_TOUCH
+    },
+    sendNeutralOnBegin = !touchAimStickUsesTouchPosition
+)

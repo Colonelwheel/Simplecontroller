@@ -116,12 +116,17 @@ TouchAim now has three selectable base-aim outputs:
 
 The new Left stick option deliberately uses the same conventions and send path as the project's normal left stick. It is not an approximation invented separately for TouchAim:
 
-- Touch position is converted from control center-to-edge into normalized `-1.0` through `1.0` X/Y values.
+- Stick origin is per control. The backward-compatible default converts control center-to-edge into
+  normalized `-1.0` through `1.0` X/Y values. The optional initial-touch origin sends neutral on
+  contact, then uses radial displacement and deadzone from that first coordinate.
 - The control's sensitivity and invert-Y settings are applied.
 - Left and Right stick TouchAim call the shared `UdpClient.sendStickPosition()` path.
 - Stick output is resent every 16 ms while active and explicitly centered when the touch ends.
 - Mouse TouchAim remains relative movement through `sendTouchpadDelta()` with its existing smoothing/scaling and an 8 ms send interval.
 - TouchAim has an opt-in `Response-curve sensitivity (stick output only)` checkbox. It defaults off, affects only Left/Right stick output, and is ignored by Mouse output.
+- TouchAim manual profiles and full calibration profiles preserve the origin, displacement, and
+  deadzone. Detection-only calibration application preserves the target control's current aiming
+  settings.
 
 Relevant files:
 
