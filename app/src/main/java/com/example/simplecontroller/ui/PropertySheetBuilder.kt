@@ -20,11 +20,15 @@ import com.example.simplecontroller.model.TouchAimShootBehavior
 import com.example.simplecontroller.model.TouchStageAction
 import com.example.simplecontroller.model.applyTo
 import com.example.simplecontroller.model.ButtonAimProfile
+import com.example.simplecontroller.model.StickDirectionalProfile
+import com.example.simplecontroller.model.StickDirectionalProfileMode
 import com.example.simplecontroller.model.TouchAimManualProfile
 import com.example.simplecontroller.model.captureButtonAimProfile
+import com.example.simplecontroller.model.captureStickDirectionalProfile
 import com.example.simplecontroller.model.captureManualTouchAimProfile
 import com.example.simplecontroller.model.isApplicable
 import com.example.simplecontroller.io.ButtonAimProfileStore
+import com.example.simplecontroller.io.StickDirectionalProfileStore
 import com.example.simplecontroller.io.TouchAimManualProfileStore
 import com.example.simplecontroller.io.TouchAimCalibrationStore
 import java.util.UUID
@@ -67,7 +71,8 @@ class PropertySheetBuilder(
         val directionalContainer: LinearLayout,
         val payloadField: AutoCompleteTextView,
         val touchAim: TouchAimComponents?,
-        val buttonAim: ButtonAimComponents?
+        val buttonAim: ButtonAimComponents?,
+        val stickProfiles: StickDirectionalProfileComponents?
     )
 
     private data class TouchAimComponents(
@@ -145,6 +150,11 @@ class PropertySheetBuilder(
         val alternateStickDeadzone: EditText,
         val alternateStickUsesTouchPosition: CheckBox,
         val alternateHaptics: CheckBox
+    )
+
+    private data class StickDirectionalProfileComponents(
+        val saveProfileButton: Button,
+        val manageProfilesButton: Button
     )
 
     /**
@@ -249,6 +259,16 @@ class PropertySheetBuilder(
             fields.manageProfilesButton.setOnClickListener {
                 saveProperties(components)
                 showButtonAimProfileList(alertDialog)
+            }
+        }
+        components.stickProfiles?.let { fields ->
+            fields.saveProfileButton.setOnClickListener {
+                saveProperties(components)
+                promptSaveStickDirectionalProfile()
+            }
+            fields.manageProfilesButton.setOnClickListener {
+                saveProperties(components)
+                showStickDirectionalProfileList(alertDialog)
             }
         }
 
@@ -480,6 +500,9 @@ class PropertySheetBuilder(
         
         // Directional mode (for sticks)
         val isStick = model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK
+        val stickProfileComponents = if (isStick) {
+            addStickDirectionalProfileUI(container)
+        } else null
         val directionalMode = addCheckBox(
             container,
             "Directional mode (WASD style)",
@@ -529,7 +552,24 @@ class PropertySheetBuilder(
             holdToggle, autoTapEnabled, autoTapIntervalMs,
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
-            directionalContainer, payloadField, touchAimComponents, buttonAimComponents
+            directionalContainer, payloadField, touchAimComponents, buttonAimComponents,
+            stickProfileComponents
+        )
+    }
+
+    private fun addStickDirectionalProfileUI(
+        container: LinearLayout
+    ): StickDirectionalProfileComponents {
+        addSectionTitle(container, "Stick directional profiles")
+        return StickDirectionalProfileComponents(
+            saveProfileButton = largeActionButton(
+                container,
+                "Save changes as new stick profile"
+            ),
+            manageProfilesButton = largeActionButton(
+                container,
+                "Save changes, then manage stick profiles"
+            )
         )
     }
 
@@ -1184,6 +1224,157 @@ class PropertySheetBuilder(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = 8 }
         )
+    }
+
+    private fun promptSaveStickDirectionalProfile() {
+        if (model.directionalMode == model.stickPlusMode) {
+            Toast.makeText(
+                context,
+                "Choose Directional/WASD mode or Stick+ mode before saving a stick profile.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val modeLabel = if (model.directionalMode) "WASD" else "Stick+"
+        val input = EditText(context).apply {
+            hint = "Profile name"
+            setText(model.name.ifBlank { "$modeLabel settings" })
+            selectAll()
+        }
+        AlertDialog.Builder(context)
+            .setTitle("Save $modeLabel profile")
+            .setMessage(
+                "Saves Up, Down, Left, and Right commands plus every Regular Boost and Super Boost " +
+                    "command and threshold. It does not save the stick's size, position, LS/RS " +
+                    "payload, sensitivity, auto-center, or Linear/Response Curve type."
+            )
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val profile = model.captureStickDirectionalProfile(
+                    UUID.randomUUID().toString(),
+                    input.text.toString(),
+                    System.currentTimeMillis()
+                )
+                if (profile == null) {
+                    Toast.makeText(context, "These stick directional settings are invalid.", Toast.LENGTH_LONG).show()
+                } else {
+                    val result = StickDirectionalProfileStore.save(context, profile)
+                    Toast.makeText(
+                        context,
+                        result.error ?: "Saved \"${result.profile?.name}\"",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showStickDirectionalProfileList(propertyDialog: AlertDialog) {
+        val profiles = StickDirectionalProfileStore.list(context)
+        if (profiles.isEmpty()) {
+            AlertDialog.Builder(context)
+                .setTitle("Stick directional profiles")
+                .setMessage("No Stick+ or WASD profiles have been saved yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val labels = profiles.map { "${it.name} — ${it.mode.displayName()}" }
+        var listDialog: AlertDialog? = null
+        listDialog = AlertDialog.Builder(context)
+            .setTitle("Stick directional profiles")
+            .setItems(labels.toTypedArray()) { _, index ->
+                showStickDirectionalProfileActions(profiles[index], propertyDialog, listDialog)
+            }
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun showStickDirectionalProfileActions(
+        profile: StickDirectionalProfile,
+        propertyDialog: AlertDialog,
+        listDialog: AlertDialog?
+    ) {
+        val modeLabel = profile.mode.displayName()
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        var actionDialog: AlertDialog? = null
+        fun finishApply() {
+            onPropertiesUpdated()
+            actionDialog?.dismiss()
+            listDialog?.dismiss()
+            propertyDialog.dismiss()
+            reopenPropertySheet()
+        }
+        largeActionButton(actions, "Apply commands only").setOnClickListener {
+            if (profile.applyCommandsTo(model)) {
+                finishApply()
+            } else {
+                Toast.makeText(context, profile.validationError() ?: "This profile cannot be applied.", Toast.LENGTH_LONG).show()
+            }
+        }
+        largeActionButton(actions, "Apply and switch to $modeLabel").setOnClickListener {
+            if (profile.applyAndSwitchModeTo(model)) {
+                finishApply()
+            } else {
+                Toast.makeText(context, profile.validationError() ?: "This profile cannot be applied.", Toast.LENGTH_LONG).show()
+            }
+        }
+        largeActionButton(actions, "Rename").setOnClickListener {
+            val input = EditText(context).apply { setText(profile.name); selectAll() }
+            AlertDialog.Builder(context)
+                .setTitle("Rename stick profile")
+                .setView(input)
+                .setPositiveButton("Rename") { _, _ ->
+                    val result = StickDirectionalProfileStore.rename(
+                        context,
+                        profile,
+                        input.text.toString(),
+                        System.currentTimeMillis()
+                    )
+                    Toast.makeText(context, result.error ?: "Profile renamed", Toast.LENGTH_LONG).show()
+                    if (result.succeeded) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        largeActionButton(actions, "Delete").setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle("Delete stick profile?")
+                .setMessage("Sticks that already copied these settings will not change.")
+                .setPositiveButton("Delete") { _, _ ->
+                    val deleted = StickDirectionalProfileStore.delete(context, profile.id)
+                    Toast.makeText(context, if (deleted) "Profile deleted" else "Could not delete profile", Toast.LENGTH_LONG).show()
+                    if (deleted) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        actionDialog = AlertDialog.Builder(context)
+            .setTitle(profile.name)
+            .setMessage(
+                "Commands only replaces all directional, Regular Boost, and Super Boost commands " +
+                    "and thresholds while keeping this stick's current mode.\n\n" +
+                    "Apply and switch also selects the saved $modeLabel mode. Both choices preserve " +
+                    "the target stick's geometry, LS/RS payload, sensitivity, auto-center, and stick type."
+            )
+            .setView(ScrollView(context).apply { addView(actions) })
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun StickDirectionalProfileMode.displayName(): String = when (this) {
+        StickDirectionalProfileMode.WASD -> "Directional/WASD"
+        StickDirectionalProfileMode.STICK_PLUS -> "Stick+"
     }
 
     private fun promptSaveManualTouchAimProfile() {

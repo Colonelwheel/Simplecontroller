@@ -283,6 +283,18 @@ The exact thresholds and payloads are yours to choose. You could use the same id
 
 After first enabling Directional mode or Stick+, you may need to press **OK/Save**, then long-press the Stick again in Edit mode before every nested setting becomes visible.
 
+### Stick directional profiles
+
+Directional/WASD and Stick+ use the same Up, Down, Left, Right, Regular Boost, and Super Boost
+command fields. Use **Save changes as new stick profile** to save all 12 commands, both thresholds,
+and whether the profile was created in Directional/WASD or Stick+ mode.
+
+When loading a profile, choose **Apply commands only** to copy the commands and thresholds while
+keeping the target stick's current mode. Choose **Apply and switch** to copy them and select the
+profile's saved WASD or Stick+ mode. Both choices preserve the target stick's position, size, LS/RS
+payload, sensitivity, auto-center setting, and normal/Response Curve stick type. Profiles work
+between normal Stick and Response Curve Stick controls and can be renamed or deleted.
+
 ### Response Curve Stick
 
 A Response Curve Stick changes how quickly analog output grows as your finger moves away from the center:

@@ -21,6 +21,7 @@ This is a parking lot for potential future work, not an implementation order or 
 - [x] Save and manage reusable Manual three-stage and Manual two-state profiles.
 - [x] Save complete reusable Button Aim profiles with separate aiming-only and complete apply choices.
 - [x] Add an optional initial-touch neutral origin for TouchAim stick output with displacement and deadzone.
+- [x] Save reusable Directional/WASD and Stick+ command profiles with commands-only and mode-switching apply choices.
 
 The implemented first wizard deliberately records only two intended states: **Aim** and **Aim +
 Shoot**. It does not claim that three contact states are calibrated. Manual Low/Medium/High

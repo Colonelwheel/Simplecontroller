@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.ButtonAimProfile
+import com.example.simplecontroller.model.StickDirectionalProfile
 import com.example.simplecontroller.model.TouchAimManualProfile
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
@@ -136,6 +137,27 @@ object ButtonAimProfileStore {
     fun list(context: Context): List<ButtonAimProfile> = store.list(context)
     fun save(context: Context, profile: ButtonAimProfile) = store.save(context, profile)
     fun rename(context: Context, profile: ButtonAimProfile, name: String, nowMs: Long) =
+        store.rename(context, profile, name, nowMs)
+    fun delete(context: Context, id: String): Boolean = store.delete(context, id)
+}
+
+object StickDirectionalProfileStore {
+    private val store = AtomicNamedProfileStore(
+        tag = "StickDirectionalProfile",
+        prefix = "stick_directional_profile_",
+        serializer = StickDirectionalProfile.serializer(),
+        idOf = StickDirectionalProfile::id,
+        nameOf = StickDirectionalProfile::name,
+        updatedAtOf = StickDirectionalProfile::updatedAtEpochMs,
+        withName = { profile, name, updated ->
+            profile.copy(name = name, updatedAtEpochMs = updated)
+        },
+        validationError = StickDirectionalProfile::validationError
+    )
+
+    fun list(context: Context): List<StickDirectionalProfile> = store.list(context)
+    fun save(context: Context, profile: StickDirectionalProfile) = store.save(context, profile)
+    fun rename(context: Context, profile: StickDirectionalProfile, name: String, nowMs: Long) =
         store.rename(context, profile, name, nowMs)
     fun delete(context: Context, id: String): Boolean = store.delete(context, id)
 }

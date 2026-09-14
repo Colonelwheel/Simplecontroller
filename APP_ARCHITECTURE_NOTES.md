@@ -59,10 +59,17 @@ both Base/Alternate aiming feel and the associated payload/action settings. Load
 aiming-only path that preserves the target button's actions and a complete path that replaces them.
 Both paths preserve identity, geometry, and the button's separate swipe setting.
 
+Stick directional profiles use the same per-profile store for the shared Directional/WASD and
+Stick+ command matrix. Each snapshot stores 12 directional/boost commands, Regular and Super Boost
+thresholds, and the source mode. Commands-only application preserves the target mode; apply-and-
+switch selects the saved WASD or Stick+ mode. Both paths preserve geometry, STICK_L/STICK_R payload,
+sensitivity, auto-center, analog threshold settings, and normal versus Response Curve stick type.
+
 Additional files:
 
 - `app/src/main/java/com/example/simplecontroller/model/TouchAimManualProfile.kt`
 - `app/src/main/java/com/example/simplecontroller/model/ButtonAimProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/model/StickDirectionalProfile.kt`
 - `app/src/main/java/com/example/simplecontroller/model/ButtonAimPayloadPolicy.kt`
 - `app/src/main/java/com/example/simplecontroller/io/ControlSettingsProfileStores.kt`
 
@@ -934,7 +941,7 @@ Responsibilities:
 - edits stick/touchpad fields: sensitivity and auto-center
 - edits touchpad fields: hold-left-while-touch, toggle click-lock, double-tap click-lock
 - keeps touchpad click modes mutually exclusive
-- edits stick fields: directional mode, Stick+ mode, directional commands, boost thresholds, super boost thresholds, and command payloads
+- edits stick fields: directional mode, Stick+ mode, directional commands, boost thresholds, super boost thresholds, command payloads, and reusable directional profiles
 - duplicates or deletes controls from inside the dialog
 - saves values back to the `Control` model and refreshes the rendered `ControlView`
 
