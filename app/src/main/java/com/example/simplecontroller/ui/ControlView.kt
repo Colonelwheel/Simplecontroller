@@ -241,7 +241,11 @@ class ControlView(
             TouchAimHandler(
                 model = model,
                 onStateChanged = { invalidate() },
-                controlSize = { width.toFloat() to height.toFloat() }
+                controlSize = { width.toFloat() to height.toFloat() },
+                payloadExecutor = uiHelper.createButtonAimPayloadExecutor(),
+                onPayloadError = { reason ->
+                    Toast.makeText(context, "TouchAim: $reason", Toast.LENGTH_SHORT).show()
+                }
             )
         } else {
             null
@@ -376,7 +380,8 @@ class ControlView(
 
     private fun drawTouchAim(canvas: Canvas) {
         val level = touchAimHandler?.currentLevel ?: TouchContactLevel.AIM_ONLY
-        val levelColor = when (level) {
+        val isTwoStateShooting = touchAimHandler?.isTwoStateShooting == true
+        val levelColor = if (isTwoStateShooting) Color.rgb(218, 73, 73) else when (level) {
             TouchContactLevel.AIM_ONLY -> Color.rgb(47, 126, 150)
             TouchContactLevel.LOW -> Color.rgb(54, 156, 112)
             TouchContactLevel.MEDIUM -> Color.rgb(232, 169, 52)
@@ -405,7 +410,8 @@ class ControlView(
         paint.typeface = android.graphics.Typeface.DEFAULT_BOLD
         paint.textSize = (min(width, height) * 0.09f).coerceIn(20f, 42f)
         val score = touchAimHandler?.currentScore ?: 0f
-        canvas.drawText("${level.displayName}  ${"%.2f".format(score)}", cx, height - 14f, paint)
+        val stateLabel = if (isTwoStateShooting) "SHOOT" else level.displayName
+        canvas.drawText("$stateLabel  ${"%.2f".format(score)}", cx, height - 14f, paint)
         paint.textAlign = Paint.Align.LEFT
         paint.typeface = android.graphics.Typeface.DEFAULT
     }
@@ -1129,10 +1135,12 @@ class ControlView(
         // Reconcile the old runtime payload/config before the dialog mutates the model.
         releaseAutoTap()
         releaseButtonAim()
+        releaseTouchAim()
         PropertySheetBuilder(context, model) {
             // After properties are updated:
             releaseAutoTap()
             releaseButtonAim()
+            releaseTouchAim()
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.width = model.w.toInt()
             lp.height = model.h.toInt()

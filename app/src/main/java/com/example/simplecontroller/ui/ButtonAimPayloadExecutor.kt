@@ -130,6 +130,15 @@ class ButtonAimPayloadExecutor(
             ?.reason
     }
 
+    /** TouchAim states must be fully reversible, so every token must own a releasable output. */
+    fun statePayloadValidationError(payload: String): String? {
+        if (payload.isBlank()) return null
+        val parsed = tokenize(payload).map(::parseToken)
+        parsed.filterIsInstance<ParsedToken.Invalid>().firstOrNull()?.let { return it.reason }
+        return if (parsed.all { it is ParsedToken.Output }) null else
+            "TouchAim Aim/Shoot payloads may use only releasable Xbox, trigger, mouse-button, keyboard, or stick-macro outputs."
+    }
+
     fun activate(
         owner: ButtonAimPayloadOwner,
         payload: String,

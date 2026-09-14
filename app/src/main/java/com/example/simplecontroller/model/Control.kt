@@ -9,6 +9,16 @@ enum class ControlType { BUTTON, STICK, CURVED_STICK, TOUCHPAD, TOUCH_AIM, RECEN
 enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
 
 @Serializable
+enum class TouchAimMode { MANUAL_THREE_STAGE, MANUAL_TWO_STATE, CALIBRATED_TWO_STATE }
+
+@Serializable
+enum class TouchAimShootBehavior {
+    HOLD_WHILE_ABOVE,
+    PRESS_ON_ENTER,
+    PRESS_ON_RETURN_TO_AIM
+}
+
+@Serializable
 enum class TouchStageAction { PRESS, HOLD }
 
 @Serializable
@@ -175,7 +185,27 @@ data class Control(
     var touchKeepLowerHolds: Boolean = true,
     var touchStickFullSpeed: Float = 900f,
     var touchInvertY: Boolean = false,
-    var touchUseResponseCurve: Boolean = false
+    var touchUseResponseCurve: Boolean = false,
+
+    /* Touch Aim two-state modes (opt-in; old layouts remain manual three-stage) */
+    var touchAimMode: TouchAimMode = TouchAimMode.MANUAL_THREE_STAGE,
+    var touchAimAppliedCalibrationId: String = "",
+    var touchAimAppliedCalibrationName: String = "",
+    var touchAimSensorTransforms: List<TouchAimSensorTransform> = emptyList(),
+    var touchAimAimPayload: String = "",
+    var touchAimShootPayload: String = "RT:1.0",
+    var touchAimKeepAimPayloadWhileShooting: Boolean = true,
+    var touchAimShootSensitivity: Float = 1f,
+    var touchAimShootBehavior: TouchAimShootBehavior =
+        TouchAimShootBehavior.HOLD_WHILE_ABOVE,
+    var touchAimManualThresholdsInitialized: Boolean = false,
+    var touchAimManualShootOnThreshold: Float = 5.2f,
+    var touchAimManualShootOffThreshold: Float = 4.95f,
+    var touchAimShootOnThreshold: Float = 1f,
+    var touchAimShootOffThreshold: Float = 0.75f,
+    var touchAimTwoStateSmoothing: Float = 0.35f,
+    var touchAimEnterShootConfirmationMs: Long = 90L,
+    var touchAimReturnToAimConfirmationMs: Long = 120L
 )
 
 /* helper when we auto-create new controls */

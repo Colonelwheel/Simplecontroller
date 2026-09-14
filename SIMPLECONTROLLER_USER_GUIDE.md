@@ -1,8 +1,8 @@
 # SimpleController User Guide
 
-> **Guide version:** September 12, 2026
+> **Guide version:** September 13, 2026
 >
-> **Applies to:** the current feature build on `codex/receiver-build-folder-backup` (`6a03869`)
+> **Applies to:** the current TouchAim calibration feature build on `codex/receiver-build-folder-backup`
 >
 > **Platform:** Android 7.0 or newer and Windows 10/11
 
@@ -396,6 +396,86 @@ Touch Aim is an experimental one-finger aiming control. It can move the mouse, r
 One possible idea is normal aim at Low, `LT:1.0` aim-down-sights at Medium, and `RT:1.0` fire at High. That is only an example; finger size readings differ greatly by phone, screen protector, finger angle, and movement.
 
 The Galaxy S22 does not provide useful pressure values for this purpose, so Touch Aim uses touch geometry rather than pressure. Geometry still overlaps between stages and can shift while the finger moves. Treat this as an experimental feature, tune it slowly, and keep a Release All Button available while testing.
+
+### Calibrated two-state Aim / Shoot mode
+
+Edit a Touch Aim control and tap **Calibrate TouchAim** to calibrate only these two intended states:
+
+1. **AIM:** touch and move the way you naturally aim.
+2. **SHOOT:** keep aiming while using your intended shooting finger posture.
+
+The wizard records each state twice. Every recording starts only after you press **Start**, uses an
+adjustable preparation countdown (10 seconds by default), and records for 9 seconds by default.
+Begin with a steady natural touch. Halfway through, a visual and vibration cue asks you to move
+naturally. This moving portion is important because Size, TouchMajor, and TouchMinor can drop while
+your finger moves.
+
+Calibration and live validation use the outlined Touch Aim area at its actual screen position. No
+gamepad, mouse, or keyboard payload is sent while the wizard is open. After each pass, choose
+**Retake**, **Continue**, or **Cancel**. The result evaluates Size, TouchMajor, TouchMinor, and useful
+normalized combinations using the repeated passes separately. It reports Good, Borderline, or
+Unreliable, estimated false and missed activations, and whether movement reduced reliability.
+The moving half must include detected finger travel; an interrupted pass or a pass without enough
+actual movement must be retaken. The detector is checked with the same smoothing, hysteresis, and
+confirmation timing used during normal TouchAim operation.
+
+If the analyzer finds a consistent sensor direction but still rates the result **Unreliable**, it
+shows its experimental best-guess thresholds. You may complete live validation, explicitly apply
+that best guess, and then edit every value in Touch Aim properties. This is a starting point, not a
+claim that the calibration is reliable. If no meaningful sensor direction exists at all, the wizard
+still refuses to invent thresholds; retake it or use Manual two-state.
+
+Two-state settings include:
+
+- Mouse, Right stick, or Left stick aim output;
+- an optional Aim-state payload such as `LT:1.0` or `MOUSE_RIGHT_DOWN`;
+- a configurable Shoot payload such as `RT:1.0` or `MOUSE_LEFT_DOWN`;
+- whether the Aim payload stays held while shooting;
+- normal Aim sensitivity and a separate **Shoot aim sensitivity** for finer control after Shoot is
+  confirmed;
+- separate Shoot-on and Shoot-off thresholds, smoothing, and confirmation times.
+
+The property sheet hides settings that do not belong to the selected mode. Manual three-stage shows
+the raw sensor and Low/Medium/High sections; Manual two-state shows the raw sensor and AIM/SHOOT
+sections; Calibrated two-state shows the normalized AIM/SHOOT section. All modes retain both stick
+aiming styles: leave **Response curve** off for Linear, or turn it on for Response curve.
+
+The gap between Shoot ON and Shoot OFF is **hysteresis**. For example, with ON `1.20` and OFF
+`0.90`, Shoot starts above `1.20` but does not return to Aim until the score falls below `0.90`.
+This prevents small fluctuations from rapidly firing and releasing. Enter and return confirmation
+times are separate: they specify how many milliseconds the score must remain beyond the relevant
+threshold before the state changes.
+
+Aim/Shoot state payloads must be fully releasable. Xbox buttons, triggers, mouse buttons, keyboard
+keys, and stick-direction macros are supported; one-way actions such as Release All, camera-follow
+changes, scroll-mode toggles, and raw edge commands are rejected for these state payloads.
+
+The three Shoot activation choices are:
+
+- **Hold while above threshold:** hold Shoot while the contact remains in Shoot.
+- **Press when entering Shoot:** send one finite press after entering Shoot is confirmed.
+- **Press when returning to Aim:** entering Shoot only arms the action. Relax the same finger below
+  Shoot-off and keep it there for the return confirmation time to send one finite press. Completely
+  lifting the finger cancels the armed action and never fires it.
+
+Use **Save changes, then manage calibrations** to save the open property form before applying,
+renaming, duplicating, deleting, or re-running named
+profiles such as “Bottom of screen thresholds” or “Reclined position.” Profiles record device,
+screen, control-position, sensor-normalization, threshold, timing, reliability, and compact repeated
+pass information. Applying a profile copies its settings into that one control; renaming or deleting
+the saved profile does not silently change the working control.
+When loading a profile, choose **Calibration only** to retain the control's current output,
+sensitivities, payloads, and Shoot behavior, or explicitly choose **Apply all saved settings**.
+
+The original manual Low/Medium/High three-stage mode remains available in the Touch Aim properties.
+There is also an explicit **Manual two-state** mode. It averages the checked Size, TouchMajor, and
+TouchMinor values (after the Size multiplier), then uses its own editable raw-score ON/OFF
+thresholds plus the two-state smoothing, confirmation times, payloads, and separate Shoot
+sensitivity. Its thresholds are stored separately from calibrated thresholds because the two score
+scales are different. The wizard does not claim
+to calibrate three states because it does not record a third intended posture.
+On first use in an older layout, Manual two-state starts from that control's existing High threshold
+and High-minus-hysteresis rather than imposing unrelated raw-score defaults.
 
 ### Touch Sensor Test
 

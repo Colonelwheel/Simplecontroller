@@ -6,17 +6,22 @@ This is a parking lot for potential future work, not an implementation order or 
 
 ### TouchAim calibration wizard
 
-- [ ] Replace threshold guesswork with a guided calibration flow.
-- [ ] Collect repeated Light, Medium, and Firm samples while both stationary and moving.
-- [ ] Allow a longer settling period and multiple cycles per level.
-- [ ] Calculate useful statistics such as median, spread, and P10/P50/P90 values.
-- [ ] Evaluate Size, TouchMajor, TouchMinor, and combined contact-score candidates.
-- [ ] Report overlap and estimated misclassification instead of claiming unreliable levels are distinct.
-- [ ] Recommend smoothing, ON thresholds, OFF thresholds/hysteresis, and confirmation timing.
-- [ ] Offer a live validation pass before saving the calibration.
-- [ ] If three levels are unreliable, recommend a safer two-level or one-secondary-action setup.
-- [ ] Store calibration per device and optionally per layout/control.
-- [ ] Preserve manual tuning after calibration.
+- [x] Replace two-state threshold guesswork with a guided calibration flow.
+- [x] Collect two separate Aim and two separate Aim + Shoot passes, with still and moving samples.
+- [x] Use adjustable preparation and recording time plus a mid-recording movement cue.
+- [x] Calculate robust pass summaries and P10/P50/P90 values.
+- [x] Evaluate Size, TouchMajor, TouchMinor, and normalized combinations.
+- [x] Validate by whole repeated pass and report estimated false/missed activations.
+- [x] Recommend smoothing, separate ON/OFF thresholds, and confirmation timing; clearly gate unreliable best guesses behind validation and an explicit warning.
+- [x] Offer an output-suppressed live validation pass before applying the calibration.
+- [x] Store reusable named, position-specific profiles and copy an applied snapshot into the control.
+- [x] Preserve the existing manual three-stage TouchAim mode and its settings.
+- [x] Add an explicit manual two-state Aim/Shoot mode using editable raw sensor scoring.
+- [x] Hide mode-specific TouchAim settings that do not apply to the selected mode.
+
+The implemented first wizard deliberately records only two intended states: **Aim** and **Aim +
+Shoot**. It does not claim that three contact states are calibrated. Manual Low/Medium/High
+TouchAim remains available for advanced tuning.
 
 Likely touchpoints: `TouchDiagnosticActivity.kt`, `TouchAimHandler.kt`, `Control.kt`, `PropertySheetBuilder.kt`, and focused JVM/instrumentation tests.
 

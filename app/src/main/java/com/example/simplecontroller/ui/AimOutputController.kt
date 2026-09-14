@@ -147,6 +147,8 @@ class AimOutputSession(
 
         val stickName = activeConfig.output.stickName()
         if (stickName != null) {
+            lastX = x
+            lastY = y
             if (ownsStick) sendStick(activeConfig, stickName, x, y)
             return true
         }
@@ -193,6 +195,16 @@ class AimOutputSession(
     }
 
     fun isActive(): Boolean = sessionActive
+
+    /** Change only the response strength while preserving pointer ownership and aim continuity. */
+    fun updateSensitivity(sensitivity: Float) {
+        val updated = config?.copy(sensitivity = sensitivity.coerceAtLeast(0f)) ?: return
+        config = updated
+        val stickName = updated.output.stickName()
+        if (sessionActive && ownsStick && stickName != null) {
+            sendStick(updated, stickName, lastX, lastY)
+        }
+    }
 
     private fun sendStick(activeConfig: AimOutputConfig, stickName: String, x: Float, y: Float) {
         val (rawX, rawY) = when (activeConfig.originMode) {

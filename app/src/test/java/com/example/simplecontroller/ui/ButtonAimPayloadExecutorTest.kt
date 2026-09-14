@@ -7,6 +7,16 @@ import org.junit.Test
 
 class ButtonAimPayloadExecutorTest {
     @Test
+    fun touchAimStatePayloadPolicy_rejectsIrreversibleActions() {
+        val fixture = Fixture()
+        assertNull(fixture.executor.statePayloadValidationError("X360A,RT:1.0,LS:R50"))
+        assertTrue(fixture.executor.statePayloadValidationError("CAMERA_FOLLOW:1") != null)
+        assertTrue(fixture.executor.statePayloadValidationError("SCROLL_MODE_TOGGLE") != null)
+        assertTrue(fixture.executor.statePayloadValidationError("RELEASE_ALL") != null)
+        assertTrue(fixture.executor.statePayloadValidationError("MOUSE_RESET") != null)
+    }
+
+    @Test
     fun booleanOverlap_releasesOnlyAfterLastLease() {
         val fixture = Fixture()
         val base = fixture.activate(ButtonAimPayloadOwner.BASE, "X360A").lease

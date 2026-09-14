@@ -15,7 +15,12 @@ import com.example.simplecontroller.model.ButtonAimMouseProfile
 import com.example.simplecontroller.model.ButtonAimPayloadTiming
 import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.TouchAimOutput
+import com.example.simplecontroller.model.TouchAimMode
+import com.example.simplecontroller.model.TouchAimShootBehavior
 import com.example.simplecontroller.model.TouchStageAction
+import com.example.simplecontroller.model.applyTo
+import com.example.simplecontroller.model.isApplicable
+import com.example.simplecontroller.io.TouchAimCalibrationStore
 import kotlin.math.roundToInt
 import kotlin.math.max
 import androidx.core.content.ContextCompat
@@ -59,6 +64,11 @@ class PropertySheetBuilder(
     )
 
     private data class TouchAimComponents(
+        val mode: Spinner,
+        val currentCalibration: TextView,
+        val calibrateButton: Button,
+        val savedCalibrationsButton: Button,
+        val rerunButton: Button,
         val aimOutput: Spinner,
         val useSize: CheckBox,
         val useMajor: CheckBox,
@@ -78,7 +88,19 @@ class PropertySheetBuilder(
         val keepLowerHolds: CheckBox,
         val stickFullSpeed: EditText,
         val invertY: CheckBox,
-        val useResponseCurve: CheckBox
+        val useResponseCurve: CheckBox,
+        val aimPayload: EditText,
+        val shootPayload: EditText,
+        val keepAimPayload: CheckBox,
+        val shootSensitivity: EditText,
+        val shootBehavior: Spinner,
+        val shootOnThreshold: EditText,
+        val shootOffThreshold: EditText,
+        val manualShootOnThreshold: EditText,
+        val manualShootOffThreshold: EditText,
+        val twoStateSmoothing: EditText,
+        val enterConfirmationMs: EditText,
+        val returnConfirmationMs: EditText
     )
 
     private data class ButtonAimComponents(
@@ -170,6 +192,33 @@ class PropertySheetBuilder(
 
         alertDialog.window?.setBackgroundDrawableResource(R.color.dark_surface)
         alertDialog.show()
+
+        components.touchAim?.let { fields ->
+            fields.calibrateButton.setOnClickListener {
+                saveProperties(components)
+                alertDialog.dismiss()
+                (context as? MainActivity)?.startTouchAimCalibration(model.id)
+            }
+            fields.rerunButton.setOnClickListener {
+                val profile = model.touchAimAppliedCalibrationId.takeIf { it.isNotBlank() }
+                    ?.let { TouchAimCalibrationStore.get(context, it) }
+                if (profile == null) {
+                    Toast.makeText(
+                        context,
+                        "The saved calibration is unavailable; this control's copied settings are retained.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return@setOnClickListener
+                }
+                saveProperties(components)
+                alertDialog.dismiss()
+                (context as? MainActivity)?.startTouchAimCalibration(model.id, profile)
+            }
+            fields.savedCalibrationsButton.setOnClickListener {
+                saveProperties(components)
+                showSavedCalibrationList(alertDialog)
+            }
+        }
 
         // Style dialog buttons
         alertDialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
@@ -740,6 +789,48 @@ class PropertySheetBuilder(
     }
 
     private fun addTouchAimUI(container: LinearLayout): TouchAimComponents {
+        addSectionTitle(container, "TouchAim mode and calibration")
+        val mode = addChoice(
+            container,
+            "Mode",
+            listOf(
+                "Manual three-stage",
+                "Manual two-state: Aim / Shoot",
+                "Calibrated two-state: Aim / Shoot"
+            ),
+            when (model.touchAimMode) {
+                TouchAimMode.MANUAL_THREE_STAGE -> 0
+                TouchAimMode.MANUAL_TWO_STATE -> 1
+                TouchAimMode.CALIBRATED_TWO_STATE -> 2
+            }
+        )
+        val storedAppliedProfile = model.touchAimAppliedCalibrationId.takeIf { it.isNotBlank() }
+            ?.let { TouchAimCalibrationStore.get(context, it) }
+        val currentCalibrationLabel = when {
+            model.touchAimMode == TouchAimMode.MANUAL_THREE_STAGE -> "Manual three-stage settings"
+            model.touchAimMode == TouchAimMode.MANUAL_TWO_STATE -> "Manual two-state settings"
+            storedAppliedProfile != null && model.matchesAppliedCalibration(storedAppliedProfile) -> storedAppliedProfile.name
+            storedAppliedProfile != null -> "Older or customized snapshot of ${storedAppliedProfile.name}"
+            model.touchAimAppliedCalibrationId.isNotBlank() -> "Saved profile unavailable; copied calibration retained"
+            else -> "Custom two-state settings"
+        }
+        val currentCalibration = TextView(context).apply {
+            text = "Currently applied: $currentCalibrationLabel"
+            textSize = 16f
+            setTextColor(ThemeManager.getTextColor(context))
+            setPadding(0, 12, 0, 8)
+            container.addView(this)
+        }
+        val calibrateButton = largeActionButton(container, "Calibrate TouchAim")
+        val savedCalibrationsButton = largeActionButton(
+            container,
+            "Save changes, then manage calibrations"
+        )
+        val rerunButton = largeActionButton(container, "Re-run current calibration").apply {
+            isEnabled = model.touchAimMode == TouchAimMode.CALIBRATED_TWO_STATE &&
+                model.touchAimAppliedCalibrationId.isNotBlank()
+        }
+
         addSectionTitle(container, "Aim")
         val aimOutput = addChoice(
             container,
@@ -754,7 +845,7 @@ class PropertySheetBuilder(
         val invertY = addCheckBox(container, "Invert Y", model.touchInvertY)
         val useResponseCurve = addCheckBox(
             container,
-            "Response-curve sensitivity (stick output only)",
+            "Stick aiming style: Response curve (off = Linear)",
             model.touchUseResponseCurve
         )
         val stickFullSpeed = addDecimalField(
@@ -763,37 +854,171 @@ class PropertySheetBuilder(
             model.touchStickFullSpeed
         )
 
-        addSectionTitle(container, "Contact score")
-        val useSize = addCheckBox(container, "Use Size", model.touchUseSize)
-        val useMajor = addCheckBox(container, "Use TouchMajor", model.touchUseMajor)
-        val useMinor = addCheckBox(container, "Use TouchMinor", model.touchUseMinor)
-        val sizeScale = addDecimalField(container, "Size multiplier", model.touchSizeScale)
-        val smoothing = addDecimalField(container, "Score smoothing (0.05-1.0)", model.touchScoreSmoothing)
+        val twoStateContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            container.addView(this)
+        }
+        addSectionTitle(twoStateContainer, "Two-state Aim / Shoot settings")
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Aim uses the normal Sensitivity setting above. Shoot aim sensitivity applies only after SHOOT is confirmed; lower values provide finer control. Manual two-state uses the manual sensor score; calibrated mode uses the wizard's normalized score."
+            setTextColor(ThemeManager.getTextColor(context))
+        })
+        val aimPayload = addCommandField(twoStateContainer, "Optional Aim-state payload", model.touchAimAimPayload)
+        val shootPayload = addCommandField(twoStateContainer, "Shoot-state payload", model.touchAimShootPayload)
+        val keepAimPayload = addCheckBox(
+            twoStateContainer,
+            "Keep Aim payload active while shooting",
+            model.touchAimKeepAimPayloadWhileShooting
+        )
+        val shootSensitivity = addDecimalField(
+            twoStateContainer,
+            "Shoot aim sensitivity",
+            model.touchAimShootSensitivity
+        )
+        val shootBehavior = addChoice(
+            twoStateContainer,
+            "Shoot activation",
+            listOf(
+                "Hold while above threshold",
+                "Press when entering Shoot",
+                "Press when returning to Aim"
+            ),
+            when (model.touchAimShootBehavior) {
+                TouchAimShootBehavior.HOLD_WHILE_ABOVE -> 0
+                TouchAimShootBehavior.PRESS_ON_ENTER -> 1
+                TouchAimShootBehavior.PRESS_ON_RETURN_TO_AIM -> 2
+            }
+        )
+        val calibratedThresholdContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            twoStateContainer.addView(this)
+        }
+        val shootOnThreshold = addDecimalField(
+            calibratedThresholdContainer,
+            "Calibrated Shoot ON threshold",
+            model.touchAimShootOnThreshold
+        )
+        val shootOffThreshold = addDecimalField(
+            calibratedThresholdContainer,
+            "Calibrated Shoot OFF threshold",
+            model.touchAimShootOffThreshold
+        )
+        val twoStateSmoothing = addDecimalField(
+            twoStateContainer,
+            "Two-state smoothing (0.05-1.0)",
+            model.touchAimTwoStateSmoothing
+        )
+        val enterConfirmationMs = addTextField(
+            twoStateContainer,
+            model.touchAimEnterShootConfirmationMs.toString(),
+            "Enter Shoot confirmation (ms)",
+            InputType.TYPE_CLASS_NUMBER
+        )
+        val returnConfirmationMs = addTextField(
+            twoStateContainer,
+            model.touchAimReturnToAimConfirmationMs.toString(),
+            "Return to Aim confirmation (ms)",
+            InputType.TYPE_CLASS_NUMBER
+        )
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Hysteresis is the gap between Shoot ON and OFF: it prevents flickering between states. Enter/return confirmation is how long, in milliseconds, the score must remain past each threshold before the state changes."
+            setTextColor(ThemeManager.getTextColor(context))
+        })
 
-        addSectionTitle(container, "Thresholds")
-        val lowThreshold = addDecimalField(container, "Low ON", model.touchLowThreshold)
-        val mediumThreshold = addDecimalField(container, "Medium ON", model.touchMediumThreshold)
-        val highThreshold = addDecimalField(container, "High ON", model.touchHighThreshold)
-        val hysteresis = addDecimalField(container, "Hysteresis", model.touchHysteresis)
+        val manualSensorContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            container.addView(this)
+        }
+        addSectionTitle(manualSensorContainer, "Manual sensor score")
+        manualSensorContainer.addView(TextView(context).apply {
+            text = "Used by both manual modes. Size is multiplied first, then the checked sensor values are averaged. Manual two-state uses its ON/OFF values below; manual three-stage has its own smoothing and Low/Medium/High settings."
+            setTextColor(ThemeManager.getTextColor(context))
+        })
+        val useSize = addCheckBox(manualSensorContainer, "Use Size", model.touchUseSize)
+        val useMajor = addCheckBox(manualSensorContainer, "Use TouchMajor", model.touchUseMajor)
+        val useMinor = addCheckBox(manualSensorContainer, "Use TouchMinor", model.touchUseMinor)
+        val sizeScale = addDecimalField(manualSensorContainer, "Size multiplier", model.touchSizeScale)
+        val initialManualShootOn = if (model.touchAimManualThresholdsInitialized) {
+            model.touchAimManualShootOnThreshold
+        } else {
+            model.touchHighThreshold
+        }
+        val initialManualShootOff = if (model.touchAimManualThresholdsInitialized) {
+            model.touchAimManualShootOffThreshold
+        } else {
+            (model.touchHighThreshold - model.touchHysteresis).coerceAtLeast(0f)
+        }
+        val manualTwoThresholdContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            manualSensorContainer.addView(this)
+        }
+        val manualShootOnThreshold = addDecimalField(
+            manualTwoThresholdContainer,
+            "Manual two-state Shoot ON threshold",
+            initialManualShootOn
+        )
+        val manualShootOffThreshold = addDecimalField(
+            manualTwoThresholdContainer,
+            "Manual two-state Shoot OFF threshold",
+            initialManualShootOff
+        )
+        val threeStageContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            container.addView(this)
+        }
+        addSectionTitle(threeStageContainer, "Manual three-stage settings")
+        val smoothing = addDecimalField(threeStageContainer, "Score smoothing (0.05-1.0)", model.touchScoreSmoothing)
+
+        addSectionTitle(threeStageContainer, "Thresholds")
+        val lowThreshold = addDecimalField(threeStageContainer, "Low ON", model.touchLowThreshold)
+        val mediumThreshold = addDecimalField(threeStageContainer, "Medium ON", model.touchMediumThreshold)
+        val highThreshold = addDecimalField(threeStageContainer, "High ON", model.touchHighThreshold)
+        val hysteresis = addDecimalField(threeStageContainer, "Hysteresis", model.touchHysteresis)
         val keepLowerHolds = addCheckBox(
-            container,
+            threeStageContainer,
             "Keep lower holds at higher levels",
             model.touchKeepLowerHolds
         )
 
-        addSectionTitle(container, "Low level")
-        val lowPayload = addCommandField(container, "Commands", model.touchLowPayload)
-        val lowAction = addActionChoice(container, model.touchLowAction)
+        addSectionTitle(threeStageContainer, "Low level")
+        val lowPayload = addCommandField(threeStageContainer, "Commands", model.touchLowPayload)
+        val lowAction = addActionChoice(threeStageContainer, model.touchLowAction)
 
-        addSectionTitle(container, "Medium level")
-        val mediumPayload = addCommandField(container, "Commands", model.touchMediumPayload)
-        val mediumAction = addActionChoice(container, model.touchMediumAction)
+        addSectionTitle(threeStageContainer, "Medium level")
+        val mediumPayload = addCommandField(threeStageContainer, "Commands", model.touchMediumPayload)
+        val mediumAction = addActionChoice(threeStageContainer, model.touchMediumAction)
 
-        addSectionTitle(container, "High level")
-        val highPayload = addCommandField(container, "Commands", model.touchHighPayload)
-        val highAction = addActionChoice(container, model.touchHighAction)
+        addSectionTitle(threeStageContainer, "High level")
+        val highPayload = addCommandField(threeStageContainer, "Commands", model.touchHighPayload)
+        val highAction = addActionChoice(threeStageContainer, model.touchHighAction)
+
+        fun updateModeVisibility(position: Int) {
+            twoStateContainer.visibility = if (position == 0) View.GONE else View.VISIBLE
+            manualSensorContainer.visibility = if (position == 2) View.GONE else View.VISIBLE
+            manualTwoThresholdContainer.visibility = if (position == 1) View.VISIBLE else View.GONE
+            calibratedThresholdContainer.visibility = if (position == 2) View.VISIBLE else View.GONE
+            threeStageContainer.visibility = if (position == 0) View.VISIBLE else View.GONE
+        }
+        mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long
+            ) {
+                updateModeVisibility(position)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        updateModeVisibility(mode.selectedItemPosition)
 
         return TouchAimComponents(
+            mode = mode,
+            currentCalibration = currentCalibration,
+            calibrateButton = calibrateButton,
+            savedCalibrationsButton = savedCalibrationsButton,
+            rerunButton = rerunButton,
             aimOutput = aimOutput,
             useSize = useSize,
             useMajor = useMajor,
@@ -813,8 +1038,231 @@ class PropertySheetBuilder(
             keepLowerHolds = keepLowerHolds,
             stickFullSpeed = stickFullSpeed,
             invertY = invertY,
-            useResponseCurve = useResponseCurve
+            useResponseCurve = useResponseCurve,
+            aimPayload = aimPayload,
+            shootPayload = shootPayload,
+            keepAimPayload = keepAimPayload,
+            shootSensitivity = shootSensitivity,
+            shootBehavior = shootBehavior,
+            shootOnThreshold = shootOnThreshold,
+            shootOffThreshold = shootOffThreshold,
+            manualShootOnThreshold = manualShootOnThreshold,
+            manualShootOffThreshold = manualShootOffThreshold,
+            twoStateSmoothing = twoStateSmoothing,
+            enterConfirmationMs = enterConfirmationMs,
+            returnConfirmationMs = returnConfirmationMs
         )
+    }
+
+    private fun largeActionButton(container: LinearLayout, label: String): Button = Button(context).apply {
+        text = label
+        textSize = 18f
+        minHeight = (58 * context.resources.displayMetrics.density).roundToInt()
+        isAllCaps = false
+        container.addView(
+            this,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = 8 }
+        )
+    }
+
+    private fun showSavedCalibrationList(propertyDialog: AlertDialog) {
+        val profiles = TouchAimCalibrationStore.list(context)
+        if (profiles.isEmpty()) {
+            AlertDialog.Builder(context)
+                .setTitle("Saved TouchAim calibrations")
+                .setMessage("No calibrations have been saved yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val labels = profiles.map { profile ->
+            val current = if (model.touchAimMode == TouchAimMode.CALIBRATED_TWO_STATE &&
+                profile.id == model.touchAimAppliedCalibrationId &&
+                model.matchesAppliedCalibration(profile)) " — APPLIED" else ""
+            "${profile.name} — ${profile.quality.name.lowercase().replaceFirstChar { it.uppercase() }}$current"
+        }
+        AlertDialog.Builder(context)
+            .setTitle("Saved TouchAim calibrations")
+            .setItems(labels.toTypedArray()) { _, index ->
+                showCalibrationActions(profiles[index], propertyDialog)
+            }
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun showCalibrationActions(
+        profile: com.example.simplecontroller.model.TouchAimCalibrationProfile,
+        propertyDialog: AlertDialog
+    ) {
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        fun action(label: String, block: () -> Unit) {
+            largeActionButton(actions, label).setOnClickListener { block() }
+        }
+        var actionDialog: AlertDialog? = null
+        val applyButton = largeActionButton(actions, "Apply to this TouchAim")
+        val allowUnreliableBestGuess =
+            profile.quality == com.example.simplecontroller.model.TouchAimCalibrationQuality.UNRELIABLE
+        applyButton.isEnabled = profile.isApplicable(allowUnreliableBestGuess)
+        applyButton.setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle("Apply ${profile.name}?")
+                .setMessage(
+                    (when (profile.quality) {
+                        com.example.simplecontroller.model.TouchAimCalibrationQuality.BORDERLINE ->
+                            "Warning: this profile was rated Borderline. Validate it cautiously for accidental firing.\n\n"
+                        com.example.simplecontroller.model.TouchAimCalibrationQuality.UNRELIABLE ->
+                            "Warning: this is an experimental best guess rated Unreliable. Apply it only as a starting point, then edit the thresholds and smoothing cautiously.\n\n"
+                        else -> ""
+                    }) +
+                        "Calibration only keeps this control's current Aim output, both sensitivities, payloads, and Shoot action. " +
+                        "Apply all also replaces those settings with the saved profile values."
+                )
+                .setPositiveButton("Calibration only") { _, _ ->
+                    if (applyCalibrationDetectionOnly(profile)) finishCalibrationApply(actionDialog, propertyDialog)
+                }
+                .setNeutralButton("Apply all saved settings") { _, _ ->
+                    if (profile.applyTo(model, allowUnreliableBestGuess)) {
+                        finishCalibrationApply(actionDialog, propertyDialog)
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        action("Re-run this calibration") {
+            actionDialog?.dismiss()
+            propertyDialog.dismiss()
+            (context as? MainActivity)?.startTouchAimCalibration(model.id, profile)
+        }
+        action("Rename") {
+            val input = EditText(context).apply { setText(profile.name); selectAll() }
+            AlertDialog.Builder(context)
+                .setTitle("Rename calibration")
+                .setView(input)
+                .setPositiveButton("Rename") { _, _ ->
+                    val result = TouchAimCalibrationStore.rename(
+                        context,
+                        profile.id,
+                        input.text.toString(),
+                        System.currentTimeMillis()
+                    )
+                    Toast.makeText(context, result.error ?: "Calibration renamed", Toast.LENGTH_LONG).show()
+                    if (result.succeeded && model.touchAimAppliedCalibrationId == profile.id) {
+                        model.touchAimAppliedCalibrationName = result.profile?.name.orEmpty()
+                        onPropertiesUpdated()
+                    }
+                    actionDialog?.dismiss()
+                    propertyDialog.dismiss()
+                    reopenPropertySheet()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        action("Duplicate") {
+            val input = EditText(context).apply {
+                setText("${profile.name} copy")
+                selectAll()
+            }
+            AlertDialog.Builder(context)
+                .setTitle("Duplicate calibration")
+                .setView(input)
+                .setPositiveButton("Duplicate") { _, _ ->
+                    val result = TouchAimCalibrationStore.duplicate(
+                        context,
+                        profile.id,
+                        input.text.toString(),
+                        System.currentTimeMillis()
+                    )
+                    Toast.makeText(context, result.error ?: "Calibration duplicated", Toast.LENGTH_LONG).show()
+                    actionDialog?.dismiss()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        action("Delete") {
+            AlertDialog.Builder(context)
+                .setTitle("Delete calibration?")
+                .setMessage("The TouchAim control keeps its copied settings. Only the reusable saved calibration is deleted.")
+                .setPositiveButton("Delete") { _, _ ->
+                    val deleted = TouchAimCalibrationStore.delete(context, profile.id)
+                    if (deleted && model.touchAimAppliedCalibrationId == profile.id) {
+                        model.touchAimAppliedCalibrationId = ""
+                        model.touchAimAppliedCalibrationName = ""
+                        onPropertiesUpdated()
+                    }
+                    Toast.makeText(
+                        context,
+                        if (deleted) "Calibration deleted; control settings retained" else "Could not delete calibration",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    actionDialog?.dismiss()
+                    propertyDialog.dismiss()
+                    reopenPropertySheet()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        actionDialog = AlertDialog.Builder(context)
+            .setTitle(profile.name)
+            .setMessage(
+                "${profile.quality.name.lowercase().replaceFirstChar { it.uppercase() }} — " +
+                    "false activations ${(profile.estimatedFalseActivationRate * 100).roundToInt()}%, " +
+                    "missed ${(profile.estimatedMissedActivationRate * 100).roundToInt()}%"
+            )
+            .setView(ScrollView(context).apply { addView(actions) })
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun finishCalibrationApply(actionDialog: AlertDialog?, propertyDialog: AlertDialog) {
+        onPropertiesUpdated()
+        actionDialog?.dismiss()
+        propertyDialog.dismiss()
+        reopenPropertySheet()
+    }
+
+    private fun applyCalibrationDetectionOnly(
+        profile: com.example.simplecontroller.model.TouchAimCalibrationProfile
+    ): Boolean {
+        val allowUnreliableBestGuess =
+            profile.quality == com.example.simplecontroller.model.TouchAimCalibrationQuality.UNRELIABLE
+        if (!profile.isApplicable(allowUnreliableBestGuess)) {
+            Toast.makeText(context, "This calibration is incomplete or invalid and cannot be applied.", Toast.LENGTH_LONG).show()
+            return false
+        }
+        model.touchAimMode = TouchAimMode.CALIBRATED_TWO_STATE
+        model.touchAimAppliedCalibrationId = profile.id
+        model.touchAimAppliedCalibrationName = profile.name
+        model.touchAimSensorTransforms = profile.sensors
+        model.touchAimTwoStateSmoothing = profile.smoothing
+        model.touchAimShootOnThreshold = profile.shootOnThreshold
+        model.touchAimShootOffThreshold = profile.shootOffThreshold
+        model.touchAimEnterShootConfirmationMs = profile.enterShootConfirmationMs
+        model.touchAimReturnToAimConfirmationMs = profile.returnToAimConfirmationMs
+        return true
+    }
+
+    private fun reopenPropertySheet() {
+        (context as? MainActivity)
+            ?.findViewById<FrameLayout>(R.id.canvas)
+            ?.children
+            ?.filterIsInstance<ControlView>()
+            ?.firstOrNull { it.model.id == model.id }
+            ?.post { reopenPropertySheetView() }
+    }
+
+    private fun reopenPropertySheetView() {
+        (context as? MainActivity)
+            ?.findViewById<FrameLayout>(R.id.canvas)
+            ?.children
+            ?.filterIsInstance<ControlView>()
+            ?.firstOrNull { it.model.id == model.id }
+            ?.showProps()
     }
 
     private fun addChoice(
@@ -1334,6 +1782,18 @@ class PropertySheetBuilder(
     }
 
     private fun saveTouchAimProperties(fields: TouchAimComponents) {
+        val requestedMode = when (fields.mode.selectedItemPosition) {
+            1 -> TouchAimMode.MANUAL_TWO_STATE
+            2 -> if (model.touchAimSensorTransforms.isNotEmpty()) {
+                TouchAimMode.CALIBRATED_TWO_STATE
+            } else {
+                TouchAimMode.MANUAL_THREE_STAGE
+            }
+            else -> TouchAimMode.MANUAL_THREE_STAGE
+        }
+        if (fields.mode.selectedItemPosition == 2 && model.touchAimSensorTransforms.isEmpty()) {
+            Toast.makeText(context, "No calibration is available, so the control stayed in Manual three-stage. Choose Manual two-state explicitly if that is what you want.", Toast.LENGTH_LONG).show()
+        }
         model.touchAimOutput = when (fields.aimOutput.selectedItemPosition) {
             1 -> TouchAimOutput.RIGHT_STICK
             2 -> TouchAimOutput.LEFT_STICK
@@ -1345,6 +1805,19 @@ class PropertySheetBuilder(
         model.touchSizeScale = fields.sizeScale.floatValue(model.touchSizeScale).coerceAtLeast(0f)
         model.touchScoreSmoothing = fields.smoothing.floatValue(model.touchScoreSmoothing)
             .coerceIn(0.05f, 1f)
+        val hasEffectiveManualSensor = model.touchUseMajor || model.touchUseMinor ||
+            (model.touchUseSize && model.touchSizeScale > 0f)
+        model.touchAimMode = if (requestedMode == TouchAimMode.MANUAL_TWO_STATE &&
+            !hasEffectiveManualSensor) {
+            Toast.makeText(
+                context,
+                "Manual two-state needs Major, Minor, or Size with a multiplier above zero. The control stayed in Manual three-stage.",
+                Toast.LENGTH_LONG
+            ).show()
+            TouchAimMode.MANUAL_THREE_STAGE
+        } else {
+            requestedMode
+        }
 
         val low = fields.lowThreshold.floatValue(model.touchLowThreshold).coerceAtLeast(0f)
         val medium = max(fields.mediumThreshold.floatValue(model.touchMediumThreshold), low + 0.01f)
@@ -1365,7 +1838,60 @@ class PropertySheetBuilder(
             .coerceAtLeast(1f)
         model.touchInvertY = fields.invertY.isChecked
         model.touchUseResponseCurve = fields.useResponseCurve.isChecked
+
+        model.touchAimAimPayload = fields.aimPayload.text.toString().trim()
+        model.touchAimShootPayload = fields.shootPayload.text.toString().trim()
+        model.touchAimKeepAimPayloadWhileShooting = fields.keepAimPayload.isChecked
+        model.touchAimShootSensitivity = fields.shootSensitivity
+            .floatValue(model.touchAimShootSensitivity)
+            .coerceIn(0f, 5f)
+        model.touchAimShootBehavior = when (fields.shootBehavior.selectedItemPosition) {
+            1 -> TouchAimShootBehavior.PRESS_ON_ENTER
+            2 -> TouchAimShootBehavior.PRESS_ON_RETURN_TO_AIM
+            else -> TouchAimShootBehavior.HOLD_WHILE_ABOVE
+        }
+        val shootOn = fields.shootOnThreshold.floatValue(model.touchAimShootOnThreshold)
+        val shootOff = fields.shootOffThreshold.floatValue(model.touchAimShootOffThreshold)
+        model.touchAimShootOnThreshold = shootOn
+        model.touchAimShootOffThreshold = shootOff.coerceAtMost(shootOn - 0.01f)
+        if (model.touchAimManualThresholdsInitialized ||
+            requestedMode == TouchAimMode.MANUAL_TWO_STATE) {
+            val manualShootOn = fields.manualShootOnThreshold
+                .floatValue(model.touchAimManualShootOnThreshold)
+                .coerceAtLeast(0.01f)
+            val manualShootOff = fields.manualShootOffThreshold
+                .floatValue(model.touchAimManualShootOffThreshold)
+                .coerceIn(0f, manualShootOn - 0.01f)
+            model.touchAimManualShootOnThreshold = manualShootOn
+            model.touchAimManualShootOffThreshold = manualShootOff
+            model.touchAimManualThresholdsInitialized = true
+        }
+        model.touchAimTwoStateSmoothing = fields.twoStateSmoothing
+            .floatValue(model.touchAimTwoStateSmoothing)
+            .coerceIn(0.05f, 1f)
+        model.touchAimEnterShootConfirmationMs = fields.enterConfirmationMs.text.toString()
+            .toLongOrNull()?.coerceIn(32L, 2000L) ?: model.touchAimEnterShootConfirmationMs
+        model.touchAimReturnToAimConfirmationMs = fields.returnConfirmationMs.text.toString()
+            .toLongOrNull()?.coerceIn(32L, 2000L) ?: model.touchAimReturnToAimConfirmationMs
+
+        val applied = model.touchAimAppliedCalibrationId.takeIf { it.isNotBlank() }
+            ?.let { TouchAimCalibrationStore.get(context, it) }
+        if (model.touchAimMode != TouchAimMode.CALIBRATED_TWO_STATE ||
+            applied == null || !model.matchesAppliedCalibration(applied)
+        ) {
+            model.touchAimAppliedCalibrationId = ""
+            model.touchAimAppliedCalibrationName = ""
+        }
     }
+
+    private fun Control.matchesAppliedCalibration(
+        profile: com.example.simplecontroller.model.TouchAimCalibrationProfile
+    ): Boolean = touchAimSensorTransforms == profile.sensors &&
+        touchAimTwoStateSmoothing == profile.smoothing &&
+        touchAimShootOnThreshold == profile.shootOnThreshold &&
+        touchAimShootOffThreshold == profile.shootOffThreshold &&
+        touchAimEnterShootConfirmationMs == profile.enterShootConfirmationMs &&
+        touchAimReturnToAimConfirmationMs == profile.returnToAimConfirmationMs
 
     private fun saveButtonAimProperties(fields: ButtonAimComponents) {
         model.buttonAimEnabled = fields.enabled.isChecked
@@ -1468,7 +1994,7 @@ class PropertySheetBuilder(
     }
 
     private fun EditText.floatValue(fallback: Float): Float =
-        text.toString().toFloatOrNull() ?: fallback
+        text.toString().toFloatOrNull()?.takeIf(Float::isFinite) ?: fallback
 
     private fun Spinner.selectedAction(): TouchStageAction =
         if (selectedItemPosition == 0) TouchStageAction.PRESS else TouchStageAction.HOLD

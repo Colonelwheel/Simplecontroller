@@ -2,6 +2,56 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-13 TouchAim two-state calibration wizard
+
+TouchAim retains its original manual `AIM_ONLY/LOW/MEDIUM/HIGH` behavior as the serialized default.
+Explicit opt-in manual and calibrated two-state modes add only `AIM/SHOOT`; neither is simulated
+with duplicate legacy thresholds. Manual two-state averages the enabled raw contact sensors, while
+calibrated mode applies saved per-sensor normalization. Their ON/OFF values are stored separately to
+prevent raw and normalized score scales from colliding. Both support an optional Aim payload, a configurable Shoot payload,
+Aim-payload carryover, three Shoot activation behaviors, independent ON/OFF thresholds, smoothing,
+confirmation timing, and a separate Shoot aim sensitivity for finer control after SHOOT is confirmed.
+
+`TouchAimCalibrationWizard` adds an output-suppressed full-canvas overlay while leaving an outlined
+capture target exactly over the current TouchAim rectangle. It records two separate passes for each
+intended state with a user-controlled countdown/duration and a mid-pass moving cue. Calibration and
+validation never enter `TouchAimHandler`, `AimOutputSession`, Swipe, or a payload executor. The
+central Release All path runs before the overlay is installed and after it is removed.
+The wizard verifies actual pointer travel after the movement cue, rejects interrupted passes, and
+requires an intentional Aim-to-Shoot-to-Aim cycle before live validation can be completed.
+
+`TouchAimCalibrationAnalyzer` is pure Kotlin. It evaluates all non-empty subsets of Size,
+TouchMajor, and TouchMinor after robust per-sensor normalization. Candidate thresholds are trained
+and validated against separate repeated passes. The scoring weights accidental Shoot activation
+conservatively and prefers a single sensor unless a normalized combination materially improves the
+held-out result. Held-out evaluation simulates the actual smoothing, hysteresis, confirmation timers,
+and stationary-contact deadlines. An unreliable candidate with a meaningful sensor direction can
+be applied only through an explicit warning after live validation and remains editable; a result
+with no viable direction exposes no applicable threshold.
+
+`TwoStateTouchAimStateMachine` is also pure Kotlin. A confirmed upward transition either holds
+Shoot, presses once on entry, or arms a press for a confirmed return to Aim. A complete finger lift
+is always a hard reset, not a return transition. All terminal cleanup clears the arm without firing.
+`TouchAimHandler` uses the existing `ButtonAimPayloadExecutor` lease ownership for both two-state
+modes and retains its previous parser/transition path for manual three-stage controls.
+Two-state payloads are restricted to lease-backed reversible outputs; raw edge actions, toggles, and
+Release All are rejected before a calibrated gesture can activate.
+
+Reusable profiles are versioned, named, UUID-addressed app-private JSON files. Applying a profile
+copies a frozen effective snapshot into `Control`, so later profile rename/delete does not silently
+alter the layout. Profiles include device/display/control geometry, selected sensor scales/weights,
+thresholds, timing, behavior/payload settings, reliability metrics, validation summary, and compact
+per-pass distributions plus bounded synchronized samples for later re-evaluation.
+
+Primary files:
+
+- `app/src/main/java/com/example/simplecontroller/model/TouchAimCalibration.kt`
+- `app/src/main/java/com/example/simplecontroller/io/TouchAimCalibrationStore.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/TouchAimCalibrationAnalyzer.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/TwoStateTouchAimStateMachine.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/TouchAimCalibrationWizard.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/TouchAimHandler.kt`
+
 ## 2026-09-12 Ordinary Button Toggle Auto-Tap
 
 Ordinary Button controls have an optional per-control `Toggle auto-tap` mode. The first tap starts

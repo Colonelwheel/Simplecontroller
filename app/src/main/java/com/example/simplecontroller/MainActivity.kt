@@ -22,6 +22,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
+import androidx.core.view.doOnNextLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -30,6 +31,7 @@ import com.example.simplecontroller.io.loadControls
 import com.example.simplecontroller.io.saveControls
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.TouchAimCalibrationProfile
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
@@ -37,6 +39,7 @@ import com.example.simplecontroller.ui.SwipeManager
 import com.example.simplecontroller.ui.ThemeManager
 import com.example.simplecontroller.ui.UIComponentBuilder
 import com.example.simplecontroller.ui.ReleaseAllCoordinator
+import com.example.simplecontroller.ui.TouchAimCalibrationWizard
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -85,6 +88,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- main canvas ---------- */
     private lateinit var canvas: FrameLayout
+    private var activeTouchAimCalibration: TouchAimCalibrationWizard? = null
+    private var touchAimCalibrationLaunchGeneration = 0
     
     /* ---------- layout monitoring ---------- */
     private var lastCanvasHeight = 0
@@ -192,8 +197,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         super.onPause()
         // Cancel timed button state that must not continue in the background. Global RELEASE_ALL
         // is intentionally reserved for an explicit control payload and is not sent on app pause.
+        cancelTouchAimCalibration("Calibration stopped because the app left the foreground.")
         SwipeManager.releaseAllButtonAimSurfaces()
         SwipeManager.releaseAllAutoTapButtons()
+        SwipeManager.releaseAllTouchAim()
         saveControls(this, layoutName, controls)   // auto-persist
     }
 
@@ -216,6 +223,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     // Override dispatchTouchEvent to handle swipe mode
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (activeTouchAimCalibration != null) return super.dispatchTouchEvent(ev)
         // When swipe mode is active and we're not in edit mode, handle with SwipeManager
         if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
             // If the manager processes it, we're done
@@ -348,6 +356,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     // a scheduled payload must not fire after reconnection.
                     SwipeManager.releaseAllButtonAimSurfaces()
                     SwipeManager.releaseAllAutoTapButtons()
+                    SwipeManager.releaseAllTouchAim()
+                    cancelTouchAimCalibration("Calibration stopped because the connection changed.")
                 }
                 previousStatus = status
                 updateConnectionStatusUI(status)
@@ -418,6 +428,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     // Release timed button-owned output while the current socket is live.
                     SwipeManager.releaseAllButtonAimSurfaces()
                     SwipeManager.releaseAllAutoTapButtons()
+                    SwipeManager.releaseAllTouchAim()
+                    cancelTouchAimCalibration("Calibration stopped before disconnecting.")
                     NetworkClient.close()
                 }
 
@@ -460,6 +472,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
         SwipeManager.releaseAllButtonAimSurfaces()
         SwipeManager.releaseAllAutoTapButtons()
+        SwipeManager.releaseAllTouchAim()
+        cancelTouchAimCalibration("Calibration stopped before changing connections.")
         UdpClient.close()
 
         NetworkClient.discoverUsbTetherReceiver { endpoint ->
@@ -590,6 +604,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 // Clear timed/armed button phases and their held payloads before changing endpoints.
                 SwipeManager.releaseAllButtonAimSurfaces()
                 SwipeManager.releaseAllAutoTapButtons()
+                SwipeManager.releaseAllTouchAim()
+                cancelTouchAimCalibration("Calibration stopped before changing connections.")
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
 
@@ -714,6 +730,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Remove a control from the layout
      */
     fun removeControl(c: Control) {
+        if (activeTouchAimCalibration != null) {
+            cancelTouchAimCalibration("Calibration stopped because a control was removed.")
+        }
         controls.remove(c)
 
         val viewToRemove = canvas.children.firstOrNull {
@@ -745,6 +764,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Clear all control views
      */
     override fun clearControlViews() {
+        cancelTouchAimCalibration("Calibration stopped because the layout changed.")
         canvas.children.filter { it.tag == "control" }.toList()
             .forEach { canvas.removeView(it) }
     }
@@ -771,6 +791,37 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    fun startTouchAimCalibration(
+        controlId: String,
+        existingProfile: TouchAimCalibrationProfile? = null
+    ) {
+        cancelTouchAimCalibration()
+        val launchToken = ++touchAimCalibrationLaunchGeneration
+        val view = canvas.children.filterIsInstance<ControlView>()
+            .firstOrNull { it.model.id == controlId }
+        if (view == null || view.model.type != ControlType.TOUCH_AIM) {
+            Toast.makeText(this, "TouchAim control is unavailable.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val launch = launch@{
+            if (launchToken != touchAimCalibrationLaunchGeneration || view.parent == null) return@launch
+            val wizard = TouchAimCalibrationWizard(this, view, view.model, existingProfile) { applied ->
+                activeTouchAimCalibration = null
+                if (applied) saveControls(this, layoutName, controls)
+            }
+            activeTouchAimCalibration = wizard
+            wizard.show()
+        }
+        if (view.isLayoutRequested) view.doOnNextLayout { launch() } else view.post(launch)
+    }
+
+    fun cancelTouchAimCalibration(reason: String? = null) {
+        touchAimCalibrationLaunchGeneration++
+        val wizard = activeTouchAimCalibration ?: return
+        activeTouchAimCalibration = null
+        wizard.cancel(reason)
     }
 
     private fun triggerReleaseAllHaptic() {
@@ -1607,13 +1658,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
-        
+        cancelTouchAimCalibration("Calibration stopped because the screen configuration changed.")
         // Do nothing - keep controls exactly as they are
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
         super.onMultiWindowModeChanged(isInMultiWindowMode)
-        
+        cancelTouchAimCalibration("Calibration stopped because the window size changed.")
         // Do nothing - keep controls exactly as they are
     }
 

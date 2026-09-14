@@ -2,7 +2,7 @@
 
 ## Scope
 
-This document records the Samsung Galaxy S22 touch diagnostic results and the proposed one-finger FPS control model. No RT, LT, mouse-button, or right-stick behavior has been implemented from these notes yet.
+This document records the Samsung Galaxy S22 touch diagnostic results, the longer-term three-stage FPS concept, and the implemented reusable two-state Aim/Shoot calibration wizard. The two-state mode can drive releasable trigger, mouse-button, keyboard, Xbox-button, and stick-macro payloads while preserving the original manual three-stage mode.
 
 ## Long-term control goal
 
@@ -257,3 +257,51 @@ The score is always the average of the enabled, scaled inputs. Disabling an inpu
 Possible reasons to disable an input include excessive noise, large movement-related changes, or poor separation between intended contact levels. Removing a noisy input may stabilize level detection; removing a strongly separating input may make detection worse. The live score and level shown on the Touch Aim surface are intended to support this tuning while stationary and while aiming.
 
 Mouse or right-stick aiming is independent of these checkboxes and continues as long as the finger owns the Touch Aim surface. If all three signals are disabled, the score remains zero. With positive thresholds, Low, Medium, and High will not activate, while aim continues normally.
+
+## Reusable two-state calibration wizard
+
+TouchAim now also has explicit, opt-in **Manual two-state** and **Calibrated two-state** modes.
+Existing and newly decoded older layouts remain on the original manual three-stage mode unless the
+user deliberately switches that individual control. Manual two-state uses the selected raw Size,
+TouchMajor, and TouchMinor inputs with the same AIM/SHOOT state machine as calibrated mode, but it
+stores separate raw-score ON/OFF thresholds so switching modes cannot reuse normalized calibration
+thresholds.
+
+The wizard records only two intended postures, twice each:
+
+```text
+AIM -> the finger naturally aims
+SHOOT -> the same finger continues aiming while using the intended shooting posture
+```
+
+Each pass begins only after a large Start button and an adjustable preparation countdown. The
+first half records a steady natural touch; a visual/vibration cue asks the user to move naturally
+during the second half. Movement matters because the S22 diagnostic showed that contact geometry
+can fall while the finger moves.
+
+Pressure is not collected or evaluated. The analyzer evaluates Size, TouchMajor, TouchMinor, and
+normalized combinations. Repeated passes stay separate during evaluation. A result is labeled
+Good, Borderline, or Unreliable and reports estimated accidental Shoot activations, missed Shoot
+activations, pass consistency, and whether movement reduced reliability. If an Unreliable result
+still has a meaningful sensor direction, the wizard exposes its thresholds as an explicitly
+experimental, editable best guess after live validation. If no meaningful direction exists, it
+still exposes no applicable threshold rather than inventing one.
+
+Two-state runtime settings include independent Shoot-on/Shoot-off thresholds, smoothing, entry and
+return confirmation times, an optional Aim payload, a Shoot payload, and whether the Aim payload
+stays active during Shoot. Aim output can still be Mouse, Right stick, or Left stick. **Shoot aim
+sensitivity** is separate from normal Aim sensitivity so a confirmed Shoot state can use finer aim
+control without changing the lower Aim state.
+
+Shoot activation choices are:
+
+- **Hold while above threshold:** hold Shoot until the contact returns to Aim.
+- **Press when entering Shoot:** emit one finite press after the upward transition is confirmed.
+- **Press when returning to Aim:** arm after a confirmed upward transition, then emit one finite
+  press only after the finger deliberately relaxes below Shoot-off and remains there for the return
+  confirmation time. Lifting the finger does not count as returning to Aim.
+
+Calibration and live validation cover the actual TouchAim rectangle at its current screen position
+and suppress all normal controller output. Entry and exit run the centralized release path. Finger
+lift, cancellation, app pause, edit mode, control removal, layout change, connection loss, and
+Release All cancel any armed return action without firing it.
