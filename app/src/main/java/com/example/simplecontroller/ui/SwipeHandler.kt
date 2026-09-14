@@ -23,6 +23,7 @@ class SwipeHandler {
     // Active gesture state
     private var activeTouch: MotionEvent? = null
     private var lastTouchedView: ControlView? = null
+    private var swipeOwnsGesture = false
 
     // Feature flags
     private var swipeEnabled = false
@@ -40,6 +41,7 @@ class SwipeHandler {
 
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                swipeOwnsGesture = false
                 // Button Aim must receive the original pointer directly and retain it outside
                 // the view. Returning false lets normal Android child dispatch own the gesture.
                 val topmostStart = topmostHit(e)
@@ -62,6 +64,7 @@ class SwipeHandler {
 
                 activeTouch = MotionEvent.obtain(e)
                 lastTouchedView = start
+                swipeOwnsGesture = true
 
                 // Send DOWN to it (with local coords)
                 start?.forwardEvent(e, MotionEvent.ACTION_DOWN)
@@ -119,13 +122,17 @@ class SwipeHandler {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                // Finalize last active control with a clamped UP
-                lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_UP, clamp = true)
+                val wasOwnedBySwipe = swipeOwnsGesture
+                if (wasOwnedBySwipe) {
+                    // Finalize the control only when Swipe owned this complete gesture.
+                    lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_UP, clamp = true)
+                }
 
                 // Clean up
                 activeTouch?.recycle(); activeTouch = null
                 lastTouchedView = null
-                return true
+                swipeOwnsGesture = false
+                return wasOwnedBySwipe
             }
         }
         return false
@@ -143,6 +150,7 @@ class SwipeHandler {
             lastTouchedView?.stopRepeat()
             lastTouchedView = null
             activeTouch?.recycle(); activeTouch = null
+            swipeOwnsGesture = false
         }
         swipeEnabled = enabled
     }
@@ -154,6 +162,7 @@ class SwipeHandler {
         activeTouch?.recycle()
         activeTouch = null
         lastTouchedView = null
+        swipeOwnsGesture = false
         lastFiredMap.clear()
     }
 

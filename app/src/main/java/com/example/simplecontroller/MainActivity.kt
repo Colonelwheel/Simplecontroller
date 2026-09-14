@@ -241,6 +241,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- member variables for turbo speed control ---------- */
     private lateinit var turboSpeedControl: Pair<EditText, ImageButton>
+    private lateinit var turboSpeedContainer: View
     private var turboSpeed = 16L // Default speed in milliseconds (≈60 Hz)
 
     private fun setupUI() {
@@ -274,15 +275,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         switchTurbo = uiBuilder.createSwitch("Turbo", false) { on ->
             GlobalSettings.globalTurbo = on
-
-            // Show/hide the turbo speed control based on the switch state
-            if (on) {
-                turboSpeedControl.first.visibility = View.VISIBLE
-                turboSpeedControl.second.visibility = View.VISIBLE
-            } else {
-                turboSpeedControl.first.visibility = View.GONE
-                turboSpeedControl.second.visibility = View.GONE
-            }
+            turboSpeedContainer.visibility = if (on) View.VISIBLE else View.GONE
         }
 
         switchSwipe = uiBuilder.createSwitch("Swipe", false) { on ->
@@ -301,8 +294,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             turboSpeed.toString(),
             "ms",
             Gravity.TOP or Gravity.START,
-            120,
-            116,
+            0,
+            0,
             100,
         ) { value ->
             // Parse and apply the new turbo speed
@@ -314,10 +307,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
             // Update the field to show the validated value
             turboSpeedControl.first.setText(turboSpeed.toString())
-
-            // Hide the controls after applying
-            turboSpeedControl.first.visibility = View.GONE
-            turboSpeedControl.second.visibility = View.GONE
+        }
+        turboSpeedContainer = turboSpeedControl.first.parent as View
+        turboSpeedContainer.visibility = View.GONE
+        switchTurbo.doOnNextLayout { turboSwitch ->
+            val params = turboSpeedContainer.layoutParams as FrameLayout.LayoutParams
+            params.leftMargin = turboSwitch.right + 8
+            params.topMargin = turboSwitch.top
+            turboSpeedContainer.layoutParams = params
         }
 
         /* --- Save / Load ------------------------------------------------- */
