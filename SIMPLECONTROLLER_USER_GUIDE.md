@@ -355,6 +355,21 @@ Once the gesture begins, you can slide beyond the Button's visible edge without 
 
 Button Aim is mutually exclusive with Hold Toggle and Toggle Auto-Tap.
 
+### Button Aim profiles
+
+Use **Save changes as new Button Aim profile** to keep a named copy of the complete setup. A profile
+stores the Base and Alternate aiming feel plus the Base payload, Hold behavior, payload timing, and
+all one-shot Alternate payload/timing settings. It does not store the button's name, size, position,
+or swipe setting.
+
+When loading a profile, choose **Apply aiming feel only** to reuse the output, sensitivity,
+Linear/Response Curve choice, displacement, deadzone, touch-position origin, inversion, and haptics
+without changing the target button's actions. This is useful for giving Fire and ADS islands the
+same feel. Choose **Apply complete profile** to restore the saved payloads and action behavior too.
+Either choice enables Button Aim and turns off conflicting Auto-Tap. A size warning appears when
+the target button is substantially different from the source because touch-position aiming can
+then feel different.
+
 ## One-Shot Alternate actions
 
 Inside Button Aim, **One-Shot Alternate** gives the same control a Base payload and an Alternate payload.
@@ -476,6 +491,16 @@ scales are different. The wizard does not claim
 to calibrate three states because it does not record a third intended posture.
 On first use in an older layout, Manual two-state starts from that control's existing High threshold
 and High-minus-hysteresis rather than imposing unrelated raw-score defaults.
+
+### Manual TouchAim profiles
+
+Manual three-stage and Manual two-state settings can be saved as reusable named profiles. A manual
+profile copies the selected manual mode, sensor choices, thresholds, aiming behavior, and that
+mode's stage or AIM/SHOOT actions. It does not copy the control's name, size, or position, and it
+does not change any reusable calibration saved in the wizard's separate profile list. Applying one
+switches only that TouchAim control to the saved manual mode and clears that control's old copied
+calibration, preventing a stale detector from being restored accidentally. Profiles can be applied,
+renamed, or deleted from the TouchAim property sheet.
 
 ### Touch Sensor Test
 

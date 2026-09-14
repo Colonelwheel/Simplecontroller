@@ -19,8 +19,15 @@ import com.example.simplecontroller.model.TouchAimMode
 import com.example.simplecontroller.model.TouchAimShootBehavior
 import com.example.simplecontroller.model.TouchStageAction
 import com.example.simplecontroller.model.applyTo
+import com.example.simplecontroller.model.ButtonAimProfile
+import com.example.simplecontroller.model.TouchAimManualProfile
+import com.example.simplecontroller.model.captureButtonAimProfile
+import com.example.simplecontroller.model.captureManualTouchAimProfile
 import com.example.simplecontroller.model.isApplicable
+import com.example.simplecontroller.io.ButtonAimProfileStore
+import com.example.simplecontroller.io.TouchAimManualProfileStore
 import com.example.simplecontroller.io.TouchAimCalibrationStore
+import java.util.UUID
 import kotlin.math.roundToInt
 import kotlin.math.max
 import androidx.core.content.ContextCompat
@@ -69,6 +76,8 @@ class PropertySheetBuilder(
         val calibrateButton: Button,
         val savedCalibrationsButton: Button,
         val rerunButton: Button,
+        val saveManualProfileButton: Button,
+        val manageManualProfilesButton: Button,
         val aimOutput: Spinner,
         val useSize: CheckBox,
         val useMajor: CheckBox,
@@ -105,6 +114,8 @@ class PropertySheetBuilder(
 
     private data class ButtonAimComponents(
         val enabled: CheckBox,
+        val saveProfileButton: Button,
+        val manageProfilesButton: Button,
         val aimOutput: Spinner,
         val payloadTiming: Spinner,
         val releaseDelayMs: EditText,
@@ -217,6 +228,24 @@ class PropertySheetBuilder(
             fields.savedCalibrationsButton.setOnClickListener {
                 saveProperties(components)
                 showSavedCalibrationList(alertDialog)
+            }
+            fields.saveManualProfileButton.setOnClickListener {
+                saveProperties(components)
+                promptSaveManualTouchAimProfile()
+            }
+            fields.manageManualProfilesButton.setOnClickListener {
+                saveProperties(components)
+                showManualTouchAimProfileList(alertDialog)
+            }
+        }
+        components.buttonAim?.let { fields ->
+            fields.saveProfileButton.setOnClickListener {
+                saveProperties(components)
+                promptSaveButtonAimProfile()
+            }
+            fields.manageProfilesButton.setOnClickListener {
+                saveProperties(components)
+                showButtonAimProfileList(alertDialog)
             }
         }
 
@@ -507,6 +536,14 @@ class PropertySheetBuilder(
     ): ButtonAimComponents {
         addSectionTitle(container, "Button Aim Surface")
         val enabled = addCheckBox(container, "Aim while pressed", model.buttonAimEnabled)
+        val saveProfileButton = largeActionButton(
+            container,
+            "Save changes as new Button Aim profile"
+        )
+        val manageProfilesButton = largeActionButton(
+            container,
+            "Save changes, then manage Button Aim profiles"
+        )
         val details = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             visibility = if (model.buttonAimEnabled) View.VISIBLE else View.GONE
@@ -759,6 +796,8 @@ class PropertySheetBuilder(
 
         return ButtonAimComponents(
             enabled = enabled,
+            saveProfileButton = saveProfileButton,
+            manageProfilesButton = manageProfilesButton,
             aimOutput = aimOutput,
             payloadTiming = payloadTiming,
             releaseDelayMs = releaseDelayMs,
@@ -830,6 +869,19 @@ class PropertySheetBuilder(
             isEnabled = model.touchAimMode == TouchAimMode.CALIBRATED_TWO_STATE &&
                 model.touchAimAppliedCalibrationId.isNotBlank()
         }
+        val manualProfileContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            container.addView(this)
+        }
+        addSectionTitle(manualProfileContainer, "Manual TouchAim profiles")
+        val saveManualProfileButton = largeActionButton(
+            manualProfileContainer,
+            "Save changes as new manual profile"
+        )
+        val manageManualProfilesButton = largeActionButton(
+            manualProfileContainer,
+            "Save changes, then manage manual profiles"
+        )
 
         addSectionTitle(container, "Aim")
         val aimOutput = addChoice(
@@ -998,6 +1050,7 @@ class PropertySheetBuilder(
             manualTwoThresholdContainer.visibility = if (position == 1) View.VISIBLE else View.GONE
             calibratedThresholdContainer.visibility = if (position == 2) View.VISIBLE else View.GONE
             threeStageContainer.visibility = if (position == 0) View.VISIBLE else View.GONE
+            manualProfileContainer.visibility = if (position == 2) View.GONE else View.VISIBLE
         }
         mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(
@@ -1019,6 +1072,8 @@ class PropertySheetBuilder(
             calibrateButton = calibrateButton,
             savedCalibrationsButton = savedCalibrationsButton,
             rerunButton = rerunButton,
+            saveManualProfileButton = saveManualProfileButton,
+            manageManualProfilesButton = manageManualProfilesButton,
             aimOutput = aimOutput,
             useSize = useSize,
             useMajor = useMajor,
@@ -1066,6 +1121,284 @@ class PropertySheetBuilder(
                 ViewGroup.LayoutParams.WRAP_CONTENT
             ).apply { topMargin = 8 }
         )
+    }
+
+    private fun promptSaveManualTouchAimProfile() {
+        if (model.touchAimMode == TouchAimMode.CALIBRATED_TWO_STATE) {
+            Toast.makeText(context, "Choose a manual TouchAim mode before saving a manual profile.", Toast.LENGTH_LONG).show()
+            return
+        }
+        val input = EditText(context).apply {
+            hint = "Profile name"
+            setText(
+                model.name.ifBlank {
+                    if (model.touchAimMode == TouchAimMode.MANUAL_TWO_STATE) {
+                        "Manual two-state"
+                    } else {
+                        "Manual three-stage"
+                    }
+                }
+            )
+            selectAll()
+        }
+        AlertDialog.Builder(context)
+            .setTitle("Save manual TouchAim profile")
+            .setMessage("Saves this manual mode's sensors, thresholds, aiming, and state actions. It does not save the control's size, position, or name.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val profile = model.captureManualTouchAimProfile(
+                    UUID.randomUUID().toString(),
+                    input.text.toString(),
+                    System.currentTimeMillis()
+                )
+                if (profile == null) {
+                    Toast.makeText(context, "These manual settings are incomplete or invalid.", Toast.LENGTH_LONG).show()
+                } else {
+                    val result = TouchAimManualProfileStore.save(context, profile)
+                    Toast.makeText(
+                        context,
+                        result.error ?: "Saved \"${result.profile?.name}\"",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showManualTouchAimProfileList(propertyDialog: AlertDialog) {
+        val profiles = TouchAimManualProfileStore.list(context)
+        if (profiles.isEmpty()) {
+            AlertDialog.Builder(context)
+                .setTitle("Manual TouchAim profiles")
+                .setMessage("No manual TouchAim profiles have been saved yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        val labels = profiles.map { profile ->
+            val mode = if (profile.mode == TouchAimMode.MANUAL_TWO_STATE) "Two-state" else "Three-stage"
+            "${profile.name} — $mode"
+        }
+        var listDialog: AlertDialog? = null
+        listDialog = AlertDialog.Builder(context)
+            .setTitle("Manual TouchAim profiles")
+            .setItems(labels.toTypedArray()) { _, index ->
+                showManualTouchAimProfileActions(profiles[index], propertyDialog, listDialog)
+            }
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun showManualTouchAimProfileActions(
+        profile: TouchAimManualProfile,
+        propertyDialog: AlertDialog,
+        listDialog: AlertDialog?
+    ) {
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        var actionDialog: AlertDialog? = null
+        largeActionButton(actions, "Apply complete manual profile").setOnClickListener {
+            if (profile.applyTo(model)) {
+                onPropertiesUpdated()
+                actionDialog?.dismiss()
+                listDialog?.dismiss()
+                propertyDialog.dismiss()
+                reopenPropertySheet()
+            } else {
+                Toast.makeText(context, profile.validationError() ?: "This profile cannot be applied.", Toast.LENGTH_LONG).show()
+            }
+        }
+        largeActionButton(actions, "Rename").setOnClickListener {
+            val input = EditText(context).apply { setText(profile.name); selectAll() }
+            AlertDialog.Builder(context)
+                .setTitle("Rename manual profile")
+                .setView(input)
+                .setPositiveButton("Rename") { _, _ ->
+                    val result = TouchAimManualProfileStore.rename(
+                        context,
+                        profile,
+                        input.text.toString(),
+                        System.currentTimeMillis()
+                    )
+                    Toast.makeText(context, result.error ?: "Profile renamed", Toast.LENGTH_LONG).show()
+                    if (result.succeeded) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        largeActionButton(actions, "Delete").setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle("Delete manual profile?")
+                .setMessage("Controls that already copied these settings will not change.")
+                .setPositiveButton("Delete") { _, _ ->
+                    val deleted = TouchAimManualProfileStore.delete(context, profile.id)
+                    Toast.makeText(context, if (deleted) "Profile deleted" else "Could not delete profile", Toast.LENGTH_LONG).show()
+                    if (deleted) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        actionDialog = AlertDialog.Builder(context)
+            .setTitle(profile.name)
+            .setMessage(
+                "Applying switches this control to ${if (profile.mode == TouchAimMode.MANUAL_TWO_STATE) "Manual two-state" else "Manual three-stage"}. " +
+                    "It replaces the aim settings, thresholds, payloads, and PRESS / HOLD / SHOOT behavior saved in this profile. " +
+                    "The control's name, size, and position stay unchanged."
+            )
+            .setView(ScrollView(context).apply { addView(actions) })
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun promptSaveButtonAimProfile() {
+        val input = EditText(context).apply {
+            hint = "Profile name"
+            setText(model.name.ifBlank { "Button Aim tuning" })
+            selectAll()
+        }
+        AlertDialog.Builder(context)
+            .setTitle("Save Button Aim profile")
+            .setMessage(
+                "Saves the complete Button Aim setup: Base and Alternate aiming feel, payloads, " +
+                    "Hold behavior, timing, and one-shot settings. The button's name, size, position, " +
+                    "and swipe setting are not included."
+            )
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                val profile = model.captureButtonAimProfile(
+                    UUID.randomUUID().toString(),
+                    input.text.toString(),
+                    System.currentTimeMillis()
+                )
+                if (profile == null) {
+                    Toast.makeText(context, "These Button Aim settings are invalid.", Toast.LENGTH_LONG).show()
+                } else {
+                    val result = ButtonAimProfileStore.save(context, profile)
+                    Toast.makeText(
+                        context,
+                        result.error ?: "Saved \"${result.profile?.name}\"",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun showButtonAimProfileList(propertyDialog: AlertDialog) {
+        val profiles = ButtonAimProfileStore.list(context)
+        if (profiles.isEmpty()) {
+            AlertDialog.Builder(context)
+                .setTitle("Button Aim profiles")
+                .setMessage("No Button Aim profiles have been saved yet.")
+                .setPositiveButton("OK", null)
+                .show()
+            return
+        }
+        var listDialog: AlertDialog? = null
+        listDialog = AlertDialog.Builder(context)
+            .setTitle("Button Aim profiles")
+            .setItems(profiles.map(ButtonAimProfile::name).toTypedArray()) { _, index ->
+                showButtonAimProfileActions(profiles[index], propertyDialog, listDialog)
+            }
+            .setNegativeButton("Back", null)
+            .show()
+    }
+
+    private fun showButtonAimProfileActions(
+        profile: ButtonAimProfile,
+        propertyDialog: AlertDialog,
+        listDialog: AlertDialog?
+    ) {
+        val actions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 8, 24, 8)
+        }
+        var actionDialog: AlertDialog? = null
+        val sizeDifference = max(
+            kotlin.math.abs(model.w - profile.sourceControlWidthPx) / profile.sourceControlWidthPx,
+            kotlin.math.abs(model.h - profile.sourceControlHeightPx) / profile.sourceControlHeightPx
+        )
+        largeActionButton(actions, "Apply aiming feel only").setOnClickListener {
+            if (profile.applyAimTuningTo(model)) {
+                onPropertiesUpdated()
+                actionDialog?.dismiss()
+                listDialog?.dismiss()
+                propertyDialog.dismiss()
+                reopenPropertySheet()
+            } else {
+                Toast.makeText(context, profile.validationError() ?: "This profile cannot be applied.", Toast.LENGTH_LONG).show()
+            }
+        }
+        largeActionButton(actions, "Apply complete profile").setOnClickListener {
+            if (profile.applyCompleteTo(model)) {
+                onPropertiesUpdated()
+                actionDialog?.dismiss()
+                listDialog?.dismiss()
+                propertyDialog.dismiss()
+                reopenPropertySheet()
+            } else {
+                Toast.makeText(context, profile.validationError() ?: "This profile cannot be applied.", Toast.LENGTH_LONG).show()
+            }
+        }
+        largeActionButton(actions, "Rename").setOnClickListener {
+            val input = EditText(context).apply { setText(profile.name); selectAll() }
+            AlertDialog.Builder(context)
+                .setTitle("Rename Button Aim profile")
+                .setView(input)
+                .setPositiveButton("Rename") { _, _ ->
+                    val result = ButtonAimProfileStore.rename(
+                        context,
+                        profile,
+                        input.text.toString(),
+                        System.currentTimeMillis()
+                    )
+                    Toast.makeText(context, result.error ?: "Profile renamed", Toast.LENGTH_LONG).show()
+                    if (result.succeeded) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        largeActionButton(actions, "Delete").setOnClickListener {
+            AlertDialog.Builder(context)
+                .setTitle("Delete Button Aim profile?")
+                .setMessage("Buttons that already copied settings from this profile will not change.")
+                .setPositiveButton("Delete") { _, _ ->
+                    val deleted = ButtonAimProfileStore.delete(context, profile.id)
+                    Toast.makeText(context, if (deleted) "Profile deleted" else "Could not delete profile", Toast.LENGTH_LONG).show()
+                    if (deleted) {
+                        actionDialog?.dismiss()
+                        listDialog?.dismiss()
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        val sizeWarning = if (sizeDifference > .25f) {
+            "\n\nThis button is a substantially different size from the source. Touch-position stick mode may feel different."
+        } else ""
+        actionDialog = AlertDialog.Builder(context)
+            .setTitle(profile.name)
+            .setMessage(
+                "Aiming feel only copies Base and Alternate output, sensitivity, curve, displacement, deadzone, origin, inversion, and haptics; this button's actions stay unchanged.\n\n" +
+                    "Complete profile also replaces the Base payload, Hold behavior, payload timing, and all one-shot Alternate payload/timing settings.\n\n" +
+                    "Either choice enables Button Aim and turns off Auto-Tap.$sizeWarning"
+            )
+            .setView(ScrollView(context).apply { addView(actions) })
+            .setNegativeButton("Back", null)
+            .show()
     }
 
     private fun showSavedCalibrationList(propertyDialog: AlertDialog) {

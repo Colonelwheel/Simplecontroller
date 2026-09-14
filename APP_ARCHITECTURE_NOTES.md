@@ -52,6 +52,20 @@ Primary files:
 - `app/src/main/java/com/example/simplecontroller/ui/TouchAimCalibrationWizard.kt`
 - `app/src/main/java/com/example/simplecontroller/ui/TouchAimHandler.kt`
 
+Manual TouchAim profiles and Button Aim profiles are stored separately from wizard
+calibrations as versioned, UUID-addressed, per-profile AtomicFile JSON. Manual profiles copy a
+mode-matched manual snapshot without geometry or calibrated detector data. Button Aim profiles save
+both Base/Alternate aiming feel and the associated payload/action settings. Loading offers an
+aiming-only path that preserves the target button's actions and a complete path that replaces them.
+Both paths preserve identity, geometry, and the button's separate swipe setting.
+
+Additional files:
+
+- `app/src/main/java/com/example/simplecontroller/model/TouchAimManualProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/model/ButtonAimProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/model/ButtonAimPayloadPolicy.kt`
+- `app/src/main/java/com/example/simplecontroller/io/ControlSettingsProfileStores.kt`
+
 ## 2026-09-12 Ordinary Button Toggle Auto-Tap
 
 Ordinary Button controls have an optional per-control `Toggle auto-tap` mode. The first tap starts

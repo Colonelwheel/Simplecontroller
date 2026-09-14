@@ -1,5 +1,7 @@
 package com.example.simplecontroller.ui
 
+import com.example.simplecontroller.model.ButtonAimPayloadPolicy
+
 /** The two independently releasable payload roles owned by one Button Aim surface. */
 enum class ButtonAimPayloadOwner {
     BASE,
@@ -121,23 +123,11 @@ class ButtonAimPayloadExecutor(
     private val effectiveOutputs = linkedMapOf<LogicalKey, DesiredOutput>()
 
     /** Returns null when activation is safe, otherwise a user-facing validation reason. */
-    fun validationError(payload: String): String? {
-        val rawTokens = tokenize(payload)
-        if (rawTokens.isEmpty()) return "Payload is blank"
-        return rawTokens.map(::parseToken)
-            .filterIsInstance<ParsedToken.Invalid>()
-            .firstOrNull()
-            ?.reason
-    }
+    fun validationError(payload: String): String? = ButtonAimPayloadPolicy.validationError(payload)
 
     /** TouchAim states must be fully reversible, so every token must own a releasable output. */
-    fun statePayloadValidationError(payload: String): String? {
-        if (payload.isBlank()) return null
-        val parsed = tokenize(payload).map(::parseToken)
-        parsed.filterIsInstance<ParsedToken.Invalid>().firstOrNull()?.let { return it.reason }
-        return if (parsed.all { it is ParsedToken.Output }) null else
-            "TouchAim Aim/Shoot payloads may use only releasable Xbox, trigger, mouse-button, keyboard, or stick-macro outputs."
-    }
+    fun statePayloadValidationError(payload: String): String? =
+        ButtonAimPayloadPolicy.stateValidationError(payload)
 
     fun activate(
         owner: ButtonAimPayloadOwner,
