@@ -83,5 +83,6 @@ transport settings, theme, the current-profile preference, and other app/device 
 - Picker integration: `app/src/main/java/com/example/simplecontroller/MainActivity.kt`
 - Load/manage UI: `app/src/main/java/com/example/simplecontroller/io/LayoutManager.kt`
 
-The current build targets API 34. Raising compile/target SDK to 36 is separate work and must retain
-this contract and golden fixture.
+The `sideloadDebug` build retains target API 34 and application ID
+`com.example.simplecontroller`. The separate `playRelease` build targets API 36 and uses
+`io.github.colonelwheel.simplecontroller`. Both builds must retain this contract and golden fixture.

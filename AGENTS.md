@@ -6,10 +6,11 @@
 
 ## Build, Test & Development Commands
 ```bash
-./gradlew assembleDebug        # compile debug APK
-./gradlew installDebug         # deploy to a device or emulator
-./gradlew test                 # run JVM unit tests
-./gradlew connectedAndroidTest # run instrumentation tests
+./gradlew assembleSideloadDebug        # compile the existing debug APK
+./gradlew installSideloadDebug         # deploy the existing debug APK
+./gradlew testSideloadDebugUnitTest    # run JVM tests against the debug variant
+./gradlew bundlePlayRelease            # compile the unsigned Play Store AAB
+./gradlew connectedSideloadDebugAndroidTest # run instrumentation tests
 ```
 - Use Android Studio for layout inspection and `adb logcat -s NetworkClient` for UDP traces.
 
@@ -19,11 +20,11 @@
 
 ## Testing Guidelines
 - Co-locate unit tests with their package paths in `app/src/test`; name methods `targetCondition_expectedOutcome`.
-- Cover layout persistence, swipe gestures, and UDP emission with instrumentation tests. Run `./gradlew lint test` before pushing and `connectedAndroidTest` whenever UI or protocol behavior changes.
+- Cover layout persistence, swipe gestures, and UDP emission with instrumentation tests. Run `./gradlew lint test` before pushing and `connectedSideloadDebugAndroidTest` whenever UI or protocol behavior changes.
 
 ## Commit & Pull Request Guidelines
 - Write single-purpose, imperative commit subjects under ~72 characters (e.g., `Fix split screen bottom inset handling`) and squash noisy work-in-progress commits.
-- PRs should summarize user impact, list manual verification (`assembleDebug`, `test`, device smoke), link issues, and attach screenshots or recordings for UI tweaks. Flag migrations or risky follow-ups.
+- PRs should summarize user impact, list manual verification (`assembleSideloadDebug`, `test`, `bundlePlayRelease`, device smoke), link issues, and attach screenshots or recordings for UI tweaks. Flag migrations or risky follow-ups.
 
 ## ConsoleBridge Pico Integration
 - Keep network defaults aligned with `consolebridge_pico_v0`: UDP port 9010, CBv0 `DELTA:dx,dy` payloads, and retry timing; document deviations in both repos.

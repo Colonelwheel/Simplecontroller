@@ -2,6 +2,25 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-15 Separate Play Store Release
+
+The Android module has two deliberately isolated distribution variants that share the same source
+and profile-transfer contract:
+
+- `sideloadDebug` keeps application ID `com.example.simplecontroller` and target API 34 so future
+  development APKs continue updating the existing debug installation.
+- `playRelease` uses the permanent application ID `io.github.colonelwheel.simplecontroller` and
+  target API 36 for Google Play. It installs beside the debug app rather than overwriting it.
+
+Only those two combinations are enabled. The Touch Sensor Test activity and its second launcher
+icon are declared only in the `sideload` source set, so they remain available for development but
+are excluded from the Play manifest. Module-wide compile SDK is 36, and Android Gradle Plugin
+8.10.1 is used with the existing Gradle 8.11.1 wrapper because that plugin supports API 36.
+
+Use `assembleSideloadDebug` for the existing feature APK and `bundlePlayRelease` for the Play AAB.
+The Play bundle remains unsigned until a private upload key is deliberately configured. Never
+commit a keystore, signing password, or local signing-properties file.
+
 ## 2026-09-14 Portable Profile Import/Export
 
 External transfer supports a versioned `simplecontroller-profile` JSON envelope containing one
@@ -1142,11 +1161,13 @@ Important details:
 - Android application plugin
 - Kotlin Android plugin
 - Kotlin serialization plugin version `2.0.21`
-- namespace/application ID: `com.example.simplecontroller`
-- compile SDK 34, min SDK 24, target SDK 34
+- namespace: `com.example.simplecontroller`
+- application IDs: `com.example.simplecontroller` for `sideloadDebug` and
+  `io.github.colonelwheel.simplecontroller` for `playRelease`
+- compile SDK 36, min SDK 24; target SDK 34 for sideload and 36 for Play
 - Java/Kotlin target 1.8
 - release minification disabled
-- ABI/density splits disabled so builds produce one universal APK
+- no custom ABI/density splits, so the sideload build produces one universal APK
 - dependencies include kotlinx serialization JSON, coroutines Android, AndroidX core/appcompat, and Material
 
 ### `gradle/libs.versions.toml`

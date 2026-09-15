@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.example.simplecontroller"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.simplecontroller"
@@ -33,18 +33,34 @@ android {
         }
     }
 
-    // ────────────────  Split settings — ONE apk per build  ────────────────
-    splits {
-        abi {
-            // Disable ABI splits → generates a single, universal ARM/x86 APK
-            isEnable = false
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("sideload") {
+            dimension = "distribution"
+            applicationId = "com.example.simplecontroller"
+            targetSdk = 34
         }
-        density {
-            // Disable screen-density splits
-            isEnable = false
+        create("play") {
+            dimension = "distribution"
+            applicationId = "io.github.colonelwheel.simplecontroller"
+            targetSdk = 36
         }
     }
-    // ───────────────────────────────────────────────────────────────────────
+
+}
+
+androidComponents {
+    beforeVariants(selector().all()) { variantBuilder ->
+        val distribution = variantBuilder.productFlavors
+            .firstOrNull { it.first == "distribution" }
+            ?.second
+
+        variantBuilder.enable = when {
+            distribution == "sideload" && variantBuilder.buildType == "debug" -> true
+            distribution == "play" && variantBuilder.buildType == "release" -> true
+            else -> false
+        }
+    }
 }
 
 dependencies {

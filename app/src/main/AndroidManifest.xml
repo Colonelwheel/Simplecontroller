@@ -13,18 +13,6 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.SimpleController">
 
-        <!-- Temporary isolated launcher for the Android-only touch sensor diagnostic. -->
-        <activity
-            android:name=".TouchDiagnosticActivity"
-            android:exported="true"
-            android:label="Touch Sensor Test"
-            android:screenOrientation="portrait">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-
         <!-- 👇 NEW: exported="true" because this Activity can be launched
              from outside the app (it has a MAIN/LAUNCHER filter). -->
         <activity
