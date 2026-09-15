@@ -18,6 +18,11 @@ data class SettingsProfileOperationResult<T>(
     val succeeded: Boolean get() = error == null
 }
 
+data class ProfileStoreBackupSnapshot<T>(
+    val profiles: List<T>,
+    val unreadableFileCount: Int
+)
+
 private class AtomicNamedProfileStore<T>(
     private val tag: String,
     private val prefix: String,
@@ -34,11 +39,18 @@ private class AtomicNamedProfileStore<T>(
         encodeDefaults = true
     }
 
-    fun list(context: Context): List<T> = context.filesDir.listFiles()
-        .orEmpty()
-        .filter { it.name.startsWith(prefix) && it.name.endsWith(SUFFIX) }
-        .mapNotNull(::readFile)
-        .sortedWith(compareByDescending<T> { updatedAtOf(it) }.thenBy { idOf(it) })
+    fun list(context: Context): List<T> = backupSnapshot(context).profiles
+
+    fun backupSnapshot(context: Context): ProfileStoreBackupSnapshot<T> {
+        val files = context.filesDir.listFiles()
+            .orEmpty()
+            .map { File(it.path.removeSuffix(".bak").removeSuffix(".new")) }
+            .filter { it.name.startsWith(prefix) && it.name.endsWith(SUFFIX) }
+            .distinctBy(File::getPath)
+        val profiles = files.mapNotNull(::readFile)
+            .sortedWith(compareByDescending<T> { updatedAtOf(it) }.thenBy { idOf(it) })
+        return ProfileStoreBackupSnapshot(profiles, files.size - profiles.size)
+    }
 
     fun save(context: Context, profile: T): SettingsProfileOperationResult<T> {
         validationError(profile)?.let { return SettingsProfileOperationResult(error = it) }
@@ -78,13 +90,17 @@ private class AtomicNamedProfileStore<T>(
     fun delete(context: Context, id: String): Boolean {
         if (!isCanonicalUuid(id)) return false
         val file = File(context.filesDir, "$prefix$id$SUFFIX")
-        return !file.exists() || file.delete()
+        AtomicFile(file).delete()
+        return listOf(file, File(file.path + ".bak"), File(file.path + ".new")).none(File::exists)
     }
 
     private fun readFile(file: File): T? = runCatching {
         val fileId = file.name.removePrefix(prefix).removeSuffix(SUFFIX)
         if (!isCanonicalUuid(fileId)) return@runCatching null
-        json.decodeFromString(serializer, file.readText()).takeIf {
+        val decoded = AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use {
+            json.decodeFromString(serializer, it.readText())
+        }
+        decoded.takeIf {
             idOf(it) == fileId && isCanonicalUuid(idOf(it)) && validationError(it) == null
         }
     }.onFailure { Log.w(tag, "Skipping unreadable profile ${file.name}", it) }.getOrNull()
@@ -114,6 +130,7 @@ object TouchAimManualProfileStore {
     )
 
     fun list(context: Context): List<TouchAimManualProfile> = store.list(context)
+    fun backupSnapshot(context: Context) = store.backupSnapshot(context)
     fun save(context: Context, profile: TouchAimManualProfile) = store.save(context, profile)
     fun rename(context: Context, profile: TouchAimManualProfile, name: String, nowMs: Long) =
         store.rename(context, profile, name, nowMs)
@@ -135,6 +152,7 @@ object ButtonAimProfileStore {
     )
 
     fun list(context: Context): List<ButtonAimProfile> = store.list(context)
+    fun backupSnapshot(context: Context) = store.backupSnapshot(context)
     fun save(context: Context, profile: ButtonAimProfile) = store.save(context, profile)
     fun rename(context: Context, profile: ButtonAimProfile, name: String, nowMs: Long) =
         store.rename(context, profile, name, nowMs)
@@ -156,6 +174,7 @@ object StickDirectionalProfileStore {
     )
 
     fun list(context: Context): List<StickDirectionalProfile> = store.list(context)
+    fun backupSnapshot(context: Context) = store.backupSnapshot(context)
     fun save(context: Context, profile: StickDirectionalProfile) = store.save(context, profile)
     fun rename(context: Context, profile: StickDirectionalProfile, name: String, nowMs: Long) =
         store.rename(context, profile, name, nowMs)

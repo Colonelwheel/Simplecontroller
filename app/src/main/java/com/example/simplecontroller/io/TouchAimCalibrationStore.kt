@@ -79,11 +79,18 @@ object TouchAimCalibrationStore {
     }
 
     fun list(context: Context): List<TouchAimCalibrationProfile> =
-        context.filesDir.listFiles()
+        backupSnapshot(context).profiles
+
+    fun backupSnapshot(context: Context): ProfileStoreBackupSnapshot<TouchAimCalibrationProfile> {
+        val files = context.filesDir.listFiles()
             .orEmpty()
+            .map { File(it.path.removeSuffix(".bak").removeSuffix(".new")) }
             .filter { it.name.startsWith(PREFIX) && it.name.endsWith(SUFFIX) }
-            .mapNotNull(::readFile)
+            .distinctBy(File::getPath)
+        val profiles = files.mapNotNull(::readFile)
             .sortedByDescending { it.updatedAtEpochMs }
+        return ProfileStoreBackupSnapshot(profiles, files.size - profiles.size)
+    }
 
     fun get(context: Context, id: String): TouchAimCalibrationProfile? =
         validatedFile(context, id)?.takeIf(File::exists)?.let(::readFile)
@@ -136,12 +143,18 @@ object TouchAimCalibrationStore {
 
     fun delete(context: Context, id: String): Boolean {
         val file = validatedFile(context, id) ?: return false
-        return !file.exists() || file.delete()
+        AtomicFile(file).delete()
+        return listOf(file, File(file.path + ".bak"), File(file.path + ".new")).none(File::exists)
     }
 
     private fun readFile(file: File): TouchAimCalibrationProfile? = runCatching {
-        val decoded = json.decodeFromString<TouchAimCalibrationProfile>(file.readText())
-        TouchAimCalibrationCatalog.migrated(decoded)
+        val fileId = file.name.removePrefix(PREFIX).removeSuffix(SUFFIX)
+        if (!UUID_PATTERN.matches(fileId)) return@runCatching null
+        AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use {
+            TouchAimCalibrationCatalog.migrated(
+                json.decodeFromString<TouchAimCalibrationProfile>(it.readText())
+            )?.takeIf { profile -> profile.id.equals(fileId, ignoreCase = true) }
+        }
     }.onFailure { Log.w(TAG, "Skipping unreadable profile ${file.name}", it) }.getOrNull()
 
     private fun validatedFile(context: Context, id: String): File? {

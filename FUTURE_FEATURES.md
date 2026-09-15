@@ -66,6 +66,20 @@ Likely touchpoints: `UdpClient.kt`, `ControlView.kt`, `ControlViewHelper.kt`, `T
 - [x] Warn about missing page targets and pages without a usable navigation action.
 - [ ] Consider a future `PAGE_ONCE` action that returns after one successfully completed action. Do not add a layer stack or live inheritance to implement it.
 
+### Portable profile import/export
+
+- [x] Export one complete profile, including every Controller Page and navigation target, through
+  Android's user-owned document storage.
+- [x] Reopen and validate the written document before reporting `Export verified`.
+- [x] Import transfer-version-1 files, bare multipage profiles, and historical one-page arrays.
+- [x] Refuse malformed, oversized, invalid-UTF-8, or newer unsupported files without changing the
+  current profile.
+- [x] Save imports under a new unique name and verify the atomic internal copy before loading it.
+- [x] Preserve the transfer contract and golden debug-export fixture for the future API 36 release.
+- [x] Export and import all saved controller profiles plus reusable TouchAim calibration/manual,
+  Button Aim, and Directional/Stick+ profile libraries in a separate versioned backup file.
+- [x] Keep network, player, transport, theme, and other non-profile preferences outside both formats.
+
 ### One-finger radial menu
 
 - [ ] Add a radial control that opens from one touch, selects by sliding into a large wedge, and activates on release.

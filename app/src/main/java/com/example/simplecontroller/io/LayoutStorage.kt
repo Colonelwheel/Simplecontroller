@@ -14,16 +14,30 @@ import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
 import java.io.FileNotFoundException
 import java.io.File
+import java.io.InputStream
 import java.util.UUID
 import java.util.Locale
 
 private const val TAG = "LayoutStorage"
 private const val EXT = ".json"
+private const val PENDING_PROFILE_EXPORT_FILE = "pending_controller_profile_export.json"
+const val CONTROLLER_PROFILE_TRANSFER_FILE_TYPE = "simplecontroller-profile"
+const val CONTROLLER_PROFILE_TRANSFER_VERSION = 1
+const val CONTROLLER_PROFILE_TRANSFER_EXTENSION = ".simplecontroller-profile.json"
+const val MAX_CONTROLLER_PROFILE_TRANSFER_BYTES = 25 * 1024 * 1024
 
 private val json = Json {
     prettyPrint = true
@@ -43,14 +57,29 @@ sealed interface StoredControllerProfileResult {
     data class Error(val message: String, val cause: Throwable) : StoredControllerProfileResult
 }
 
+@kotlinx.serialization.Serializable
+private data class ControllerProfileTransferFile(
+    val fileType: String = CONTROLLER_PROFILE_TRANSFER_FILE_TYPE,
+    val transferVersion: Int = CONTROLLER_PROFILE_TRANSFER_VERSION,
+    val profileName: String,
+    val profile: ControllerProfile
+)
+
+data class ImportedControllerProfile(
+    val suggestedName: String,
+    val result: ControllerProfileLoadResult
+)
+
 private fun fileFor(ctx: Context, name: String) =
     ctx.getFileStreamPath("layout_${name.lowercase(Locale.ROOT)}$EXT")
 
 /** Return saved profile names without the historical layout_ prefix. */
 fun listLayouts(ctx: Context): List<String> =
     ctx.filesDir.listFiles()
-        ?.filter { it.name.startsWith("layout_") && it.name.endsWith(EXT) }
-        ?.map { it.name.removePrefix("layout_").removeSuffix(EXT) }
+        ?.map { it.name.removeSuffix(".bak").removeSuffix(".new") }
+        ?.filter { it.startsWith("layout_") && it.endsWith(EXT) }
+        ?.map { it.removePrefix("layout_").removeSuffix(EXT) }
+        ?.distinct()
         .orEmpty()
 
 fun stableLegacyBasePageId(profileName: String): String = UUID.nameUUIDFromBytes(
@@ -59,8 +88,9 @@ fun stableLegacyBasePageId(profileName: String): String = UUID.nameUUIDFromBytes
 ).toString()
 
 fun decodeControllerProfile(text: String, profileName: String): ControllerProfileLoadResult {
-    if (text.trimStart().startsWith("[")) {
-        val controls = json.decodeFromString<List<Control>>(text)
+    val normalizedText = text.removePrefix("\uFEFF")
+    if (normalizedText.trimStart().startsWith("[")) {
+        val controls = json.decodeFromString<List<Control>>(normalizedText)
         val pageId = stableLegacyBasePageId(profileName)
         return ControllerProfileLoadResult(
             profile = ControllerProfile(
@@ -71,12 +101,18 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
             migratedFromSinglePage = true
         )
     }
-    val element = json.parseToJsonElement(text)
-    val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
-    require(decoded.formatVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
-        "Profile format ${decoded.formatVersion} is newer than supported format " +
+    val element = json.parseToJsonElement(normalizedText)
+    val encodedVersion = (element as? JsonObject)
+        ?.get("formatVersion")
+        ?.jsonPrimitive
+        ?.intOrNull
+        ?: CONTROLLER_PROFILE_FORMAT_VERSION
+    require(encodedVersion >= 1) { "Profile format $encodedVersion is invalid." }
+    require(encodedVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
+        "Profile format $encodedVersion is newer than supported format " +
             CONTROLLER_PROFILE_FORMAT_VERSION
     }
+    val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
     val result = validateControllerProfile(decoded, profileName)
     val missingFieldWarnings = element.jsonObject["pages"]?.jsonArray.orEmpty()
         .mapIndexedNotNull { index, pageElement ->
@@ -90,6 +126,210 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
 fun encodeControllerProfile(profile: ControllerProfile): String {
     validateControllerProfileForSave(profile)?.let { throw IllegalArgumentException(it) }
     return json.encodeToString(profile.copy(formatVersion = CONTROLLER_PROFILE_FORMAT_VERSION))
+}
+
+/**
+ * Portable, user-owned profile file. This wrapper is deliberately independent from Android's
+ * application ID, signing certificate, and target SDK so it can cross debug/release installs.
+ */
+fun encodeControllerProfileTransfer(profileName: String, profile: ControllerProfile): String {
+    validateControllerProfileForSave(profile)?.let { throw IllegalArgumentException(it) }
+    return json.encodeToString(
+        ControllerProfileTransferFile(
+            profileName = profileName.trim(),
+            profile = profile.copy(formatVersion = CONTROLLER_PROFILE_FORMAT_VERSION)
+        )
+    )
+}
+
+/**
+ * Reads the transfer wrapper plus raw current-profile JSON and historical top-level control arrays.
+ * The last two forms keep files created before the transfer wrapper importable.
+ */
+fun decodeControllerProfileTransfer(
+    text: String,
+    fallbackProfileName: String
+): ImportedControllerProfile {
+    val fallbackName = sanitizeSuggestedProfileName(fallbackProfileName)
+    val normalizedText = text.removePrefix("\uFEFF")
+    val element = json.parseToJsonElement(normalizedText)
+    if (element is JsonArray) {
+        return ImportedControllerProfile(
+            fallbackName,
+            decodeControllerProfile(normalizedText, fallbackName)
+        )
+    }
+
+    val objectValue = element as? JsonObject
+        ?: throw IllegalArgumentException("This is not a SimpleController profile file.")
+    if (!objectValue.containsKey("fileType")) {
+        require(objectValue.containsKey("pages")) {
+            "This is not a SimpleController profile file."
+        }
+        return ImportedControllerProfile(
+            fallbackName,
+            decodeControllerProfile(normalizedText, fallbackName)
+        )
+    }
+
+    val fileType = objectValue["fileType"]?.jsonPrimitive?.contentOrNull
+        ?: throw IllegalArgumentException("The profile file type is missing or invalid.")
+    require(fileType == CONTROLLER_PROFILE_TRANSFER_FILE_TYPE) {
+        "Unsupported profile file type '$fileType'."
+    }
+    val transferVersion = objectValue["transferVersion"]?.jsonPrimitive?.intOrNull
+        ?: throw IllegalArgumentException("The profile transfer version is missing or invalid.")
+    require(transferVersion >= 1) { "Profile transfer version $transferVersion is invalid." }
+    require(transferVersion <= CONTROLLER_PROFILE_TRANSFER_VERSION) {
+        "Profile transfer version $transferVersion is newer than supported version " +
+            CONTROLLER_PROFILE_TRANSFER_VERSION
+    }
+    val encodedProfile = objectValue["profile"] as? JsonObject
+        ?: throw IllegalArgumentException("The profile data is missing or invalid.")
+    val profileFormatVersion = encodedProfile["formatVersion"]?.jsonPrimitive?.intOrNull
+        ?: CONTROLLER_PROFILE_FORMAT_VERSION
+    require(profileFormatVersion >= 1) {
+        "Profile format $profileFormatVersion is invalid."
+    }
+    require(profileFormatVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
+        "Profile format $profileFormatVersion is newer than supported format " +
+            CONTROLLER_PROFILE_FORMAT_VERSION
+    }
+
+    val transfer = json.decodeFromJsonElement<ControllerProfileTransferFile>(element)
+
+    val suggestedName = sanitizeSuggestedProfileName(transfer.profileName.ifBlank { fallbackName })
+    return ImportedControllerProfile(
+        suggestedName,
+        validateControllerProfile(transfer.profile, suggestedName)
+    )
+}
+
+fun controllerProfileTransferFileName(profileName: String): String =
+    sanitizeSuggestedProfileName(profileName) + CONTROLLER_PROFILE_TRANSFER_EXTENSION
+
+fun sanitizeSuggestedProfileName(value: String): String {
+    val withoutTransferExtension = value.replace(
+        Regex("(?i)\\.simplecontroller-profile\\.json$"),
+        ""
+    ).replace(Regex("(?i)\\.json$"), "")
+    return withoutTransferExtension
+        .replace(Regex("[\\\\/\\u0000-\\u001F\\u007F]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .trim('.')
+        .take(80)
+        .ifBlank { "Imported Profile" }
+}
+
+fun validateImportedProfileName(name: String): String? {
+    val trimmed = name.trim()
+    if (trimmed.isEmpty()) return "Enter a profile name."
+    if (trimmed.length > 80) return "Profile names must be 80 characters or fewer."
+    if (Regex("[\\\\/\\u0000-\\u001F\\u007F]").containsMatchIn(trimmed)) {
+        return "Profile names cannot contain slashes or control characters."
+    }
+    return null
+}
+
+fun uniqueImportedProfileName(suggestedName: String, existingNames: Collection<String>): String {
+    val normalizedExisting = existingNames.mapTo(mutableSetOf()) {
+        it.trim().lowercase(Locale.ROOT)
+    }
+    val base = sanitizeSuggestedProfileName(suggestedName)
+    if (base.lowercase(Locale.ROOT) !in normalizedExisting) return base
+
+    fun withSuffix(suffix: String): String {
+        val available = (80 - suffix.length).coerceAtLeast(1)
+        return base.take(available).trimEnd() + suffix
+    }
+
+    var candidate = withSuffix(" (Imported)")
+    if (candidate.lowercase(Locale.ROOT) !in normalizedExisting) return candidate
+    var index = 2
+    while (true) {
+        candidate = withSuffix(" (Imported $index)")
+        if (candidate.lowercase(Locale.ROOT) !in normalizedExisting) return candidate
+        index++
+    }
+}
+
+/** Prevent a malformed or hostile document provider from allocating an unbounded import. */
+fun readControllerProfileTransferText(
+    input: InputStream,
+    maxBytes: Int = MAX_CONTROLLER_PROFILE_TRANSFER_BYTES
+): String {
+    require(maxBytes > 0)
+    val output = ByteArrayOutputStream(minOf(maxBytes, 64 * 1024))
+    val buffer = ByteArray(16 * 1024)
+    var total = 0
+    while (true) {
+        val count = input.read(buffer)
+        if (count < 0) break
+        if (count == 0) {
+            val singleByte = input.read()
+            if (singleByte < 0) break
+            total++
+            require(total <= maxBytes) {
+                "Profile file is larger than ${maxBytes / (1024 * 1024)} MB."
+            }
+            output.write(singleByte)
+            continue
+        }
+        total += count
+        require(total <= maxBytes) {
+            "Profile file is larger than ${maxBytes / (1024 * 1024)} MB."
+        }
+        output.write(buffer, 0, count)
+    }
+    return StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(output.toByteArray()))
+        .toString()
+        .removePrefix("\uFEFF")
+}
+
+/**
+ * Stage the exact export snapshot before opening the system picker. App-private staging lets the
+ * Activity Result callback finish safely even if Android recreates the Activity while the picker
+ * is open. It is never offered as a saved controller profile.
+ */
+fun stageControllerProfileTransfer(
+    ctx: Context,
+    profileName: String,
+    profile: ControllerProfile
+): Result<Unit> = stageProfileTransferDocument(
+    ctx,
+    encodeControllerProfileTransfer(profileName, profile)
+)
+
+/** Stage either the one-profile document or the all-profiles backup document. */
+fun stageProfileTransferDocument(ctx: Context, text: String): Result<Unit> = runCatching {
+    val atomic = AtomicFile(File(ctx.filesDir, PENDING_PROFILE_EXPORT_FILE))
+    atomic.delete()
+    val bytes = text.toByteArray(StandardCharsets.UTF_8)
+    require(bytes.size <= MAX_CONTROLLER_PROFILE_TRANSFER_BYTES) {
+        "Profile export is larger than ${MAX_CONTROLLER_PROFILE_TRANSFER_BYTES / (1024 * 1024)} MB."
+    }
+    val stream = atomic.startWrite()
+    try {
+        stream.write(bytes)
+        atomic.finishWrite(stream)
+    } catch (error: Throwable) {
+        atomic.failWrite(stream)
+        throw error
+    }
+}
+
+fun readStagedControllerProfileTransfer(ctx: Context): Result<String> = runCatching {
+    AtomicFile(File(ctx.filesDir, PENDING_PROFILE_EXPORT_FILE)).openRead().use {
+        readControllerProfileTransferText(it)
+    }
+}
+
+fun clearStagedControllerProfileTransfer(ctx: Context) {
+    AtomicFile(File(ctx.filesDir, PENDING_PROFILE_EXPORT_FILE)).delete()
 }
 
 /** Serialization round-trip guarantees detached nested lists now and as Control evolves. */

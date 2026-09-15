@@ -1,0 +1,46 @@
+{
+  "fileType": "simplecontroller-profile",
+  "transferVersion": 1,
+  "profileName": "Debug Migration Golden",
+  "profile": {
+    "formatVersion": 2,
+    "homePageId": "golden-base",
+    "pages": [
+      {
+        "id": "golden-base",
+        "name": "Base",
+        "controls": [
+          {
+            "id": "golden-go-to-alternate",
+            "type": "BUTTON",
+            "x": 20.0,
+            "y": 40.0,
+            "w": 160.0,
+            "h": 120.0,
+            "payload": "unused",
+            "name": "Alternate",
+            "pageAction": "GO_TO",
+            "pageTargetId": "golden-alternate"
+          }
+        ]
+      },
+      {
+        "id": "golden-alternate",
+        "name": "Alternate",
+        "controls": [
+          {
+            "id": "golden-home",
+            "type": "BUTTON",
+            "x": 20.0,
+            "y": 40.0,
+            "w": 160.0,
+            "h": 120.0,
+            "payload": "unused",
+            "name": "Home",
+            "pageAction": "HOME"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -41,6 +41,12 @@ class LayoutManager(
             result: ControllerProfileLoadResult
         ): Boolean = false
         fun onNewControllerProfileRequested(): Boolean = false
+        fun onExternalProfileImportRequested(): Boolean = false
+        fun onExternalProfileExportRequested(
+            profileName: String,
+            profile: ControllerProfile
+        ): Boolean = false
+        fun onAllProfilesExportRequested(): Boolean = false
     }
 
     // Callback handler
@@ -192,6 +198,16 @@ class LayoutManager(
                     }
                 }
             }
+            .setNeutralButton("Import profile file") { _, _ ->
+                if (callback?.onExternalProfileImportRequested() != true) {
+                    toast("Profile-file import is unavailable")
+                }
+            }
+            .setPositiveButton("Export all profiles") { _, _ ->
+                if (callback?.onAllProfilesExportRequested() != true) {
+                    toast("All-profile export is unavailable")
+                }
+            }
             .create()
 
         // Set up long press detection on list items (skip "New Layout" option)
@@ -264,7 +280,7 @@ class LayoutManager(
      * Show context menu for layout management
      */
     private fun showLayoutContextMenu(layoutName: String, onComplete: () -> Unit) {
-        val options = arrayOf("Rename", "Duplicate", "Delete")
+        val options = arrayOf("Rename", "Duplicate", "Export to file", "Delete")
         
         AlertDialog.Builder(context)
             .setTitle("Manage \"$layoutName\"")
@@ -272,11 +288,30 @@ class LayoutManager(
                 when (which) {
                     0 -> renameLayout(layoutName, onComplete)
                     1 -> duplicateLayout(layoutName, onComplete)
-                    2 -> deleteLayout(layoutName, onComplete)
+                    2 -> exportLayout(layoutName)
+                    3 -> deleteLayout(layoutName, onComplete)
                 }
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun exportLayout(layoutName: String) {
+        val isActive = callback?.activeLayoutName()
+            ?.equals(layoutName, ignoreCase = true) == true
+        val profile = if (isActive) {
+            callback?.controllerProfileForSave()
+        } else {
+            (readControllerProfile(context, layoutName) as? StoredControllerProfileResult.Loaded)
+                ?.result?.profile
+        }
+        if (profile == null) {
+            toast("Could not read \"$layoutName\"; its file was not changed")
+            return
+        }
+        if (callback?.onExternalProfileExportRequested(layoutName, profile) != true) {
+            toast("Profile-file export is unavailable")
+        }
     }
 
     /**

@@ -45,7 +45,7 @@ Use a matching APK and receiver pair from the exact official release or link I p
 
 The current APK is a development build, and the Windows receiver is not digitally signed, so Android, Windows, or SmartScreen may display an unfamiliar-app warning. Public source code makes the project independently reviewable, but it is not a blanket guarantee of safety. Download it only from the official repository.
 
-> **Protect your profiles:** If Android reports an update or signature problem, do not immediately uninstall the older app. Uninstalling removes the profiles stored inside it. Controller Pages can import another profile already saved inside the app, but external file export/import is not available yet.
+> **Protect your profiles:** If Android reports an update or signature problem, do not immediately uninstall the older app. Uninstalling removes profiles stored only inside it. First use **Export all profiles** and wait for the verified-export message. You can then import that backup after installing the differently signed release APK.
 
 ## Quick start
 
@@ -155,6 +155,41 @@ The app warns before Play Mode if a non-Home page has no usable Return, Home, or
 Edit remains an emergency route, but it is not intended to replace a reachable page-navigation
 Button. A possible future `PAGE_ONCE` action may return after one completed action; it is not part
 of this version.
+
+## Exporting and importing complete profiles
+
+External profile files are designed to survive uninstalling a sideloaded/debug APK and moving to a
+separately signed release APK, including a future release targeting Android API 36.
+
+To export one controller profile:
+
+1. Tap **Edit**, then **Load**.
+2. Long-press the saved profile and choose **Export to file**.
+3. Choose Downloads, Google Drive, OneDrive, or another location in Android's file picker.
+4. Wait for **Export verified**. SimpleController writes the file, reopens it, and confirms that the
+   saved profile matches before reporting success.
+
+To import:
+
+1. Tap **Edit**, then **Load**, then **Import profile file**.
+2. Select a `.simplecontroller-profile.json` file.
+3. Accept the unique suggested profile name or edit it, then tap **Import and load**.
+
+The import contains the complete profile: every page, Home-page choice, control, applied control
+setting, and page-navigation target. Existing profiles are never overwritten automatically. Older
+single-page layout JSON files can also be selected and are imported as one Base page.
+
+To export all profile data at once:
+
+1. Tap **Edit**, then **Load**, then **Export all profiles**.
+2. Choose a user-owned location and wait for **All-profile export verified**.
+3. In the new installation, use **Import profile file**, select the
+   `.simplecontroller-profiles-backup.json` file, review the counts, and tap **Import all**.
+
+The all-profile backup includes every saved controller profile and page, TouchAim calibration and
+manual profiles, Button Aim profiles, and Directional/WASD or Stick+ profiles. Existing profiles
+are retained and imported copies receive unique names. The currently loaded profile stays in place.
+Network/player/transport/theme and other non-profile settings are intentionally not included.
 
 ## What a payload is
 
@@ -748,7 +783,8 @@ Each should be the complete payload of its own dedicated Button.
 
 - Use **Load** and check the saved layout list.
 - Avoid uninstalling the app, because Android removes its internal saved layouts.
-- Before installing a differently signed APK, duplicate important layouts and record their payloads manually until export/import exists.
+- Before installing a differently signed APK, use **Export all profiles** and wait for the verified-export message.
+- Keep the exported files in Downloads or a trusted cloud/document location, then import them after installing the new APK.
 
 ### Windows warns about the receiver
 
@@ -762,7 +798,8 @@ As of September 14, 2026:
 - Delay macros are not reliable enough for ordered action sequences.
 - USB tethering, two-player play, Touch Aim tuning, global Hold, and several ConsoleBridge combinations need more real-device testing.
 - ConsoleBridge/Pico does not yet provide atomic receiver-side Release All confirmation.
-- Profiles are stored inside the Android app and do not yet have external file export/import.
+- Profiles remain private inside the app until deliberately exported. **Export all profiles** covers
+  controller profiles/pages and all four reusable-setting libraries, but no non-profile app settings.
 - Some advanced options may require saving and reopening the control before all nested fields appear.
 - The visual design and spacing still have room to improve.
 
@@ -839,6 +876,15 @@ A Button can start a persistent timed repeater with one tap and stop it with the
 - Page-navigation Buttons support Go To, Toggle, Previous, and Home without sending page commands to a receiver.
 - Every successful page change releases active output first, while the connection and player settings stay active.
 - Existing one-page profiles migrate in memory as Base and remain readable.
+
+### 15. Portable profile import/export — September 14
+
+- A complete profile and all of its Controller Pages can be exported through Android's file picker.
+- Export is reopened and checked before the app reports **Export verified**.
+- Imported files are validated, saved under a new unique name, verified, and then loaded safely.
+- The format is the migration path from this debug APK to a separately signed API 36 release APK.
+- **Export all profiles** and **Import all** also move every saved controller profile plus reusable
+  TouchAim calibration/manual, Button Aim, and Directional/Stick+ profiles.
 
 ---
 

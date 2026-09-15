@@ -2,6 +2,48 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-14 Portable Profile Import/Export
+
+External transfer supports a versioned `simplecontroller-profile` JSON envelope containing one
+complete `ControllerProfile` and a separate `simplecontroller-profiles-backup` envelope containing
+all controller and reusable setting profiles. Because the file lives in a user-selected Storage
+Access Framework location,
+it can be selected again after the debug APK is uninstalled and a separately signed release APK is
+installed. The format is independent of application ID, signing certificate, and target SDK.
+
+`LayoutManager` exposes Import and **Export all profiles** in the Load dialog, plus single-profile
+Export in each saved profile's long-press management menu. `MainActivity` owns the Activity Result
+launchers. Before opening the create-file
+picker, the exact profile snapshot is staged in an app-private `AtomicFile`, allowing Android to
+recreate the Activity without replacing the intended export. The selected document is written,
+closed, reopened, decoded, and compared with that snapshot before `Export verified` is shown.
+
+Import performs provider I/O and decoding off the UI thread, limits files to 25 MB, requires valid
+UTF-8/JSON, and validates version/structure before any internal write. A unique editable name is
+prefilled; existing profiles are never overwritten automatically. The imported profile is saved
+atomically and re-read before the existing safe profile-install path releases outputs and loads its
+Home page. Whole-profile import preserves page/control IDs and cross-page targets exactly.
+
+The all-profile bundle includes every controller profile/page and the TouchAim calibration/manual,
+Button Aim, and Directional/Stick+ reusable profile stores. Restore adds unique copies, remaps
+included TouchAim calibration references, verifies the new internal files, and keeps the currently
+loaded profile unchanged. Network/player/transport/theme and other non-profile preferences are not
+part of the backup.
+
+`PROFILE_TRANSFER_FORMAT.md` is the release compatibility contract. In particular, the future API
+36 release must accept transfer version 1, all-profile backup version 1, nested profile format 2,
+bare version-2 profile objects, and historical top-level Control arrays. The committed golden debug
+export must remain readable.
+
+Primary files:
+
+- `PROFILE_TRANSFER_FORMAT.md`
+- `app/src/main/java/com/example/simplecontroller/io/LayoutStorage.kt`
+- `app/src/main/java/com/example/simplecontroller/io/ProfileBackup.kt`
+- `app/src/main/java/com/example/simplecontroller/io/LayoutManager.kt`
+- `app/src/main/java/com/example/simplecontroller/MainActivity.kt`
+- `app/src/test/resources/golden/debug-profile-transfer-v1.json`
+
 ## 2026-09-14 Controller Pages
 
 Saved controller profiles now use a versioned object containing an ordered list of complete

@@ -5,10 +5,12 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.res.Configuration
+import android.net.Uri
 import android.os.Bundle
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
+import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -20,6 +22,7 @@ import android.view.ViewTreeObserver
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
 import androidx.core.view.doOnNextLayout
@@ -28,12 +31,30 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.io.ControllerProfileLoadResult
+import com.example.simplecontroller.io.ImportedControllerProfile
+import com.example.simplecontroller.io.ControllerProfilesBackupLoadResult
+import com.example.simplecontroller.io.ProfileTransferDocument
 import com.example.simplecontroller.io.StoredControllerProfileResult
+import com.example.simplecontroller.io.clearStagedControllerProfileTransfer
+import com.example.simplecontroller.io.controllerProfilesBackupFileName
+import com.example.simplecontroller.io.controllerProfileTransferFileName
+import com.example.simplecontroller.io.createControllerProfilesBackup
+import com.example.simplecontroller.io.decodeProfileTransferDocument
+import com.example.simplecontroller.io.deleteControllerProfile
 import com.example.simplecontroller.io.deepCopyControls
+import com.example.simplecontroller.io.encodeControllerProfilesBackup
+import com.example.simplecontroller.io.importControllerProfilesBackup
 import com.example.simplecontroller.io.listLayouts
+import com.example.simplecontroller.io.readControllerProfileTransferText
 import com.example.simplecontroller.io.readControllerProfile
+import com.example.simplecontroller.io.readStagedControllerProfileTransfer
 import com.example.simplecontroller.io.saveControllerProfile
+import com.example.simplecontroller.io.sanitizeSuggestedProfileName
+import com.example.simplecontroller.io.stageControllerProfileTransfer
+import com.example.simplecontroller.io.stageProfileTransferDocument
 import com.example.simplecontroller.io.stableLegacyBasePageId
+import com.example.simplecontroller.io.uniqueImportedProfileName
+import com.example.simplecontroller.io.validateImportedProfileName
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerPageOption
@@ -58,17 +79,36 @@ import com.example.simplecontroller.ui.UIComponentBuilder
 import com.example.simplecontroller.ui.ReleaseAllCoordinator
 import com.example.simplecontroller.ui.TouchAimCalibrationWizard
 import com.google.android.material.floatingactionbutton.FloatingActionButton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.simplecontroller.net.UdpClient
 import android.widget.CheckBox
 import android.view.ViewGroup
+import java.nio.charset.StandardCharsets
 
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     private companion object {
         const val USB_TETHER_RETURN_PENDING = "usbTetherReturnPending"
         const val TETHER_SETTINGS_ACTION = "android.settings.TETHER_SETTINGS"
+    }
+
+    private val createProfileDocumentLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri ->
+        if (uri == null) {
+            clearStagedControllerProfileTransfer(this)
+        } else {
+            writeAndVerifyProfileExport(uri)
+        }
+    }
+
+    private val openProfileDocumentLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) readAndPromptForProfileImport(uri)
     }
 
     /* ---------- persisted "current layout" name ---------- */
@@ -875,6 +915,371 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         Toast.makeText(this, "New blank profile created", Toast.LENGTH_SHORT).show()
         return true
     }
+
+    override fun onExternalProfileImportRequested(): Boolean {
+        runCatching {
+            openProfileDocumentLauncher.launch(
+                arrayOf("application/json", "text/json", "text/plain", "application/octet-stream")
+            )
+        }.onFailure {
+            Toast.makeText(
+                this,
+                "Android's document picker could not be opened: ${friendlyProfileFileError(it)}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        return true
+    }
+
+    override fun onExternalProfileExportRequested(
+        profileName: String,
+        profile: ControllerProfile
+    ): Boolean {
+        lifecycleScope.launch {
+            val staged = withContext(Dispatchers.IO) {
+                stageControllerProfileTransfer(this@MainActivity, profileName, profile)
+            }
+            if (staged.isFailure) {
+                withContext(Dispatchers.IO) {
+                    clearStagedControllerProfileTransfer(this@MainActivity)
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    "Could not prepare the profile export: ${friendlyProfileFileError(staged.exceptionOrNull())}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                runCatching {
+                    createProfileDocumentLauncher.launch(
+                        controllerProfileTransferFileName(profileName)
+                    )
+                }.onFailure {
+                    withContext(Dispatchers.IO) {
+                        clearStagedControllerProfileTransfer(this@MainActivity)
+                    }
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Android's document picker could not be opened: ${friendlyProfileFileError(it)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+        return true
+    }
+
+    override fun onAllProfilesExportRequested(): Boolean {
+        val activeName = layoutName
+        val activeProfile = controllerProfileForSave()
+        lifecycleScope.launch {
+            val staged = withContext(Dispatchers.IO) {
+                createControllerProfilesBackup(
+                    this@MainActivity,
+                    activeName,
+                    activeProfile
+                ).mapCatching(::encodeControllerProfilesBackup)
+                    .fold(
+                        onSuccess = { stageProfileTransferDocument(this@MainActivity, it) },
+                        onFailure = { Result.failure(it) }
+                    )
+            }
+            if (staged.isFailure) {
+                withContext(Dispatchers.IO) {
+                    clearStagedControllerProfileTransfer(this@MainActivity)
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    "Could not prepare the all-profiles export: ${friendlyProfileFileError(staged.exceptionOrNull())}",
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                runCatching {
+                    createProfileDocumentLauncher.launch(controllerProfilesBackupFileName())
+                }.onFailure {
+                    withContext(Dispatchers.IO) {
+                        clearStagedControllerProfileTransfer(this@MainActivity)
+                    }
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Android's document picker could not be opened: ${friendlyProfileFileError(it)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+        }
+        return true
+    }
+
+    private fun writeAndVerifyProfileExport(uri: Uri) {
+        lifecycleScope.launch {
+            val attempt = withContext(Dispatchers.IO) {
+                var writeCompleted = false
+                val result = runCatching {
+                    val stagedText = readStagedControllerProfileTransfer(this@MainActivity)
+                        .getOrThrow()
+                    val expected = decodeProfileTransferDocument(stagedText, "Exported Profile")
+                    val output = contentResolver.openOutputStream(uri, "wt")
+                        ?: error("The selected location could not be opened for writing.")
+                    output.bufferedWriter(StandardCharsets.UTF_8).use { writer ->
+                        writer.write(stagedText)
+                    }
+                    writeCompleted = true
+
+                    val writtenText = contentResolver.openInputStream(uri)?.use {
+                        readControllerProfileTransferText(it)
+                    } ?: error("The exported file could not be reopened for verification.")
+                    val verified = decodeProfileTransferDocument(
+                        writtenText,
+                        "Exported Profile"
+                    )
+                    require(verified == expected) {
+                        "The exported profile data did not match the data prepared by SimpleController."
+                    }
+                    verified
+                }
+                clearStagedControllerProfileTransfer(this@MainActivity)
+                writeCompleted to result
+            }
+
+            val verified = attempt.second.getOrNull()
+            if (verified != null) {
+                val message = when (verified) {
+                    is ProfileTransferDocument.Single ->
+                        "Export verified: ${verified.imported.suggestedName} " +
+                            "(${verified.imported.result.profile.pages.size} pages)"
+                    is ProfileTransferDocument.AllProfiles -> {
+                        val backup = verified.loaded.backup
+                        val reusableCount = backup.touchAimCalibrations.size +
+                            backup.touchAimManualProfiles.size + backup.buttonAimProfiles.size +
+                            backup.stickDirectionalProfiles.size
+                        "All-profile export verified: ${backup.controllerProfiles.size} controller, " +
+                            "$reusableCount reusable profiles"
+                    }
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    message,
+                    Toast.LENGTH_LONG
+                ).show()
+            } else {
+                val prefix = if (attempt.first) {
+                    "The file was written, but verification failed"
+                } else {
+                    "Profile export failed"
+                }
+                Toast.makeText(
+                    this@MainActivity,
+                    "$prefix: ${friendlyProfileFileError(attempt.second.exceptionOrNull())}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+
+    private fun readAndPromptForProfileImport(uri: Uri) {
+        lifecycleScope.launch {
+            val document = withContext(Dispatchers.IO) {
+                runCatching {
+                    val displayName = profileDocumentDisplayName(uri)
+                    val text = contentResolver.openInputStream(uri)?.use {
+                        readControllerProfileTransferText(it)
+                    } ?: error("The selected file could not be opened.")
+                    displayName to decodeProfileTransferDocument(text, displayName)
+                }
+            }
+            document.fold(
+                onSuccess = { (displayName, document) ->
+                    when (document) {
+                        is ProfileTransferDocument.Single ->
+                            promptForProfileImport(document.imported, displayName)
+                        is ProfileTransferDocument.AllProfiles ->
+                            promptForAllProfilesImport(document.loaded, displayName)
+                    }
+                },
+                onFailure = {
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Profile import failed: ${friendlyProfileFileError(it)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
+        }
+    }
+
+    private fun promptForProfileImport(
+        imported: ImportedControllerProfile,
+        sourceDisplayName: String
+    ) {
+        val input = EditText(this).apply {
+            setText(uniqueImportedProfileName(imported.suggestedName, listLayouts(this@MainActivity)))
+            selectAll()
+        }
+        val warnings = imported.result.warnings
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Import controller profile")
+            .setMessage(
+                buildString {
+                    append("File: $sourceDisplayName\n")
+                    append("Pages: ${imported.result.profile.pages.size}\n\n")
+                    append("The imported profile will be saved as a new profile and loaded at its Home page. ")
+                    append("Your current profile will not be overwritten.")
+                    if (imported.result.migratedFromSinglePage) {
+                        append("\n\nThis older one-page layout will be imported as a Base page.")
+                    }
+                    if (warnings.isNotEmpty()) {
+                        append("\n\nProfile warning:\n")
+                        append(warnings.take(3).joinToString("\n"))
+                    }
+                }
+            )
+            .setView(input)
+            .setPositiveButton("Import and load", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            val importButton = dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+            importButton.setOnClickListener {
+                val requestedName = input.text.toString().trim()
+                val problem = validateImportedProfileName(requestedName)
+                if (problem != null) {
+                    input.error = problem
+                    return@setOnClickListener
+                }
+                if (listLayouts(this).any { it.equals(requestedName, ignoreCase = true) }) {
+                    input.error = "That profile already exists. Choose a new name."
+                    return@setOnClickListener
+                }
+
+                importButton.isEnabled = false
+                lifecycleScope.launch {
+                    val verified = withContext(Dispatchers.IO) {
+                        if (listLayouts(this@MainActivity).any {
+                                it.equals(requestedName, ignoreCase = true)
+                            }
+                        ) return@withContext null
+
+                        val saved = saveControllerProfile(
+                            this@MainActivity,
+                            requestedName,
+                            imported.result.profile
+                        )
+                        if (saved.isFailure) return@withContext null
+                        val reloaded = (readControllerProfile(
+                            this@MainActivity,
+                            requestedName
+                        ) as? StoredControllerProfileResult.Loaded)?.result
+                        reloaded?.takeIf { it.profile == imported.result.profile } ?: run {
+                            deleteControllerProfile(this@MainActivity, requestedName)
+                            null
+                        }
+                    }
+                    importButton.isEnabled = true
+                    if (verified == null) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "The imported profile could not be saved and verified; the current profile is unchanged.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        dialog.dismiss()
+                        onControllerProfileLoaded(requestedName, verified)
+                        Toast.makeText(
+                            this@MainActivity,
+                            "Imported \"$requestedName\" with ${verified.profile.pages.size} pages",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun promptForAllProfilesImport(
+        loaded: ControllerProfilesBackupLoadResult,
+        sourceDisplayName: String
+    ) {
+        val backup = loaded.backup
+        val reusableCount = backup.touchAimCalibrations.size +
+            backup.touchAimManualProfiles.size + backup.buttonAimProfiles.size +
+            backup.stickDirectionalProfiles.size
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Import all profiles")
+            .setMessage(
+                buildString {
+                    append("File: $sourceDisplayName\n")
+                    append("Controller profiles: ${backup.controllerProfiles.size}\n")
+                    append("Reusable profiles: $reusableCount\n\n")
+                    append("This adds every profile in the backup. Existing profiles are kept, ")
+                    append("and duplicate names receive an Imported suffix. ")
+                    append("Your currently loaded profile stays unchanged.")
+                    if (loaded.warnings.isNotEmpty()) {
+                        append("\n\nProfile warning:\n")
+                        append(loaded.warnings.take(3).joinToString("\n"))
+                    }
+                }
+            )
+            .setPositiveButton("Import all", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            val importButton = dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE)
+            importButton.setOnClickListener {
+                importButton.isEnabled = false
+                lifecycleScope.launch {
+                    val imported = withContext(Dispatchers.IO) {
+                        importControllerProfilesBackup(this@MainActivity, loaded)
+                    }
+                    importButton.isEnabled = true
+                    imported.fold(
+                        onSuccess = { result ->
+                            dialog.dismiss()
+                            val importedReusable = result.touchAimCalibrationCount +
+                                result.touchAimManualProfileCount + result.buttonAimProfileCount +
+                                result.stickDirectionalProfileCount
+                            Toast.makeText(
+                                this@MainActivity,
+                                "Imported ${result.controllerProfileCount} controller and " +
+                                    "$importedReusable reusable profiles",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onFailure = {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "All-profile import failed; no existing profile was overwritten: " +
+                                    friendlyProfileFileError(it),
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    )
+                }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun profileDocumentDisplayName(uri: Uri): String {
+        val displayName = runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) null else {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index < 0) null else cursor.getString(index)
+                }
+            }
+        }.getOrNull()
+        return sanitizeSuggestedProfileName(displayName.orEmpty())
+    }
+
+    private fun friendlyProfileFileError(error: Throwable?): String =
+        error?.message?.takeIf(String::isNotBlank) ?: "unknown file error"
 
     /**
      * Clear all control views
