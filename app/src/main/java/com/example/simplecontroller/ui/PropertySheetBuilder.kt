@@ -18,6 +18,8 @@ import com.example.simplecontroller.model.TouchAimOutput
 import com.example.simplecontroller.model.TouchAimMode
 import com.example.simplecontroller.model.TouchAimShootBehavior
 import com.example.simplecontroller.model.TouchStageAction
+import com.example.simplecontroller.model.PageAction
+import com.example.simplecontroller.model.pageActionNeedsTarget
 import com.example.simplecontroller.model.applyTo
 import com.example.simplecontroller.model.ButtonAimProfile
 import com.example.simplecontroller.model.StickDirectionalProfile
@@ -72,6 +74,7 @@ class PropertySheetBuilder(
         val payloadField: AutoCompleteTextView,
         val touchAim: TouchAimComponents?,
         val buttonAim: ButtonAimComponents?,
+        val pageAction: PageActionComponents?,
         val stickProfiles: StickDirectionalProfileComponents?
     )
 
@@ -150,6 +153,13 @@ class PropertySheetBuilder(
         val alternateStickDeadzone: EditText,
         val alternateStickUsesTouchPosition: CheckBox,
         val alternateHaptics: CheckBox
+    )
+
+    private data class PageActionComponents(
+        val action: Spinner,
+        val target: Spinner,
+        val targetIds: List<String>,
+        val targetContainer: LinearLayout
     )
 
     private data class StickDirectionalProfileComponents(
@@ -361,6 +371,14 @@ class PropertySheetBuilder(
         
         // Size controls
         val (widthSeek, heightSeek) = addSizeControls(container)
+
+        // Keep the primary Button behavior choice near the top for one-finger access.
+        val pageActionComponents = if (model.type == ControlType.BUTTON) {
+            addPageActionUI(container)
+        } else null
+        val earlyButtonPayload = if (model.type == ControlType.BUTTON) {
+            addPayloadControl(container)
+        } else null
         
         // Sensitivity (for stick/touchpad)
         val sensitivitySeek = if (
@@ -449,6 +467,34 @@ class PropertySheetBuilder(
                     autoTapEnabled.isChecked = false
                 autoTapEnabled.isChecked -> holdToggle.isChecked = false
             }
+
+            val updatePageActionCompatibility = {
+                val action = PageAction.entries[pageActionComponents?.action?.selectedItemPosition ?: 0]
+                val localAction = action != PageAction.NONE
+                pageActionComponents?.targetContainer?.visibility =
+                    if (pageActionNeedsTarget(action)) View.VISIBLE else View.GONE
+                holdToggle.isEnabled = !localAction
+                autoTapEnabled.isEnabled = !localAction
+                buttonAimComponents?.enabled?.isEnabled = !localAction
+                holdDurationField.visibility = if (localAction) View.GONE else View.VISIBLE
+                earlyButtonPayload?.visibility = if (localAction) View.GONE else View.VISIBLE
+                autoTapIntervalMs.visibility = if (!localAction && autoTapEnabled.isChecked) {
+                    View.VISIBLE
+                } else View.GONE
+                if (localAction) {
+                    holdToggle.isChecked = false
+                    autoTapEnabled.isChecked = false
+                    buttonAimComponents?.enabled?.isChecked = false
+                }
+            }
+            pageActionComponents?.action?.onItemSelectedListener =
+                object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(
+                        parent: AdapterView<*>?, view: View?, position: Int, id: Long
+                    ) = updatePageActionCompatibility()
+                    override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+                }
+            updatePageActionCompatibility()
         }
         
         // Stick/Touchpad controls
@@ -544,8 +590,11 @@ class PropertySheetBuilder(
         }
         
         // Payload field
-        val payloadField = addPayloadControl(container)
-        payloadField.visibility = if (model.type == ControlType.TOUCH_AIM) View.GONE else View.VISIBLE
+        val payloadField = earlyButtonPayload ?: addPayloadControl(container)
+        payloadField.visibility = if (
+            model.type == ControlType.TOUCH_AIM ||
+            (model.type == ControlType.BUTTON && model.pageAction != PageAction.NONE)
+        ) View.GONE else View.VISIBLE
         
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivitySeek,
@@ -553,8 +602,49 @@ class PropertySheetBuilder(
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField, touchAimComponents, buttonAimComponents,
+            pageActionComponents,
             stickProfileComponents
         )
+    }
+
+    private fun addPageActionUI(container: LinearLayout): PageActionComponents {
+        addSectionTitle(container, "Local page action")
+        container.addView(TextView(context).apply {
+            text = "Page actions run once on Android and never send the ordinary payload. Hold, Turbo, Auto-Tap, Button Aim, and delayed actions are disabled."
+        })
+        val action = addChoice(
+            container,
+            "Button action",
+            listOf("Ordinary payload", "Go to page", "Toggle page", "Return to previous page", "Go to Home page"),
+            model.pageAction.ordinal.coerceIn(0, PageAction.entries.lastIndex)
+        )
+
+        val pageOptions = (context as? MainActivity)?.controllerPageOptions().orEmpty()
+        val ids = pageOptions.map { it.id }.toMutableList()
+        val names = pageOptions.map { it.name }.toMutableList()
+        if (model.pageTargetId.isNotBlank() && model.pageTargetId !in ids) {
+            ids += model.pageTargetId
+            names += "⚠ Missing page"
+        }
+        if (ids.isEmpty()) {
+            ids += ""
+            names += "No pages available"
+        }
+        val targetContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(context).apply { text = "Target page" })
+        }
+        val target = Spinner(context).apply {
+            adapter = ArrayAdapter(
+                context,
+                android.R.layout.simple_spinner_dropdown_item,
+                names
+            )
+            setSelection(ids.indexOf(model.pageTargetId).takeIf { it >= 0 } ?: 0)
+        }
+        targetContainer.addView(target)
+        container.addView(targetContainer)
+        return PageActionComponents(action, target, ids, targetContainer)
     }
 
     private fun addStickDirectionalProfileUI(
@@ -2320,6 +2410,22 @@ class PropertySheetBuilder(
             }
             model.swipeActivate = components.swipeActivate.isChecked
             components.buttonAim?.let(::saveButtonAimProperties)
+            components.pageAction?.let { fields ->
+                val action = PageAction.entries[
+                    fields.action.selectedItemPosition.coerceIn(0, PageAction.entries.lastIndex)
+                ]
+                model.pageAction = action
+                model.pageTargetId = if (pageActionNeedsTarget(action)) {
+                    fields.targetIds.getOrNull(fields.target.selectedItemPosition).orEmpty()
+                } else ""
+                if (action != PageAction.NONE) {
+                    model.holdToggle = false
+                    model.autoTapEnabled = false
+                    model.buttonAimEnabled = false
+                    model.buttonAimOneShotAlternateEnabled = false
+                    model.buttonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE
+                }
+            }
         }
         
         // Stick/Touchpad properties

@@ -9,6 +9,8 @@ fun autoTapUnsupportedPayloadReason(payload: String): String? {
         .map { it.uppercase() }
     return when {
         commands.isEmpty() -> "Auto-tap needs a button payload."
+        commands.any { it.startsWith("PAGE_") } ->
+            "Page actions cannot use Toggle auto-tap."
         commands.any { it == "RELEASE_ALL" } -> "Release All cannot use Toggle auto-tap."
         commands.any { it == "SCROLL_MODE_TOGGLE" } ->
             "Scroll Mode Toggle cannot use Toggle auto-tap."

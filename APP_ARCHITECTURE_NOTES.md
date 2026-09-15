@@ -2,6 +2,45 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-14 Controller Pages
+
+Saved controller profiles now use a versioned object containing an ordered list of complete
+`ControllerPage` snapshots and one stable Home page ID. Each page has its own stable UUID, name,
+and full `Control` list. The runtime active/previous page is intentionally not serialized: opening
+or loading a profile starts on Home. Older top-level JSON control arrays still load and are wrapped
+in memory as one deterministic-ID page named `Base`; the structured multipage format is written by
+the normal save/autosave path.
+
+The existing mutable `controls` list remains the rendered working copy. Before page selection,
+save, or runtime navigation, MainActivity deep-copies it back into only the displayed page.
+Selecting another page refills the working list from another detached copy. Duplicate and import
+regenerate page/control IDs and copy every serialized setting, so pages never share mutable control
+state or remain linked to another saved profile.
+
+Buttons store typed Android-local `PageAction` and `pageTargetId` fields separately from their
+ordinary payload. Go To and Toggle resolve the current page name through the stable target ID;
+Return and Home need no target. ControlView consumes these actions once on `ACTION_DOWN`, ahead of
+Button Aim, Auto-Tap, Hold, Turbo, or ordinary payload handling. Receiver transports also reject
+raw `PAGE_*` strings as defense in depth.
+
+A successful Play Mode change resolves its destination first, then runs `ReleaseAllCoordinator`
+to invalidate stale sends and cancel latches, sticks, Turbo, Auto-Tap, delayed actions, Button Aim,
+TouchAim, pointer ownership, and one-shot state. Only after cleanup does it silently detach the old
+views and render the destination page. The UDP connection, player selection, and transport settings
+stay unchanged. Explicit Release All clears every output but deliberately keeps the current page.
+Edit Mode, profile loading, disconnect, and app pause reset the runtime session to Home and clear
+its single previous-page value.
+
+Primary files:
+
+- `app/src/main/java/com/example/simplecontroller/model/ControllerProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/model/Control.kt`
+- `app/src/main/java/com/example/simplecontroller/io/LayoutStorage.kt`
+- `app/src/main/java/com/example/simplecontroller/io/LayoutManager.kt`
+- `app/src/main/java/com/example/simplecontroller/MainActivity.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/ControlView.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/PropertySheetBuilder.kt`
+
 ## 2026-09-13 TouchAim two-state calibration wizard
 
 TouchAim retains its original manual `AIM_ONLY/LOW/MEDIUM/HIGH` behavior as the serialized default.

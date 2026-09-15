@@ -13,6 +13,7 @@ import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.SocketException
 import java.net.SocketTimeoutException
+import com.example.simplecontroller.model.isPageTransportCommand
 
 
 object NetworkClient {
@@ -494,6 +495,10 @@ object NetworkClient {
      * Non‑blocking, thread‑safe.
      */
     fun send(message: String) {
+        if (isPageTransportCommand(message)) {
+            Log.w("NetworkClient", "Blocked Android-local page command from receiver transport")
+            return
+        }
         android.util.Log.d("NetworkClient", "Sending: $message")
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             scope.launch {

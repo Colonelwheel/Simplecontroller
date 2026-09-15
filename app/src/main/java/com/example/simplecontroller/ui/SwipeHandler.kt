@@ -104,6 +104,11 @@ class SwipeHandler {
 
                         // Activate the new control with DOWN…
                         entered.forwardEvent(e, MotionEvent.ACTION_DOWN)
+                        // A local page action can synchronously cancel Swipe and remove this view.
+                        // Never re-adopt or forward MOVE to a detached page-switch button.
+                        if (activeTouch == null || !swipeOwnsGesture || entered.parent == null) {
+                            return true
+                        }
                         // …and immediately feed it a MOVE so sticks have a position right away
                         entered.forwardEvent(e, MotionEvent.ACTION_MOVE)
 

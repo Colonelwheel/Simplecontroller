@@ -14,6 +14,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import com.example.simplecontroller.CbProtocol
+import com.example.simplecontroller.model.isPageTransportCommand
 
 /**
  * Provides UDP communication for lower latency position updates.
@@ -153,6 +154,10 @@ object UdpClient {
      * Send a command via UDP
      */
     fun sendCommand(command: String) {
+        if (isPageTransportCommand(command)) {
+            Log.w(TAG, "Blocked Android-local page command from receiver transport")
+            return
+        }
         val ticket = outputSafetyEpoch.nextTicket()
         if (!isInitialized || socket == null || serverAddress == null) {
             if (outputSafetyEpoch.isCurrent(ticket)) {
@@ -270,6 +275,10 @@ object UdpClient {
      * Use this for WASD or similar directional controls
      */
     fun sendKeyCommand(key: String, isPressed: Boolean) {
+        if (isPageTransportCommand(key)) {
+            Log.w(TAG, "Blocked Android-local page command from keyboard transport")
+            return
+        }
         if (isPressed) {
             // Add to active keys
             activeKeys[key] = true

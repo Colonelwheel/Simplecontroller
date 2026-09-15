@@ -20,6 +20,8 @@ import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.R
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.PageAction
+import com.example.simplecontroller.model.isLocalPageAction
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
@@ -38,7 +40,9 @@ import android.view.GestureDetector.SimpleOnGestureListener
  */
 class ControlView(
     context: Context,
-    val model: Control
+    val model: Control,
+    private val onPageAction: ((PageAction, String) -> Unit)? = null,
+    private val pageActionLabel: ((Control) -> String?)? = null
 ) : FrameLayout(context) {
 
     /*hold*/
@@ -49,6 +53,8 @@ class ControlView(
 
     private var wasJustUnlatched = false
     private var suppressLatchReleaseSideEffect = false
+    private var pageActionGestureConsumed = false
+    private var safeForSilentDetach = false
 
 
     /* ───────── member variables ────────── */
@@ -287,7 +293,18 @@ class ControlView(
         SwipeManager.registerControl(this)
 
         // Initial UI updates
-        uiHelper.updateLabel()
+        refreshControlLabel()
+    }
+
+    private fun refreshControlLabel() {
+        uiHelper.updateLabel(if (model.isLocalPageAction()) pageActionLabel?.invoke(model) else null)
+    }
+
+    fun refreshPageActionLabel() = refreshControlLabel()
+
+    /** Used only after centralized cleanup or while Edit Mode guarantees views are output-inert. */
+    fun markSafeForSilentDetach() {
+        safeForSilentDetach = true
     }
 
     private fun updateButtonAimPresentation() {
@@ -297,7 +314,7 @@ class ControlView(
 
     // Clean up when the view is removed
     override fun onDetachedFromWindow() {
-        releaseEverythingLocally()
+        if (!safeForSilentDetach) releaseEverythingLocally()
 
         // Unregister from SwipeManager
         SwipeManager.unregisterControl(this)
@@ -472,6 +489,19 @@ class ControlView(
         when (model.type) {
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> {
+                if (model.isLocalPageAction()) {
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            if (!pageActionGestureConsumed && isAttachedToWindow) {
+                                pageActionGestureConsumed = true
+                                onPageAction?.invoke(model.pageAction, model.pageTargetId)
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                            pageActionGestureConsumed = false
+                    }
+                    return
+                }
                 if (model.buttonAimEnabled && !uiHelper.isReleaseAllAction()) {
                     buttonAimHandler?.onTouch(e)
                     return
@@ -1080,6 +1110,7 @@ class ControlView(
      * This deliberately leaves the serialized model and all global settings unchanged.
      */
     fun releaseEverythingLocally() {
+        pageActionGestureConsumed = false
         val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
         if (buttonAimOwnedRuntime) buttonAimHandler?.hardReset()
         holdHandler.removeCallbacksAndMessages(null)
@@ -1145,7 +1176,7 @@ class ControlView(
             lp.width = model.w.toInt()
             lp.height = model.h.toInt()
             layoutParams = lp
-            uiHelper.updateLabel()
+            refreshControlLabel()
             invalidate()
 
             // Stop any running senders when settings change

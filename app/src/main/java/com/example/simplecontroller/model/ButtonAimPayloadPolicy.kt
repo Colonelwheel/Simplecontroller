@@ -24,6 +24,9 @@ object ButtonAimPayloadPolicy {
 
     private fun classify(raw: String): TokenResult {
         val command = raw.trim().uppercase()
+        if (command.startsWith("PAGE_")) {
+            return TokenResult(error = "Page actions must use the local Button action selector.")
+        }
         if (command == "RELEASE_ALL") return TokenResult(TokenKind.RELEASE_ALL)
         if (command == "SCROLL_MODE_TOGGLE" || command == "CAMERA_FOLLOW" ||
             command == "CAMERA_FOLLOW:1" || command == "CAMERA_FOLLOW:0"

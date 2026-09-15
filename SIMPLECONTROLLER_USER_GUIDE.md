@@ -1,6 +1,6 @@
 # SimpleController User Guide
 
-> **Guide version:** September 13, 2026
+> **Guide version:** September 14, 2026
 >
 > **Applies to:** the current TouchAim calibration feature build on `codex/receiver-build-folder-backup`
 >
@@ -45,7 +45,7 @@ Use a matching APK and receiver pair from the exact official release or link I p
 
 The current APK is a development build, and the Windows receiver is not digitally signed, so Android, Windows, or SmartScreen may display an unfamiliar-app warning. Public source code makes the project independently reviewable, but it is not a blanket guarantee of safety. Download it only from the official repository.
 
-> **Protect your layouts:** If Android reports an update or signature problem, do not immediately uninstall the older app. Uninstalling removes the layouts stored inside it, and the current version does not yet have layout export/import.
+> **Protect your profiles:** If Android reports an update or signature problem, do not immediately uninstall the older app. Uninstalling removes the profiles stored inside it. Controller Pages can import another profile already saved inside the app, but external file export/import is not available yet.
 
 ## Quick start
 
@@ -83,7 +83,8 @@ The receiver accepts controller commands over the local network without a passwo
 
 ## Creating and editing a layout
 
-The app calls its saved profiles **layouts**.
+A saved **profile** is the complete controller setup. Older versions called these saved profiles
+**layouts**, so the Save/Load screens and filenames may still use that word.
 
 1. Tap **Edit** in the upper-right corner. It changes to **Done**.
 2. If you want to begin from an empty page, tap **Load**, then **New Layout**.
@@ -95,6 +96,65 @@ The app calls its saved profiles **layouts**.
 8. Tap **Save** to name or update the layout, then **Done** to return to play mode.
 
 Tap **Load** to switch layouts. Long-press a saved layout to rename, duplicate, or delete it. The app normally saves the current layout when it pauses, but pressing **Save** yourself is the safest habit after meaningful changes.
+
+## Controller Pages inside a profile
+
+One saved profile can now contain several complete controller pages, such as **Base**,
+**Alternate**, **Driving**, or **Menus**. A page is not a small overlay: it owns a complete list of
+Buttons, Sticks, Touchpads, TouchAim surfaces, positions, colors, payloads, and advanced settings.
+
+To create and edit Page 2:
+
+1. Tap **Edit**.
+2. Tap **Editing page: Base ▾**.
+3. Choose **Duplicate current page** for the safest start, name it, and edit the duplicate.
+4. Or choose **Add blank page** or **Import saved profile as page**. The app offers to copy your
+   existing page-navigation Buttons at their current positions; this option starts enabled.
+5. Long-press controls on Page 2 and edit them normally. Changes affect only Page 2.
+6. Use the same page manager to rename a page or set it as Home. Page names are unique regardless
+   of capitalization or extra spaces.
+7. Tap **Save** to save every page in the profile, then tap **Done**.
+
+Duplicate and import create independent deep copies. Later edits to Base do not change Alternate,
+and editing an imported page does not change or depend on its source profile.
+
+### Page-switch Buttons
+
+Edit an ordinary Button and use **Local page action** instead of typing a page command manually:
+
+- **Go to page** switches directly to the selected page. Choosing the active page does nothing.
+- **Toggle page** switches to its target; when pressed on that target page, it returns to the page
+  most recently left. This lets a copied Toggle Button move from Base to Alternate and back.
+- **Return to previous page** returns to the most recently left valid page, or Home if none exists.
+- **Go to Home page** switches to the profile's designated Home page.
+
+Target Buttons store the page's stable ID while showing its current name. Renaming a page therefore
+does not break its Buttons. If a target was deleted, the Button is visibly marked **Missing page**
+and safely does nothing. Deleting a page reports how many controls reference it. You cannot delete
+the only page or delete Home until another page becomes Home.
+
+Page actions run only inside Android; they are never sent to the Windows receiver or Pico. They
+activate once per intentional press and cannot use Hold Toggle, Turbo, Auto-Tap, Button Aim, or
+delayed/on-release behavior.
+
+### Safety and startup behavior
+
+Before a successful Play Mode page change, SimpleController releases held/latched buttons and
+triggers, centers sticks, releases keyboard and mouse holds, cancels Turbo/Auto-Tap/delayed work,
+and stops Button Aim, TouchAim, Swipe ownership, and one-shot Alternate state. The network
+connection, selected player, and transport settings remain active. The new page name appears
+briefly after the switch.
+
+Loading or reopening a profile starts on its Home page, normally Base. The temporary active and
+previous page are not saved. Release All clears every active output while keeping the current page.
+Edit Mode, deliberate disconnect, and leaving the app return the runtime session to Home. Existing
+one-page profiles load automatically as a Base page with every existing control and setting
+preserved; using the normal save path writes the new multipage format.
+
+The app warns before Play Mode if a non-Home page has no usable Return, Home, or Toggle action.
+Edit remains an emergency route, but it is not intended to replace a reachable page-navigation
+Button. A possible future `PAGE_ONCE` action may return after one completed action; it is not part
+of this version.
 
 ## What a payload is
 
@@ -696,13 +756,13 @@ The receiver is an unsigned development executable, so SmartScreen may warn that
 
 ## Current limitations and testing status
 
-As of September 12, 2026:
+As of September 14, 2026:
 
 - The current feature build is usable but still a development build rather than a store release.
 - Delay macros are not reliable enough for ordered action sequences.
 - USB tethering, two-player play, Touch Aim tuning, global Hold, and several ConsoleBridge combinations need more real-device testing.
 - ConsoleBridge/Pico does not yet provide atomic receiver-side Release All confirmation.
-- Layouts are stored inside the Android app and do not yet have export/import.
+- Profiles are stored inside the Android app and do not yet have external file export/import.
 - Some advanced options may require saving and reopening the control before all nested fields appear.
 - The visual design and spacing still have room to improve.
 
@@ -717,9 +777,9 @@ If you find a bug, the most useful report includes:
 
 I am happily accepting feedback, bug reports, visual suggestions, accessibility ideas, and feature requests. This is a project I care deeply about, and practical reports from other people are what will make it better.
 
-## Recent additions: August 29–September 12, 2026
+## Recent additions: August 29–September 14, 2026
 
-There were no feature commits from August 29 through September 7. The following work began on September 8, was largely committed on September 10, and continued through September 12.
+There were no feature commits from August 29 through September 7. The following work began on September 8, was largely committed on September 10, and continued through September 14.
 
 ### 1. Touch Sensor Test — developed September 8, committed September 10
 
@@ -772,6 +832,13 @@ A latched Base payload can remain held briefly after an Alternate return/reset. 
 ### 13. Toggle Auto-Tap — September 12
 
 A Button can start a persistent timed repeater with one tap and stop it with the next. Enable **Toggle Auto-Tap**, set the interval, then tap once to start and again to stop.
+
+### 14. Controller Pages — September 14
+
+- One saved profile can contain multiple complete, independently editable pages.
+- Page-navigation Buttons support Go To, Toggle, Previous, and Home without sending page commands to a receiver.
+- Every successful page change releases active output first, while the connection and player settings stay active.
+- Existing one-page profiles migrate in memory as Base and remain readable.
 
 ---
 

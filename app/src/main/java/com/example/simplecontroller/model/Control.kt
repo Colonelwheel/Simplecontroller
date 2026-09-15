@@ -30,6 +30,10 @@ enum class ButtonAimStickProfile { LINEAR, RESPONSE_CURVE }
 @Serializable
 enum class ButtonAimMouseProfile { LINEAR_RELATIVE, SMOOTHED_NONLINEAR }
 
+/** Android-local page navigation. These actions are never sent to a receiver. */
+@Serializable
+enum class PageAction { NONE, GO_TO, TOGGLE, RETURN, HOME }
+
 @Serializable
 data class Control(
     val id: String,
@@ -50,6 +54,10 @@ data class Control(
     var holdDurationMs: Long = 500,        // long-press threshold
     var autoTapEnabled: Boolean = false,
     var autoTapIntervalMs: Long = 100L,
+
+    /* Controller Pages (Android-local action; target is a stable page ID) */
+    var pageAction: PageAction = PageAction.NONE,
+    var pageTargetId: String = "",
 
     /* Button Aim Surface (disabled by default for layout compatibility) */
     var buttonAimEnabled: Boolean = false,

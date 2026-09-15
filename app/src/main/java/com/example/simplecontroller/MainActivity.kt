@@ -27,11 +27,28 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.example.simplecontroller.io.LayoutManager
-import com.example.simplecontroller.io.loadControls
-import com.example.simplecontroller.io.saveControls
+import com.example.simplecontroller.io.ControllerProfileLoadResult
+import com.example.simplecontroller.io.StoredControllerProfileResult
+import com.example.simplecontroller.io.deepCopyControls
+import com.example.simplecontroller.io.listLayouts
+import com.example.simplecontroller.io.readControllerProfile
+import com.example.simplecontroller.io.saveControllerProfile
+import com.example.simplecontroller.io.stableLegacyBasePageId
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ControllerPage
+import com.example.simplecontroller.model.ControllerPageOption
+import com.example.simplecontroller.model.ControllerPageSession
+import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.TouchAimCalibrationProfile
+import com.example.simplecontroller.model.hasPageName
+import com.example.simplecontroller.model.hasUsablePageNavigation
+import com.example.simplecontroller.model.isLocalPageAction
+import com.example.simplecontroller.model.newPageId
+import com.example.simplecontroller.model.page
+import com.example.simplecontroller.model.pageName
+import com.example.simplecontroller.model.referenceCount
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
@@ -70,11 +87,18 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     /* ---------- underlying data model ---------- */
     // Changed from lazy delegate to lateinit to avoid initialization order issues
     private lateinit var controls: MutableList<Control>
+    private lateinit var controllerProfile: ControllerProfile
+    private lateinit var pageSession: ControllerPageSession
+    private var displayedPageId: String = ""
+    private var editingPageId: String = ""
+    private var profileAutosaveBlocked = false
 
     /* ---------- edit-only widgets we show/hide ---------- */
     private lateinit var btnSave: View
     private lateinit var btnLoad: View
     private lateinit var fabAdd: View
+    private lateinit var btnEdit: Button
+    private lateinit var btnPageManager: Button
 
     /* ---------- global switches ---------- */
     private lateinit var switchSnap: Switch
@@ -131,21 +155,63 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         }.getOrDefault(NetworkClient.PlayerRole.PLAYER1)
         NetworkClient.setPlayerRole(playerRole)
 
-        // 4. ----------  ONE  shared controls list  ----------
-        controls = loadControls(this, layoutName)?.toMutableList() ?: mutableListOf()
+        // 4. Load the complete profile. Old top-level control arrays are wrapped in memory as Base.
+        val storedProfile = readControllerProfile(this, layoutName)
+        val loadedProfile = (storedProfile as? StoredControllerProfileResult.Loaded)?.result
+        profileAutosaveBlocked = storedProfile is StoredControllerProfileResult.Error
+        controllerProfile = loadedProfile?.profile ?: run {
+            val baseId = stableLegacyBasePageId(layoutName)
+            ControllerProfile(
+                homePageId = baseId,
+                pages = listOf(ControllerPage(baseId, "Base", emptyList()))
+            )
+        }
+        pageSession = ControllerPageSession(
+            controllerProfile.homePageId,
+            controllerProfile.pages.map { it.id }
+        )
+        displayedPageId = controllerProfile.homePageId
+        editingPageId = controllerProfile.homePageId
+        controls = deepCopyControls(
+            controllerProfile.page(controllerProfile.homePageId)?.controls.orEmpty()
+        ).toMutableList()
 
         // 5. Helpers that all point at *that* list
         uiBuilder = UIComponentBuilder(this, canvas)
         layoutManager = LayoutManager(this, canvas, controls) { ctrl ->
-            ControlView(this, ctrl)
+            ControlView(
+                this,
+                ctrl,
+                onPageAction = ::activateControllerPageAction,
+                pageActionLabel = ::pageActionDisplayLabel
+            )
         }.apply { setCallback(this@MainActivity) }
 
         // If this is a first run (or the file was missing) seed it with the default template
-        if (controls.isEmpty()) controls += layoutManager.defaultLayout()
+        if (loadedProfile == null ||
+            (loadedProfile.migratedFromSinglePage && controls.isEmpty())
+        ) {
+            controls += layoutManager.defaultLayout()
+            syncDisplayedPageIntoProfile()
+        }
 
         // 6. Build the UI & observers
         setupUI()
         observeConnectionStatus()
+
+        if (loadedProfile?.warnings?.isNotEmpty() == true) {
+            Toast.makeText(
+                this,
+                loadedProfile.warnings.take(3).joinToString("\n"),
+                Toast.LENGTH_LONG
+            ).show()
+        } else if (storedProfile is StoredControllerProfileResult.Error) {
+            Toast.makeText(
+                this,
+                "This profile could not be read. Its original file was left unchanged; use Save as to recover safely.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
 
         // 7. Render current layout
         layoutManager.spawnControlViews()
@@ -195,13 +261,18 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onPause() {
         super.onPause()
-        // Cancel timed button state that must not continue in the background. Global RELEASE_ALL
-        // is intentionally reserved for an explicit control payload and is not sent on app pause.
         cancelTouchAimCalibration("Calibration stopped because the app left the foreground.")
-        SwipeManager.releaseAllButtonAimSurfaces()
-        SwipeManager.releaseAllAutoTapButtons()
-        SwipeManager.releaseAllTouchAim()
-        saveControls(this, layoutName, controls)   // auto-persist
+        syncDisplayedPageIntoProfile()
+        releaseOutputs(showFeedback = false)
+        if (displayedPageId != controllerProfile.homePageId) {
+            pageSession.resetToHome()
+            editingPageId = controllerProfile.homePageId
+            renderPage(controllerProfile.homePageId, safeToDetach = true)
+        } else pageSession.resetToHome()
+        syncDisplayedPageIntoProfile()
+        if (!profileAutosaveBlocked) {
+            saveControllerProfile(this, layoutName, controllerProfile)
+        }
     }
 
     override fun onResume() {
@@ -246,20 +317,31 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     private fun setupUI() {
         /* --- Edit toggle ------------------------------------------------ */
-        uiBuilder.addCornerButton("Edit", Gravity.TOP or Gravity.END) { v ->
-            GlobalSettings.editMode = !GlobalSettings.editMode
-            (v as? android.widget.Button)?.text = if (GlobalSettings.editMode) "Done" else "Edit"
-            updateEditUi(GlobalSettings.editMode)
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        btnEdit = uiBuilder.addCornerButton(
+            "Edit", Gravity.TOP or Gravity.END, dp(16), dp(16)
+        ) {
+            requestEditModeChange(!GlobalSettings.editMode)
         }
 
         /* --- Connection button ------------------------------------------ */
         btnConnect = uiBuilder.addCornerButton(
             "Connect",                  // Label
             Gravity.TOP or Gravity.END, // Gravity
-            16,                         // Horizontal margin
-            64                          // Vertical margin
+            dp(16),                     // Horizontal margin
+            dp(72)                      // Vertical margin
         ) {
             showConnectionSettingsDialog()
+        }
+
+        btnPageManager = uiBuilder.addCornerButton(
+            "Editing page: Base ▾",
+            Gravity.TOP or Gravity.END,
+            dp(16),
+            dp(128)
+        ) {
+            showControllerPageManager()
         }
 
         /* --- Switches --------------------------------------------------- */
@@ -351,10 +433,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 ) {
                     // Cancel armed/delayed Button Aim and Auto-tap state locally. In particular,
                     // a scheduled payload must not fire after reconnection.
-                    SwipeManager.releaseAllButtonAimSurfaces()
-                    SwipeManager.releaseAllAutoTapButtons()
-                    SwipeManager.releaseAllTouchAim()
+                    releaseOutputs(showFeedback = false)
                     cancelTouchAimCalibration("Calibration stopped because the connection changed.")
+                    resetToHomeAfterCleanup()
                 }
                 previousStatus = status
                 updateConnectionStatusUI(status)
@@ -422,10 +503,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             when (status) {
                 NetworkClient.ConnectionStatus.CONNECTED,
                 NetworkClient.ConnectionStatus.CONNECTING -> {
-                    // Release timed button-owned output while the current socket is live.
-                    SwipeManager.releaseAllButtonAimSurfaces()
-                    SwipeManager.releaseAllAutoTapButtons()
-                    SwipeManager.releaseAllTouchAim()
+                    // Release while the current socket is live, then return to Home.
+                    releaseOutputs(showFeedback = false)
+                    resetToHomeAfterCleanup()
                     cancelTouchAimCalibration("Calibration stopped before disconnecting.")
                     NetworkClient.close()
                 }
@@ -467,9 +547,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     private fun connectViaUsbTether() {
         Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
-        SwipeManager.releaseAllButtonAimSurfaces()
-        SwipeManager.releaseAllAutoTapButtons()
-        SwipeManager.releaseAllTouchAim()
+        releaseOutputs(showFeedback = false)
+        resetToHomeAfterCleanup()
         cancelTouchAimCalibration("Calibration stopped before changing connections.")
         UdpClient.close()
 
@@ -599,9 +678,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
                 // --- Update client and connect (honor toggle) ---
                 // Clear timed/armed button phases and their held payloads before changing endpoints.
-                SwipeManager.releaseAllButtonAimSurfaces()
-                SwipeManager.releaseAllAutoTapButtons()
-                SwipeManager.releaseAllTouchAim()
+                releaseOutputs(showFeedback = false)
+                resetToHomeAfterCleanup()
                 cancelTouchAimCalibration("Calibration stopped before changing connections.")
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
@@ -711,7 +789,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Update UI components when edit mode changes
      */
     private fun updateEditUi(edit: Boolean) {
-        val editWidgets = listOf(btnSave, btnLoad, fabAdd)
+        val editWidgets = listOf(btnSave, btnLoad, fabAdd, btnPageManager)
         uiBuilder.updateViewsVisibility(editWidgets, edit)
 
         // Global switches stay visible in both modes
@@ -748,6 +826,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     override fun onLayoutLoaded(layoutName: String) {
         this.layoutName = layoutName
+        profileAutosaveBlocked = false
     }
 
     /**
@@ -755,6 +834,46 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      */
     override fun onLayoutSaved(layoutName: String) {
         this.layoutName = layoutName
+        profileAutosaveBlocked = false
+    }
+
+    override fun controllerProfileForSave(): ControllerProfile {
+        syncDisplayedPageIntoProfile()
+        return controllerProfile
+    }
+
+    override fun activeLayoutName(): String = layoutName
+
+    override fun onControllerProfileLoaded(
+        layoutName: String,
+        result: ControllerProfileLoadResult
+    ): Boolean {
+        releaseOutputs(showFeedback = false)
+        profileAutosaveBlocked = false
+        installProfile(layoutName, result.profile)
+        if (result.warnings.isNotEmpty()) {
+            Toast.makeText(
+                this,
+                result.warnings.take(3).joinToString("\n"),
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        return true
+    }
+
+    override fun onNewControllerProfileRequested(): Boolean {
+        releaseOutputs(showFeedback = false)
+        profileAutosaveBlocked = false
+        val baseId = newPageId()
+        installProfile(
+            "untitled",
+            ControllerProfile(
+                homePageId = baseId,
+                pages = listOf(ControllerPage(baseId, "Base", emptyList()))
+            )
+        )
+        Toast.makeText(this, "New blank profile created", Toast.LENGTH_SHORT).show()
+        return true
     }
 
     /**
@@ -766,12 +885,483 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             .forEach { canvas.removeView(it) }
     }
 
-    /** Public so an assignable RELEASE_ALL ControlView uses the same safety path. */
-    fun activateReleaseAll(showFeedback: Boolean = true) {
-        if (showFeedback) {
-            triggerReleaseAllHaptic()
+    fun controllerPageOptions(): List<ControllerPageOption> =
+        controllerProfile.pages.map { ControllerPageOption(it.id, it.name) }
+
+    private fun syncDisplayedPageIntoProfile() {
+        if (!::controllerProfile.isInitialized || displayedPageId.isBlank()) return
+        val index = controllerProfile.pages.indexOfFirst { it.id == displayedPageId }
+        if (index < 0) return
+        val updated = controllerProfile.pages.toMutableList()
+        updated[index] = updated[index].copy(controls = deepCopyControls(controls))
+        controllerProfile = controllerProfile.copy(pages = updated)
+    }
+
+    private fun clearControlViewsSafely() {
+        cancelTouchAimCalibration("Calibration stopped because the page changed.")
+        canvas.children.filterIsInstance<ControlView>().toList().forEach { view ->
+            view.markSafeForSilentDetach()
+            canvas.removeView(view)
+        }
+    }
+
+    private fun renderPage(pageId: String, safeToDetach: Boolean) {
+        val page = controllerProfile.page(pageId) ?: return
+        if (safeToDetach) clearControlViewsSafely() else clearControlViews()
+        controls.clear()
+        controls.addAll(deepCopyControls(page.controls))
+        displayedPageId = page.id
+        layoutManager.spawnControlViews()
+        updatePageSelectorLabel()
+    }
+
+    private fun installProfile(name: String, profile: ControllerProfile) {
+        controllerProfile = profile
+        pageSession = ControllerPageSession(profile.homePageId, profile.pages.map { it.id })
+        displayedPageId = profile.homePageId
+        editingPageId = profile.homePageId
+        layoutName = name
+        renderPage(profile.homePageId, safeToDetach = true)
+    }
+
+    private fun resetToHomeAfterCleanup() {
+        if (!::controllerProfile.isInitialized) return
+        syncDisplayedPageIntoProfile()
+        pageSession.resetToHome()
+        editingPageId = controllerProfile.homePageId
+        if (displayedPageId != controllerProfile.homePageId) {
+            renderPage(controllerProfile.homePageId, safeToDetach = true)
+        } else {
+            updatePageSelectorLabel()
+        }
+    }
+
+    private fun activateControllerPageAction(action: PageAction, targetPageId: String) {
+        if (GlobalSettings.editMode) return
+        val result = pageSession.perform(
+            action = action,
+            targetPageId = targetPageId,
+            beforeSwitch = {
+                syncDisplayedPageIntoProfile()
+                releaseOutputs(showFeedback = false)
+            },
+            showPage = { renderPage(it, safeToDetach = true) }
+        )
+        result.warning?.let {
+            Toast.makeText(this, it, Toast.LENGTH_LONG).show()
+            return
+        }
+        if (result.changed) {
+            val name = controllerProfile.pageName(result.toPageId).orEmpty()
+            canvas.performHapticFeedback(
+                android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+            )
+            Toast.makeText(this, name, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun pageActionDisplayLabel(control: Control): String? {
+        if (!control.isLocalPageAction()) return null
+        val target = controllerProfile.pageName(control.pageTargetId)
+        return when (control.pageAction) {
+            PageAction.GO_TO -> target?.let { "Go to $it" } ?: "⚠ Missing page"
+            PageAction.TOGGLE -> target?.let { "Toggle $it" } ?: "⚠ Missing page"
+            PageAction.RETURN -> "Previous page"
+            PageAction.HOME -> "Home page"
+            PageAction.NONE -> null
+        }
+    }
+
+    private fun updatePageSelectorLabel() {
+        if (!::btnPageManager.isInitialized) return
+        val pageName = controllerProfile.pageName(editingPageId)
+            ?: controllerProfile.pageName(displayedPageId)
+            ?: "Missing"
+        val home = if (editingPageId == controllerProfile.homePageId) " · Home" else ""
+        btnPageManager.text = "Editing page: $pageName$home ▾"
+    }
+
+    private fun requestEditModeChange(edit: Boolean) {
+        if (edit) {
+            syncDisplayedPageIntoProfile()
+            GlobalSettings.editMode = true
+            releaseOutputs(showFeedback = false)
+            pageSession.resetToHome()
+            editingPageId = controllerProfile.homePageId
+            renderPage(controllerProfile.homePageId, safeToDetach = true)
+            btnEdit.text = "Done"
+            updateEditUi(true)
+            return
         }
 
+        syncDisplayedPageIntoProfile()
+        val validPageIds = controllerProfile.pages.mapTo(mutableSetOf()) { it.id }
+        val unsafePages = controllerProfile.pages.filter {
+            it.id != controllerProfile.homePageId && !it.hasUsablePageNavigation(validPageIds)
+        }
+        if (unsafePages.isNotEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle("Page navigation warning")
+                .setMessage(
+                    "These pages have no usable Return, Home, or valid Toggle button:\n\n" +
+                        unsafePages.joinToString("\n") { "• ${it.name}" } +
+                        "\n\nYou can still use Edit as an emergency route. Enter Play Mode anyway?"
+                )
+                .setPositiveButton("Enter Play Mode") { _, _ -> finishLeavingEditMode() }
+                .setNegativeButton("Keep editing", null)
+                .show()
+        } else finishLeavingEditMode()
+    }
+
+    private fun finishLeavingEditMode() {
+        syncDisplayedPageIntoProfile()
+        pageSession.resetToHome()
+        editingPageId = controllerProfile.homePageId
+        renderPage(controllerProfile.homePageId, safeToDetach = true)
+        GlobalSettings.editMode = false
+        btnEdit.text = "Edit"
+        updateEditUi(false)
+    }
+
+    private fun showControllerPageManager() {
+        if (!GlobalSettings.editMode) return
+        syncDisplayedPageIntoProfile()
+        var dialog: AlertDialog? = null
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(24, 16, 24, 16)
+        }
+        content.addView(TextView(this).apply {
+            text = "Select a page to edit"
+            textSize = 18f
+            setPadding(8, 8, 8, 8)
+        })
+        controllerProfile.pages.forEach { page ->
+            content.addView(pageManagerButton(
+                "${if (page.id == editingPageId) "✓ " else ""}${page.name}" +
+                    if (page.id == controllerProfile.homePageId) "  (Home)" else ""
+            ) {
+                dialog?.dismiss()
+                selectEditingPage(page.id)
+            })
+        }
+        content.addView(pageManagerButton("Add blank page") {
+            dialog?.dismiss()
+            promptCreateBlankPage()
+        })
+        content.addView(pageManagerButton("Duplicate current page") {
+            dialog?.dismiss()
+            promptDuplicateCurrentPage()
+        })
+        content.addView(pageManagerButton("Import saved profile as page") {
+            dialog?.dismiss()
+            showImportProfilePicker()
+        })
+        content.addView(pageManagerButton("Rename current page") {
+            dialog?.dismiss()
+            promptRenameCurrentPage()
+        })
+        content.addView(pageManagerButton("Delete current page") {
+            dialog?.dismiss()
+            confirmDeleteCurrentPage()
+        })
+        content.addView(pageManagerButton("Set current page as Home") {
+            dialog?.dismiss()
+            setCurrentPageAsHome()
+        }.apply { isEnabled = editingPageId != controllerProfile.homePageId })
+
+        dialog = AlertDialog.Builder(this)
+            .setTitle("Controller Pages")
+            .setView(ScrollView(this).apply { addView(content) })
+            .setNegativeButton("Close", null)
+            .create()
+        dialog.show()
+    }
+
+    private fun pageManagerButton(label: String, action: () -> Unit): Button = Button(this).apply {
+        text = label
+        isAllCaps = false
+        minHeight = (56 * resources.displayMetrics.density).toInt()
+        setOnClickListener { action() }
+    }
+
+    private fun selectEditingPage(pageId: String) {
+        if (!GlobalSettings.editMode || controllerProfile.page(pageId) == null) return
+        syncDisplayedPageIntoProfile()
+        editingPageId = pageId
+        renderPage(pageId, safeToDetach = true)
+    }
+
+    private fun promptCreateBlankPage() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 32, 0)
+        }
+        val name = EditText(this).apply { hint = "Page name" }
+        val copyNavigation = CheckBox(this).apply {
+            text = "Copy page-navigation buttons from the current page"
+            isChecked = true
+        }
+        container.addView(name)
+        container.addView(copyNavigation)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Add blank page")
+            .setMessage("Copied navigation buttons keep their current positions; move them in Edit Mode if needed.")
+            .setView(container)
+            .setPositiveButton("Add", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val pageName = name.text.toString().trim()
+                if (!validNewPageName(pageName)) return@setOnClickListener
+                syncDisplayedPageIntoProfile()
+                val id = newPageId()
+                val copiedNavigation = if (copyNavigation.isChecked) {
+                    deepCopyControls(controls.filter(Control::isLocalPageAction), regenerateIds = true)
+                } else emptyList()
+                addNewPageWithWarning(ControllerPage(id, pageName, copiedNavigation))
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun promptDuplicateCurrentPage() {
+        val source = controllerProfile.page(editingPageId) ?: return
+        val input = EditText(this).apply { setText(uniquePageName("${source.name} Copy")) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Duplicate current page")
+            .setMessage("The duplicate is an independent deep copy. Later edits will not affect the source page.")
+            .setView(input)
+            .setPositiveButton("Duplicate", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString().trim()
+                if (!validNewPageName(name)) return@setOnClickListener
+                syncDisplayedPageIntoProfile()
+                val current = controllerProfile.page(editingPageId) ?: return@setOnClickListener
+                val newId = newPageId()
+                val copied = deepCopyControls(current.controls, regenerateIds = true).map { control ->
+                    if (control.pageTargetId == current.id) control.copy(pageTargetId = newId) else control
+                }
+                addNewPage(ControllerPage(newId, name, copied))
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun showImportProfilePicker() {
+        val names = listLayouts(this).sorted()
+        if (names.isEmpty()) {
+            Toast.makeText(this, "No saved profiles are available to import.", Toast.LENGTH_LONG).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Import from saved profile")
+            .setItems(names.toTypedArray()) { _, index ->
+                val sourceName = names[index]
+                val stored = readControllerProfile(this, sourceName)
+                val result = (stored as? StoredControllerProfileResult.Loaded)?.result
+                if (result == null) {
+                    val message = if (stored is StoredControllerProfileResult.NotFound) {
+                        "'$sourceName' no longer exists."
+                    } else "Could not read '$sourceName'; its file was not changed."
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                } else if (result.profile.pages.size == 1) {
+                    promptImportPage(result.profile.pages.first(), result.warnings)
+                } else {
+                    val pages = result.profile.pages
+                    AlertDialog.Builder(this)
+                        .setTitle("Choose page from $sourceName")
+                        .setItems(pages.map { it.name }.toTypedArray()) { _, pageIndex ->
+                            promptImportPage(pages[pageIndex], result.warnings)
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun promptImportPage(source: ControllerPage, warnings: List<String>) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 32, 0)
+        }
+        val name = EditText(this).apply { setText(uniquePageName(source.name)) }
+        val copyNavigation = CheckBox(this).apply {
+            text = "Also copy page-navigation buttons from the current page"
+            isChecked = true
+        }
+        container.addView(name)
+        container.addView(copyNavigation)
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Import '${source.name}'")
+            .setMessage(
+                buildString {
+                    append("The imported page is an independent copy and keeps no link to its source file. ")
+                    append("Copied navigation buttons keep their positions and may overlap imported controls; review them in Edit Mode.")
+                    if (warnings.isNotEmpty()) {
+                        append("\n\nSource warning:\n")
+                        append(warnings.take(3).joinToString("\n"))
+                    }
+                }
+            )
+            .setView(container)
+            .setPositiveButton("Import", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val pageName = name.text.toString().trim()
+                if (!validNewPageName(pageName)) return@setOnClickListener
+                syncDisplayedPageIntoProfile()
+                val newId = newPageId()
+                val imported = deepCopyControls(source.controls, regenerateIds = true).map { control ->
+                    if (control.pageTargetId == source.id) control.copy(pageTargetId = newId) else control
+                }.toMutableList()
+                if (copyNavigation.isChecked) {
+                    imported += deepCopyControls(
+                        controls.filter(Control::isLocalPageAction),
+                        regenerateIds = true
+                    )
+                }
+                addNewPageWithWarning(ControllerPage(newId, pageName, imported))
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun addNewPageWithWarning(page: ControllerPage) {
+        val validIds = controllerProfile.pages.mapTo(mutableSetOf()) { it.id }.apply { add(page.id) }
+        if (page.hasUsablePageNavigation(validIds)) {
+            addNewPage(page)
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("No page-navigation button")
+            .setMessage(
+                "'${page.name}' has no usable Return, Home, or Toggle action. " +
+                    "Edit remains an emergency route, but this page may be difficult to leave in Play Mode."
+            )
+            .setPositiveButton("Add anyway") { _, _ -> addNewPage(page) }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun addNewPage(page: ControllerPage) {
+        syncDisplayedPageIntoProfile()
+        controllerProfile = controllerProfile.copy(pages = controllerProfile.pages + page)
+        pageSession.updateProfile(controllerProfile.homePageId, controllerProfile.pages.map { it.id })
+        editingPageId = page.id
+        renderPage(page.id, safeToDetach = true)
+    }
+
+    private fun promptRenameCurrentPage() {
+        val page = controllerProfile.page(editingPageId) ?: return
+        val input = EditText(this).apply { setText(page.name) }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rename page")
+            .setView(input)
+            .setPositiveButton("Rename", null)
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+                val name = input.text.toString().trim()
+                if (name.isBlank() || controllerProfile.hasPageName(name, exceptPageId = page.id)) {
+                    Toast.makeText(this, "Page names must be unique.", Toast.LENGTH_LONG).show()
+                    return@setOnClickListener
+                }
+                syncDisplayedPageIntoProfile()
+                controllerProfile = controllerProfile.copy(
+                    pages = controllerProfile.pages.map {
+                        if (it.id == page.id) it.copy(name = name) else it
+                    }
+                )
+                updatePageSelectorLabel()
+                canvas.children.filterIsInstance<ControlView>()
+                    .forEach(ControlView::refreshPageActionLabel)
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun confirmDeleteCurrentPage() {
+        syncDisplayedPageIntoProfile()
+        val page = controllerProfile.page(editingPageId) ?: return
+        when {
+            controllerProfile.pages.size == 1 -> {
+                Toast.makeText(this, "The only page cannot be deleted.", Toast.LENGTH_LONG).show()
+                return
+            }
+            page.id == controllerProfile.homePageId -> {
+                Toast.makeText(this, "Set another page as Home before deleting this one.", Toast.LENGTH_LONG).show()
+                return
+            }
+        }
+        val references = controllerProfile.referenceCount(page.id, excludingPageId = page.id)
+        AlertDialog.Builder(this)
+            .setTitle("Delete '${page.name}'?")
+            .setMessage(
+                "$references control${if (references == 1) "" else "s"} reference this page. " +
+                    "Those controls will be visibly marked as missing. This cannot be undone."
+            )
+            .setPositiveButton("Delete") { _, _ ->
+                syncDisplayedPageIntoProfile()
+                controllerProfile = controllerProfile.copy(
+                    pages = controllerProfile.pages.filterNot { it.id == page.id }
+                )
+                pageSession.updateProfile(
+                    controllerProfile.homePageId,
+                    controllerProfile.pages.map { it.id }
+                )
+                editingPageId = controllerProfile.homePageId
+                renderPage(controllerProfile.homePageId, safeToDetach = true)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun setCurrentPageAsHome() {
+        val page = controllerProfile.page(editingPageId) ?: return
+        syncDisplayedPageIntoProfile()
+        controllerProfile = controllerProfile.copy(homePageId = page.id)
+        pageSession.updateProfile(page.id, controllerProfile.pages.map { it.id })
+        Toast.makeText(this, "${page.name} is now Home", Toast.LENGTH_SHORT).show()
+        updatePageSelectorLabel()
+    }
+
+    private fun validNewPageName(name: String): Boolean {
+        val valid = name.isNotBlank() && !controllerProfile.hasPageName(name)
+        if (!valid) Toast.makeText(this, "Page names must be nonblank and unique.", Toast.LENGTH_LONG).show()
+        return valid
+    }
+
+    private fun uniquePageName(baseName: String): String {
+        val base = baseName.trim().ifBlank { "Page" }
+        if (!controllerProfile.hasPageName(base)) return base
+        var suffix = 2
+        while (controllerProfile.hasPageName("$base $suffix")) suffix++
+        return "$base $suffix"
+    }
+
+    /** Public so an assignable RELEASE_ALL ControlView uses the same safety path. */
+    fun activateReleaseAll(showFeedback: Boolean = true) {
+        syncDisplayedPageIntoProfile()
+        releaseOutputs(showFeedback)
+    }
+
+    private fun releaseOutputs(showFeedback: Boolean) {
+        if (showFeedback) triggerReleaseAllHaptic()
         ReleaseAllCoordinator.releaseAll { status ->
             if (!showFeedback) return@releaseAll
             runOnUiThread {
@@ -806,7 +1396,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             if (launchToken != touchAimCalibrationLaunchGeneration || view.parent == null) return@launch
             val wizard = TouchAimCalibrationWizard(this, view, view.model, existingProfile) { applied ->
                 activeTouchAimCalibration = null
-                if (applied) saveControls(this, layoutName, controls)
+                if (applied) {
+                    syncDisplayedPageIntoProfile()
+                    if (!profileAutosaveBlocked) {
+                        saveControllerProfile(this, layoutName, controllerProfile)
+                    }
+                }
             }
             activeTouchAimCalibration = wizard
             wizard.show()
@@ -839,7 +1434,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private fun createXboxControllerLayout() {
         // First clear existing controls
         controls.clear()
-        clearControlViews()
+        clearControlViewsSafely()
 
         // Screen dimensions for positioning
         val screenWidth = canvas.width.toFloat()
@@ -1100,10 +1695,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         )
 
         // Save the layout
-        saveControls(this, "xbox_standard", controls)
-        layoutName = "xbox_standard"
+        finalizeBuiltInPage()
 
-        Toast.makeText(this, "Xbox controller layout created!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Current page replaced with Xbox controls", Toast.LENGTH_SHORT).show()
     }
 
     /**
@@ -1112,7 +1706,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private fun createPlayer1XboxLayout() {
         // First clear existing controls
         controls.clear()
-        clearControlViews()
+        clearControlViewsSafely()
 
         // Screen dimensions for positioning
         val screenWidth = canvas.width.toFloat()
@@ -1373,10 +1967,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         )
 
         // Save the layout
-        saveControls(this, "player1_xbox", controls)
-        layoutName = "player1_xbox"
+        finalizeBuiltInPage()
 
-        Toast.makeText(this, "Player 1 Xbox layout created!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Current page replaced with Player 1 controls", Toast.LENGTH_SHORT).show()
     }
 
 
@@ -1386,7 +1979,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private fun createPlayer2XboxLayout() {
         // First clear existing controls
         controls.clear()
-        clearControlViews()
+        clearControlViewsSafely()
 
         // Screen dimensions for positioning
         val screenWidth = canvas.width.toFloat()
@@ -1647,10 +2240,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         )
 
         // Save the layout
-        saveControls(this, "player2_xbox", controls)
-        layoutName = "player2_xbox"
+        finalizeBuiltInPage()
 
-        Toast.makeText(this, "Player 2 Xbox controller layout created!", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Current page replaced with Player 2 controls", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun finalizeBuiltInPage() {
+        syncDisplayedPageIntoProfile()
+        updatePageSelectorLabel()
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {

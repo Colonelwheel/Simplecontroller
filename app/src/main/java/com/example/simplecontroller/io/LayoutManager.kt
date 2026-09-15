@@ -9,6 +9,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.FrameLayout
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.ui.ControlView
 
@@ -33,6 +34,13 @@ class LayoutManager(
         fun onLayoutLoaded(layoutName: String)
         fun onLayoutSaved(layoutName: String)
         fun clearControlViews()
+        fun activeLayoutName(): String? = null
+        fun controllerProfileForSave(): ControllerProfile? = null
+        fun onControllerProfileLoaded(
+            layoutName: String,
+            result: ControllerProfileLoadResult
+        ): Boolean = false
+        fun onNewControllerProfileRequested(): Boolean = false
     }
 
     // Callback handler
@@ -126,9 +134,15 @@ class LayoutManager(
             .setPositiveButton("Save") { _, _ ->
                 val name = input.text.toString().trim()
                 if (name.isNotEmpty()) {
-                    saveControls(context, name, controls)
-                    toast("Saved as \"$name\"")
-                    callback?.onLayoutSaved(name)
+                    val result = callback?.controllerProfileForSave()?.let {
+                        saveControllerProfile(context, name, it)
+                    } ?: saveControls(context, name, controls)
+                    if (result.isSuccess) {
+                        toast("Saved as \"$name\"")
+                        callback?.onLayoutSaved(name)
+                    } else {
+                        toast("Failed to save \"$name\"")
+                    }
                 }
             }
             .setNegativeButton("Cancel", null)
@@ -150,23 +164,32 @@ class LayoutManager(
             .setItems(displayNames.toTypedArray()) { _, i ->
                 if (i == 0) {
                     // "New Layout" option - create blank layout
-                    createNewLayout()
+                    if (callback?.onNewControllerProfileRequested() != true) createNewLayout()
                 } else {
                     // Regular saved layout
                     val sel = savedNames[i - 1]
-                    loadControls(context, sel)?.let { loadedControls ->
-                        // Clear existing controls and views
-                        callback?.clearControlViews()
-                        controls.clear()
-
-                        // Add loaded controls
-                        controls.addAll(loadedControls)
-                        spawnControlViews()
-
-                        // Notify callback
-                        callback?.onLayoutLoaded(sel)
-                        toast("Loaded \"$sel\"")
-                    } ?: toast("Failed to load \"$sel\"")
+                    when (val stored = readControllerProfile(context, sel)) {
+                        is StoredControllerProfileResult.Loaded -> {
+                            val result = stored.result
+                            if (callback?.onControllerProfileLoaded(sel, result) == true) {
+                                toast("Loaded \"$sel\"")
+                            } else {
+                                val profile = result.profile
+                                val loadedControls = profile.pages
+                                    .firstOrNull { it.id == profile.homePageId }?.controls
+                                    ?: profile.pages.firstOrNull()?.controls.orEmpty()
+                                callback?.clearControlViews()
+                                controls.clear()
+                                controls.addAll(loadedControls)
+                                spawnControlViews()
+                                callback?.onLayoutLoaded(sel)
+                                toast("Loaded \"$sel\"")
+                            }
+                        }
+                        StoredControllerProfileResult.NotFound -> toast("\"$sel\" no longer exists")
+                        is StoredControllerProfileResult.Error ->
+                            toast("Failed to load \"$sel\"; its file was not changed")
+                    }
                 }
             }
             .create()
@@ -270,17 +293,28 @@ class LayoutManager(
             .setView(input)
             .setPositiveButton("Rename") { _, _ ->
                 val newName = input.text.toString().trim()
-                if (newName.isNotEmpty() && newName != oldName) {
+                if (newName.isNotEmpty() && !newName.equals(oldName, ignoreCase = true)) {
                     // Load the layout data
-                    loadControls(context, oldName)?.let { layoutData ->
+                    val isActive = callback?.activeLayoutName()
+                        ?.equals(oldName, ignoreCase = true) == true
+                    val layoutData = if (isActive) {
+                        callback?.controllerProfileForSave()
+                    } else {
+                        (readControllerProfile(context, oldName) as? StoredControllerProfileResult.Loaded)
+                            ?.result?.profile
+                    }
+                    layoutData?.let {
                         // Save with new name
-                        saveControls(context, newName, layoutData)
-                        // Delete old file
-                        deleteLayoutFile(oldName)
-                        toast("Renamed \"$oldName\" to \"$newName\"")
-                        onComplete()
+                        if (saveControllerProfile(context, newName, it).isSuccess) {
+                            // Delete old file only after the replacement is safely written.
+                            if (deleteControllerProfile(context, oldName)) {
+                                if (isActive) callback?.onLayoutSaved(newName)
+                                toast("Renamed \"$oldName\" to \"$newName\"")
+                                onComplete()
+                            } else toast("Saved \"$newName\", but could not delete \"$oldName\"")
+                        } else toast("Failed to rename layout")
                     } ?: toast("Failed to rename layout")
-                } else if (newName == oldName) {
+                } else if (newName.equals(oldName, ignoreCase = true)) {
                     onComplete() // No change needed
                 } else {
                     toast("Invalid name")
@@ -306,11 +340,20 @@ class LayoutManager(
                 val newName = input.text.toString().trim()
                 if (newName.isNotEmpty()) {
                     // Load the layout data
-                    loadControls(context, layoutName)?.let { layoutData ->
+                    val isActive = callback?.activeLayoutName()
+                        ?.equals(layoutName, ignoreCase = true) == true
+                    val layoutData = if (isActive) {
+                        callback?.controllerProfileForSave()
+                    } else {
+                        (readControllerProfile(context, layoutName) as? StoredControllerProfileResult.Loaded)
+                            ?.result?.profile
+                    }
+                    layoutData?.let {
                         // Save with new name
-                        saveControls(context, newName, layoutData)
-                        toast("Duplicated \"$layoutName\" as \"$newName\"")
-                        onComplete()
+                        if (saveControllerProfile(context, newName, it).isSuccess) {
+                            toast("Duplicated \"$layoutName\" as \"$newName\"")
+                            onComplete()
+                        } else toast("Failed to duplicate layout")
                     } ?: toast("Failed to duplicate layout")
                 } else {
                     toast("Invalid name")
@@ -324,11 +367,15 @@ class LayoutManager(
      * Delete a layout
      */
     private fun deleteLayout(layoutName: String, onComplete: () -> Unit) {
+        if (callback?.activeLayoutName()?.equals(layoutName, ignoreCase = true) == true) {
+            toast("Load or save another profile before deleting the active one")
+            return
+        }
         AlertDialog.Builder(context)
             .setTitle("Delete layout")
             .setMessage("Are you sure you want to delete \"$layoutName\"? This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
-                if (deleteLayoutFile(layoutName)) {
+                if (deleteControllerProfile(context, layoutName)) {
                     toast("Deleted \"$layoutName\"")
                     onComplete()
                 } else {
@@ -337,18 +384,6 @@ class LayoutManager(
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    /**
-     * Delete a layout file
-     */
-    private fun deleteLayoutFile(name: String): Boolean {
-        return try {
-            val file = context.getFileStreamPath("layout_${name.lowercase()}.json")
-            file.delete()
-        } catch (e: Exception) {
-            false
-        }
     }
 
     /**

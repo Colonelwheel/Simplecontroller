@@ -54,15 +54,17 @@ Likely touchpoints: `UdpClient.kt`, `ControlView.kt`, `ControlViewHelper.kt`, `T
 - [x] Exclude state-toggle payloads such as `RELEASE_ALL`, Camera Follow, and Scroll Mode Toggle.
 - [ ] Verify timing and cancellation on the intended Pico/ConsoleBridge hardware.
 
-### Sticky action layers
+### Controller Pages (replaces Sticky action layers)
 
-- [ ] Allow a one-finger tap to activate/deactivate a named alternate mapping layer without holding a modifier.
-- [ ] Let a layer override selected controls while allowing unchanged base controls to remain available.
-- [ ] Support explicit Set/Enable/Disable commands so duplicate UDP packets cannot invert state accidentally.
-- [ ] Display the active layer clearly and use distinct haptic feedback for entry/exit.
-- [ ] Provide optional one-action layers that return to the base layer after the next selection.
-- [ ] Define deterministic stacking/priority or initially permit only one active layer to avoid conflicts.
-- [ ] Release or reconcile outputs safely when switching layers.
+- [x] Store multiple complete, independently editable controller pages inside one saved profile.
+- [x] Migrate older one-layout profiles in memory as a single stable-ID `Base` page.
+- [x] Add a one-finger Edit Mode page manager for blank, duplicate, imported, renamed, deleted, and Home pages.
+- [x] Make duplicate/import a detached deep copy rather than live inheritance or sparse overrides.
+- [x] Add Android-local Go To, Toggle, Return, and Home actions with stable target page IDs.
+- [x] Release active output through the centralized safety path before every successful runtime page change.
+- [x] Keep the receiver connection, player, and transport settings active while only control views are swapped.
+- [x] Warn about missing page targets and pages without a usable navigation action.
+- [ ] Consider a future `PAGE_ONCE` action that returns after one successfully completed action. Do not add a layer stack or live inheritance to implement it.
 
 ### One-finger radial menu
 
