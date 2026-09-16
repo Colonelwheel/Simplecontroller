@@ -44,9 +44,19 @@ class ControllerProfileTransferTest {
                 )
             )
         )
+        val baseWithGeometry = base.copy(
+            portraitGeometry = capturePageGeometry(base.controls, 1000f, 2000f),
+            landscapeGeometry = capturePageGeometry(
+                base.controls.mapIndexed { index, control ->
+                    control.copy(x = 600f + index * 150f, y = 250f)
+                },
+                2000f,
+                1000f
+            )
+        )
         val profile = ControllerProfile(
             homePageId = base.id,
-            pages = listOf(base, alternate)
+            pages = listOf(baseWithGeometry, alternate)
         )
 
         val imported = decodeControllerProfileTransfer(
@@ -62,6 +72,12 @@ class ControllerProfileTransferTest {
             imported.result.profile.pages.first().controls.first().pageTargetId
         )
         assertEquals("to-alt", imported.result.profile.pages.first().controls.first().id)
+        assertEquals(
+            600f,
+            imported.result.profile.pages.first().landscapeGeometry!!
+                .controls.getValue("to-alt").x,
+            0.001f
+        )
     }
 
     @Test
@@ -212,6 +228,9 @@ class ControllerProfileTransferTest {
             "golden-alternate",
             imported.result.profile.pages.first().controls.single().pageTargetId
         )
+        assertEquals(3, imported.result.profile.formatVersion)
+        assertTrue(imported.result.profile.pages.all { it.portraitGeometry != null })
+        assertTrue(imported.result.profile.pages.all { it.landscapeGeometry == null })
     }
 
     private fun button(id: String, payload: String) = Control(

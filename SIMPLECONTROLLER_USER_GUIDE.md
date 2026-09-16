@@ -97,6 +97,23 @@ A saved **profile** is the complete controller setup. Older versions called thes
 
 Tap **Load** to switch layouts. Long-press a saved layout to rename, duplicate, or delete it. The app normally saves the current layout when it pauses, but pressing **Save** yourself is the safest habit after meaningful changes.
 
+### Portrait and Landscape without rotating the phone
+
+Edit Mode has two large, single-tap orientation controls. They disappear completely after you tap
+**Done**, so they cannot be triggered accidentally while playing.
+
+- **Edit in Landscape** or **Edit in Portrait** changes the editor immediately without using the
+  phone's rotation sensor or requiring you to move the phone.
+- **Play lock: Portrait** or **Play lock: Landscape** shows the saved Play Mode choice. Tap it once
+  to switch the saved choice.
+- Tapping **Done** forces the saved Play Mode orientation. The same lock is applied when the app
+  starts, and physically rotating the phone does not change Play Mode.
+
+Each page keeps separate Portrait and Landscape positions and sizes. The first time an older profile
+opens in Landscape, SimpleController makes a fitted copy and clamps every control inside the screen.
+Later edits in one orientation do not move controls in the other orientation. An orientation change
+also releases active output and cancels calibration or armed delayed actions before the canvas moves.
+
 ## Controller Pages inside a profile
 
 One saved profile can now contain several complete controller pages, such as **Base**,

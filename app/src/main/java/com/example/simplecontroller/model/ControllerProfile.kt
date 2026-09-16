@@ -4,13 +4,15 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 import java.util.Locale
 
-const val CONTROLLER_PROFILE_FORMAT_VERSION = 2
+const val CONTROLLER_PROFILE_FORMAT_VERSION = 3
 
 @Serializable
 data class ControllerPage(
     val id: String = "",
     val name: String = "",
-    val controls: List<Control> = emptyList()
+    val controls: List<Control> = emptyList(),
+    val portraitGeometry: PageOrientationGeometry? = null,
+    val landscapeGeometry: PageOrientationGeometry? = null
 )
 
 @Serializable

@@ -177,8 +177,15 @@ fun decodeControllerProfilesBackup(text: String): ControllerProfilesBackupLoadRe
     }
 
     requireNestedVersions(objectValue)
+    val decoded = backupJson.decodeFromString<ControllerProfilesBackup>(normalizedText)
+    val rawProfiles = objectValue["controllerProfiles"] as? JsonArray ?: JsonArray(emptyList())
+    val normalizedProfiles = decoded.controllerProfiles.mapIndexed { index, named ->
+        val rawProfile = (rawProfiles[index] as JsonObject)["profile"] as JsonObject
+        val version = rawProfile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2
+        named.copy(profile = named.profile.copy(formatVersion = version))
+    }
     return validateControllerProfilesBackup(
-        backupJson.decodeFromString<ControllerProfilesBackup>(normalizedText)
+        decoded.copy(controllerProfiles = normalizedProfiles)
     )
 }
 
@@ -189,7 +196,7 @@ private fun requireNestedVersions(objectValue: JsonObject) {
             ?: throw IllegalArgumentException("Controller profile ${index + 1} is missing its data.")
         requireSupportedVersion(
             "Controller profile ${index + 1}",
-            profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: CONTROLLER_PROFILE_FORMAT_VERSION,
+            profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2,
             CONTROLLER_PROFILE_FORMAT_VERSION
         )
     }

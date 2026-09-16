@@ -2,6 +2,44 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-15 App-Controlled Portrait/Landscape Layouts
+
+`MainActivity` explicitly requests Portrait or Landscape and never depends on Android auto-rotate.
+Two large controls are present only in Edit Mode: one switches the editor orientation and one toggles
+the persisted Play Mode lock. Entering Play Mode and app startup apply that saved lock. Both controls
+use `GONE` in Play Mode, so they are neither visible nor tappable while gaming. The sideload-only
+`TouchDiagnosticActivity` remains independently locked to Portrait.
+
+The main activity declares Android 16's temporary restricted-resizability compatibility property so
+API-36 large-screen devices continue honoring its explicit orientation request. Most phones are
+already exempt from Android 16's `sw600dp` override. OEM policy can still override requested
+orientation, and Android 17 removes this large-screen opt-out, so those device classes remain a
+device-test risk rather than an automated guarantee.
+
+Controller-profile format 3 keeps one canonical `Control` list for behavior and separate Portrait
+and Landscape geometry overlays on every `ControllerPage`. Each overlay is keyed by stable control
+ID and records its source canvas dimensions. Keeping Hold, Turbo, TouchAim, Button Aim, page action,
+and other behavior in one canonical control prevents the two orientations from drifting. Format 2
+profiles and historical arrays migrate their exact existing geometry to Portrait only. On first use
+of missing geometry, pure fitting code proportionally places and uniformly scales each control, then
+clamps its complete rectangle within the destination canvas. Later synchronization updates only the
+active orientation.
+
+Before an explicit editor orientation change, the activity snapshots the current page, runs the
+central output-release path, and cancels TouchAim calibration. `onConfigurationChanged` waits for
+the new canvas measurement before rendering the same edited page with its target geometry. Page
+duplicate/import remaps the same regenerated control IDs through both overlays. Transfer version 1
+and all-profile backup version 1 remain unchanged; both carry nested format-3 profiles, while their
+readers continue accepting format 2 and the golden debug export.
+
+Primary files:
+
+- `app/src/main/java/com/example/simplecontroller/model/OrientationLayout.kt`
+- `app/src/main/java/com/example/simplecontroller/model/OrientationPreferenceStore.kt`
+- `app/src/main/java/com/example/simplecontroller/model/ControllerProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/io/LayoutStorage.kt`
+- `app/src/main/java/com/example/simplecontroller/MainActivity.kt`
+
 ## 2026-09-15 Separate Play Store Release
 
 The Android module has two deliberately isolated distribution variants that share the same source

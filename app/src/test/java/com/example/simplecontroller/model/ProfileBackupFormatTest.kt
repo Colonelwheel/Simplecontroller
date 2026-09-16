@@ -12,7 +12,24 @@ import org.junit.Test
 class ProfileBackupFormatTest {
     @Test
     fun versionOne_roundTripsEveryProfileFamily() {
-        val page = ControllerPage("base", "Base", emptyList())
+        val control = Control(
+            id = "fire",
+            type = ControlType.BUTTON,
+            x = 10f,
+            y = 20f,
+            w = 100f,
+            h = 100f,
+            payload = "X360A"
+        )
+        val page = ControllerPage(
+            id = "base",
+            name = "Base",
+            controls = listOf(control),
+            portraitGeometry = capturePageGeometry(listOf(control), 1000f, 2000f),
+            landscapeGeometry = capturePageGeometry(
+                listOf(control.copy(x = 700f, y = 300f)), 2000f, 1000f
+            )
+        )
         val backup = ControllerProfilesBackup(
             activeControllerProfileName = "Controller",
             controllerProfiles = listOf(
@@ -30,6 +47,13 @@ class ProfileBackupFormatTest {
         val decoded = decodeControllerProfilesBackup(encodeControllerProfilesBackup(backup)).backup
 
         assertEquals(backup, decoded)
+        assertEquals(1, decoded.backupVersion)
+        assertEquals(
+            700f,
+            decoded.controllerProfiles.single().profile.pages.single()
+                .landscapeGeometry!!.controls.getValue("fire").x,
+            0.001f
+        )
     }
 
     @Test
@@ -47,6 +71,34 @@ class ProfileBackupFormatTest {
             runCatching { decodeControllerProfilesBackup(future) }
                 .exceptionOrNull()?.message.orEmpty().contains("newer")
         )
+    }
+
+    @Test
+    fun versionOneBackup_withMissingNestedFormat_migratesAsFormatTwo() {
+        val legacy = """
+            {
+              "fileType":"simplecontroller-profiles-backup",
+              "backupVersion":1,
+              "activeControllerProfileName":"Legacy",
+              "controllerProfiles":[{
+                "name":"Legacy",
+                "profile":{
+                  "homePageId":"base",
+                  "pages":[{"id":"base","name":"Base","controls":[{
+                    "id":"a","type":"BUTTON","x":3.0,"y":4.0,
+                    "w":100.0,"h":100.0,"payload":"X360A"
+                  }]}]
+                }
+              }]
+            }
+        """.trimIndent()
+
+        val profile = decodeControllerProfilesBackup(legacy).backup
+            .controllerProfiles.single().profile
+
+        assertEquals(3, profile.formatVersion)
+        assertEquals(3f, profile.pages.single().portraitGeometry!!
+            .controls.getValue("a").x, 0.001f)
     }
 
     private fun calibration() = TouchAimCalibrationProfile(

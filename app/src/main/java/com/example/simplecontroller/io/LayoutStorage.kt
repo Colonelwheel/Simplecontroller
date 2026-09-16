@@ -9,6 +9,7 @@ import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.PageAction
+import com.example.simplecontroller.model.capturePageGeometry
 import com.example.simplecontroller.model.newPageId
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -92,27 +93,28 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
     if (normalizedText.trimStart().startsWith("[")) {
         val controls = json.decodeFromString<List<Control>>(normalizedText)
         val pageId = stableLegacyBasePageId(profileName)
-        return ControllerProfileLoadResult(
-            profile = ControllerProfile(
+        return validateControllerProfile(
+            decoded = ControllerProfile(
+                formatVersion = 2,
                 homePageId = pageId,
                 pages = listOf(ControllerPage(pageId, "Base", controls))
             ),
-            warnings = emptyList(),
-            migratedFromSinglePage = true
-        )
+            profileName = profileName
+        ).copy(migratedFromSinglePage = true)
     }
     val element = json.parseToJsonElement(normalizedText)
     val encodedVersion = (element as? JsonObject)
         ?.get("formatVersion")
         ?.jsonPrimitive
         ?.intOrNull
-        ?: CONTROLLER_PROFILE_FORMAT_VERSION
+        ?: 2
     require(encodedVersion >= 1) { "Profile format $encodedVersion is invalid." }
     require(encodedVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
         "Profile format $encodedVersion is newer than supported format " +
             CONTROLLER_PROFILE_FORMAT_VERSION
     }
     val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
+        .copy(formatVersion = encodedVersion)
     val result = validateControllerProfile(decoded, profileName)
     val missingFieldWarnings = element.jsonObject["pages"]?.jsonArray.orEmpty()
         .mapIndexedNotNull { index, pageElement ->
@@ -187,7 +189,7 @@ fun decodeControllerProfileTransfer(
     val encodedProfile = objectValue["profile"] as? JsonObject
         ?: throw IllegalArgumentException("The profile data is missing or invalid.")
     val profileFormatVersion = encodedProfile["formatVersion"]?.jsonPrimitive?.intOrNull
-        ?: CONTROLLER_PROFILE_FORMAT_VERSION
+        ?: 2
     require(profileFormatVersion >= 1) {
         "Profile format $profileFormatVersion is invalid."
     }
@@ -201,7 +203,10 @@ fun decodeControllerProfileTransfer(
     val suggestedName = sanitizeSuggestedProfileName(transfer.profileName.ifBlank { fallbackName })
     return ImportedControllerProfile(
         suggestedName,
-        validateControllerProfile(transfer.profile, suggestedName)
+        validateControllerProfile(
+            transfer.profile.copy(formatVersion = profileFormatVersion),
+            suggestedName
+        )
     )
 }
 
@@ -387,8 +392,28 @@ fun validateControllerProfile(
             warnings += "Duplicate page name '$base' was renamed to '$name'."
         }
         usedNames += name.lowercase(Locale.ROOT)
-        val controls = deepCopyControls(source.controls).map { original ->
+        validateOrientationGeometry(source.portraitGeometry, "$name Portrait")
+        validateOrientationGeometry(source.landscapeGeometry, "$name Landscape")
+        val usedControlIds = mutableSetOf<String>()
+        val controls = deepCopyControls(source.controls).mapIndexed { controlIndex, original ->
             var control = original
+            if (control.id.isBlank() || !usedControlIds.add(control.id)) {
+                require(
+                    decoded.formatVersion < CONTROLLER_PROFILE_FORMAT_VERSION &&
+                        source.portraitGeometry == null && source.landscapeGeometry == null
+                ) {
+                    "Page '$name' contains blank or duplicate control IDs; its orientation geometry is ambiguous."
+                }
+                val replacement = stableRecoveredControlId(
+                    profileName,
+                    id,
+                    controlIndex,
+                    usedControlIds
+                )
+                usedControlIds += replacement
+                control = control.copy(id = replacement)
+                warnings += "A blank or duplicate control ID on '$name' was assigned a stable replacement."
+            }
             if ((control.pageAction == PageAction.GO_TO || control.pageAction == PageAction.TOGGLE) &&
                 control.pageTargetId.isBlank() && recoveredMissingId != null
             ) {
@@ -421,7 +446,18 @@ fun validateControllerProfile(
             }
             control
         }
-        ControllerPage(id, name, controls)
+        val migratedPortraitGeometry = if (
+            decoded.formatVersion < CONTROLLER_PROFILE_FORMAT_VERSION &&
+            source.portraitGeometry == null && source.landscapeGeometry == null
+        ) {
+            capturePageGeometry(controls, 0f, 0f)
+        } else source.portraitGeometry
+        source.copy(
+            id = id,
+            name = name,
+            controls = controls,
+            portraitGeometry = migratedPortraitGeometry
+        )
     }
 
     val validIds = pages.mapTo(mutableSetOf()) { it.id }
@@ -462,6 +498,15 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
     if (names.distinct().size != names.size) return "Page names must be unique."
 
     profile.pages.forEach { page ->
+        val controlIds = page.controls.map { it.id }
+        if (controlIds.any(String::isBlank)) return "Every control must have a nonblank stable ID."
+        if (controlIds.distinct().size != controlIds.size) {
+            return "Control IDs must be unique within each page."
+        }
+        runCatching {
+            validateOrientationGeometry(page.portraitGeometry, "${page.name} Portrait")
+            validateOrientationGeometry(page.landscapeGeometry, "${page.name} Landscape")
+        }.exceptionOrNull()?.let { return it.message ?: "Orientation geometry is invalid." }
         page.controls.forEach { control ->
             if (control.pageAction != PageAction.NONE && control.type != ControlType.BUTTON) {
                 return "Only button controls can have local page actions."
@@ -497,6 +542,39 @@ private fun stableRecoveredPageId(
         ).toString()
         if (value !in usedIds) return value
         attempt++
+    }
+}
+
+private fun stableRecoveredControlId(
+    profileName: String,
+    pageId: String,
+    index: Int,
+    usedIds: Set<String>
+): String {
+    var attempt = 0
+    while (true) {
+        val value = "control_" + UUID.nameUUIDFromBytes(
+            "simplecontroller-control:${profileName.lowercase(Locale.ROOT)}:$pageId:$index:$attempt"
+                .toByteArray(StandardCharsets.UTF_8)
+        )
+        if (value !in usedIds) return value
+        attempt++
+    }
+}
+
+private fun validateOrientationGeometry(
+    geometry: com.example.simplecontroller.model.PageOrientationGeometry?,
+    label: String
+) {
+    if (geometry == null) return
+    require(geometry.canvasWidth.isFinite() && geometry.canvasHeight.isFinite()) {
+        "$label canvas dimensions are invalid."
+    }
+    geometry.controls.forEach { (controlId, value) ->
+        require(controlId.isNotBlank()) { "$label contains a blank control ID." }
+        require(value.x.isFinite() && value.y.isFinite() && value.w.isFinite() && value.h.isFinite()) {
+            "$label contains non-finite control geometry."
+        }
     }
 }
 

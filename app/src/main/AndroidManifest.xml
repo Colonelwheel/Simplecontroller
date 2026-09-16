@@ -22,6 +22,11 @@
             android:supportsPictureInPicture="false"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
 
+            <!-- API 36 otherwise ignores requested portrait/landscape on sw600dp displays. -->
+            <property
+                android:name="android.window.PROPERTY_COMPAT_ALLOW_RESTRICTED_RESIZABILITY"
+                android:value="true" />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

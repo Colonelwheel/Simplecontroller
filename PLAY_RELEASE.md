@@ -14,6 +14,9 @@ The Play build can be installed beside the debug build. Profiles move between th
 versioned export/import contract in `PROFILE_TRANSFER_FORMAT.md`; the two apps do not share private
 Android storage.
 
+The main controller activity uses the app's saved Play Mode orientation lock rather than the phone's
+rotation sensor. The optional Touch Sensor Test activity remains sideload-only and portrait-only.
+
 ## Build commands
 
 ```powershell

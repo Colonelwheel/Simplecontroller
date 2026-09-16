@@ -32,6 +32,10 @@ class ControllerProfileTest {
         assertTrue(first.profile.pages.single().controls.single().holdToggle)
         assertEquals(350L, first.profile.pages.single().controls.single().holdDurationMs)
         assertEquals(PageAction.NONE, first.profile.pages.single().controls.single().pageAction)
+        assertEquals(CONTROLLER_PROFILE_FORMAT_VERSION, first.profile.formatVersion)
+        assertEquals(12f, first.profile.pages.single().portraitGeometry!!
+            .controls.getValue("fire").x, 0.001f)
+        assertEquals(null, first.profile.pages.single().landscapeGeometry)
     }
 
     @Test
@@ -51,7 +55,18 @@ class ControllerProfileTest {
                 )
             )
         )
-        val profile = ControllerProfile(homePageId = "alt-id", pages = listOf(base, alternate))
+        val profile = ControllerProfile(
+            homePageId = "alt-id",
+            pages = listOf(
+                base.copy(
+                    portraitGeometry = capturePageGeometry(base.controls, 1000f, 2000f),
+                    landscapeGeometry = capturePageGeometry(
+                        base.controls.map { it.copy(x = 600f) }, 2000f, 1000f
+                    )
+                ),
+                alternate
+            )
+        )
 
         val decoded = decodeControllerProfile(encodeControllerProfile(profile), "roundtrip").profile
 
@@ -60,6 +75,49 @@ class ControllerProfileTest {
         assertTrue(decoded.pages.first().controls.single().autoTapEnabled)
         assertEquals(PageAction.TOGGLE, decoded.pages.last().controls.single().pageAction)
         assertEquals("alt-id", decoded.pages.last().controls.single().pageTargetId)
+        assertEquals(0f, decoded.pages.first().portraitGeometry!!
+            .controls.getValue("base-button").x, 0.001f)
+        assertEquals(600f, decoded.pages.first().landscapeGeometry!!
+            .controls.getValue("base-button").x, 0.001f)
+    }
+
+    @Test
+    fun formatTwoProfile_migratesExistingGeometryToPortraitOnly() {
+        val formatTwo = """
+            {"formatVersion":2,"homePageId":"base","pages":[
+              {"id":"base","name":"Base","controls":[
+                {"id":"aim","type":"TOUCH_AIM","x":25.0,"y":50.0,"w":300.0,"h":400.0,
+                 "payload":"TOUCH_AIM","holdToggle":false}
+              ]}
+            ]}
+        """.trimIndent()
+
+        val migrated = decodeControllerProfile(formatTwo, "old portrait").profile
+        val page = migrated.pages.single()
+
+        assertEquals(3, migrated.formatVersion)
+        assertEquals(ControlType.TOUCH_AIM, page.controls.single().type)
+        assertEquals(25f, page.portraitGeometry!!.controls.getValue("aim").x, 0.001f)
+        assertEquals(null, page.landscapeGeometry)
+    }
+
+    @Test
+    fun missingFormatVersion_isTreatedAsLegacyFormatTwo() {
+        val legacyObject = """
+            {"homePageId":"base","pages":[
+              {"id":"base","name":"Base","controls":[
+                {"id":"a","type":"BUTTON","x":11.0,"y":22.0,"w":100.0,"h":100.0,
+                 "payload":"X360A"}
+              ]}
+            ]}
+        """.trimIndent()
+
+        val migrated = decodeControllerProfile(legacyObject, "missing version").profile
+
+        assertEquals(3, migrated.formatVersion)
+        assertEquals(11f, migrated.pages.single().portraitGeometry!!
+            .controls.getValue("a").x, 0.001f)
+        assertEquals(null, migrated.pages.single().landscapeGeometry)
     }
 
     @Test

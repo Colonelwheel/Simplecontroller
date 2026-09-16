@@ -10,7 +10,8 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
-- the nested `ControllerProfile` format version `2`;
+- the current nested `ControllerProfile` format version `3`;
+- the older nested `ControllerProfile` format version `2`;
 - bare format-version-2 multipage `ControllerProfile` JSON objects created before the wrapper;
 - historical top-level JSON arrays of `Control` objects, migrated to one `Base` page.
 
@@ -50,6 +51,11 @@ The single-profile file contains one complete controller profile:
 - stable page IDs and control IDs;
 - every serialized `Control` setting and applied settings snapshot;
 - local page actions and cross-page target IDs.
+- independent Portrait and Landscape position/size geometry for every page, when created.
+
+Format 2 profiles and historical control arrays contain one geometry set. They migrate as Portrait
+without changing their controls or settings. Landscape remains absent until the first Landscape
+switch, when the app creates a proportional fitted copy and clamps it within the new canvas.
 
 Whole-profile import preserves those IDs exactly. It must not use the single-page import path that
 regenerates IDs, because doing so would break cross-page navigation.
@@ -74,7 +80,7 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - All-profile backup version: `1`
-- Nested controller-profile format: `2`
+- Nested controller-profile format: `3` (format `2` remains importable)
 - Single-profile suffix: `.simplecontroller-profile.json`
 - All-profile suffix: `.simplecontroller-profiles-backup.json`
 - Maximum file size: 25 MB

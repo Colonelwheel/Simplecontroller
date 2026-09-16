@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
@@ -61,15 +62,24 @@ import com.example.simplecontroller.model.ControllerPageOption
 import com.example.simplecontroller.model.ControllerPageSession
 import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.LayoutOrientation
+import com.example.simplecontroller.model.OrientationPreferenceBackend
+import com.example.simplecontroller.model.OrientationPreferenceStore
 import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.TouchAimCalibrationProfile
 import com.example.simplecontroller.model.hasPageName
 import com.example.simplecontroller.model.hasUsablePageNavigation
+import com.example.simplecontroller.model.capturePageGeometry
+import com.example.simplecontroller.model.controlsForOrientation
+import com.example.simplecontroller.model.geometryFor
 import com.example.simplecontroller.model.isLocalPageAction
 import com.example.simplecontroller.model.newPageId
 import com.example.simplecontroller.model.page
 import com.example.simplecontroller.model.pageName
 import com.example.simplecontroller.model.referenceCount
+import com.example.simplecontroller.model.remapControlIds
+import com.example.simplecontroller.model.withGeometry
+import com.example.simplecontroller.model.withOnlyControlIds
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
@@ -119,6 +129,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     /* ---------- network settings prefs ---------- */
     private val networkPrefs by lazy { getSharedPreferences("network", MODE_PRIVATE) }
+    private val orientationPrefs by lazy { getSharedPreferences("orientation", MODE_PRIVATE) }
+    private val orientationStore by lazy {
+        OrientationPreferenceStore(object : OrientationPreferenceBackend {
+            override fun read(key: String): String? = orientationPrefs.getString(key, null)
+
+            override fun write(key: String, value: String) {
+                orientationPrefs.edit().putString(key, value).apply()
+            }
+        })
+    }
 
     /* ---------- helper classes ---------- */
     private lateinit var uiBuilder: UIComponentBuilder
@@ -139,6 +159,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var fabAdd: View
     private lateinit var btnEdit: Button
     private lateinit var btnPageManager: Button
+    private lateinit var btnEditOrientation: Button
+    private lateinit var btnPlayOrientation: Button
 
     /* ---------- global switches ---------- */
     private lateinit var switchSnap: Switch
@@ -154,6 +176,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var canvas: FrameLayout
     private var activeTouchAimCalibration: TouchAimCalibrationWizard? = null
     private var touchAimCalibrationLaunchGeneration = 0
+    private var activeLayoutOrientation = LayoutOrientation.PORTRAIT
+    private var pendingOrientationPageId: String? = null
+    private var orientationRenderPending = false
     
     /* ---------- layout monitoring ---------- */
     private var lastCanvasHeight = 0
@@ -175,11 +200,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         ThemeManager.init(this)
 
         super.onCreate(savedInstanceState)
+        requestedOrientation = requestedOrientationFor(orientationStore.readPlayOrientation())
         setContentView(R.layout.activity_main)
 
         // 1. Grab views
         canvas = findViewById(R.id.canvas)
         connectionStatusText = findViewById(R.id.connectionStatus)
+        activeLayoutOrientation = layoutOrientationFrom(resources.configuration)
 
         // 2. Apply theme colours
         canvas.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_background))
@@ -212,9 +239,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         )
         displayedPageId = controllerProfile.homePageId
         editingPageId = controllerProfile.homePageId
-        controls = deepCopyControls(
-            controllerProfile.page(controllerProfile.homePageId)?.controls.orEmpty()
-        ).toMutableList()
+        controls = controllerProfile.page(controllerProfile.homePageId)
+            ?.controlsForOrientation(activeLayoutOrientation, 0f, 0f)
+            ?.let(::deepCopyControls)
+            .orEmpty()
+            .toMutableList()
 
         // 5. Helpers that all point at *that* list
         uiBuilder = UIComponentBuilder(this, canvas)
@@ -255,6 +284,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // 7. Render current layout
         layoutManager.spawnControlViews()
+        canvas.doOnNextLayout {
+            renderPage(displayedPageId, safeToDetach = true)
+        }
 
         // 8. Setup window insets handling for split screen
         setupWindowInsetsHandling()
@@ -384,6 +416,32 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             showControllerPageManager()
         }
 
+        btnEditOrientation = uiBuilder.addCornerButton(
+            "Edit in Landscape",
+            Gravity.TOP or Gravity.END,
+            dp(16),
+            dp(184)
+        ) {
+            requestEditorOrientation(activeLayoutOrientation.opposite())
+        }.apply {
+            isAllCaps = false
+            minHeight = dp(48)
+        }
+
+        btnPlayOrientation = uiBuilder.addCornerButton(
+            "Play lock: Portrait",
+            Gravity.TOP or Gravity.END,
+            dp(16),
+            dp(240)
+        ) {
+            val updated = orientationStore.readPlayOrientation().opposite()
+            orientationStore.writePlayOrientation(updated)
+            updateOrientationButtonLabels()
+        }.apply {
+            isAllCaps = false
+            minHeight = dp(48)
+        }
+
         /* --- Switches --------------------------------------------------- */
         switchSnap = uiBuilder.createSwitch("Snap", true) { on ->
             GlobalSettings.snapEnabled = on
@@ -458,6 +516,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         }
 
         // Hide edit widgets by default
+        updateOrientationButtonLabels()
         updateEditUi(GlobalSettings.editMode)
     }
 
@@ -829,7 +888,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Update UI components when edit mode changes
      */
     private fun updateEditUi(edit: Boolean) {
-        val editWidgets = listOf(btnSave, btnLoad, fabAdd, btnPageManager)
+        val editWidgets = listOf(
+            btnSave,
+            btnLoad,
+            fabAdd,
+            btnPageManager,
+            btnEditOrientation,
+            btnPlayOrientation
+        )
         uiBuilder.updateViewsVisibility(editWidgets, edit)
 
         // Global switches stay visible in both modes
@@ -1294,11 +1360,32 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         controllerProfile.pages.map { ControllerPageOption(it.id, it.name) }
 
     private fun syncDisplayedPageIntoProfile() {
-        if (!::controllerProfile.isInitialized || displayedPageId.isBlank()) return
+        if (orientationRenderPending || !::controllerProfile.isInitialized || displayedPageId.isBlank()) {
+            return
+        }
         val index = controllerProfile.pages.indexOfFirst { it.id == displayedPageId }
         if (index < 0) return
         val updated = controllerProfile.pages.toMutableList()
-        updated[index] = updated[index].copy(controls = deepCopyControls(controls))
+        val existing = updated[index]
+        val copiedControls = deepCopyControls(controls)
+        val controlIds = copiedControls.mapTo(mutableSetOf()) { it.id }
+        val priorCurrentGeometry = existing.geometryFor(activeLayoutOrientation)
+        val canvasWidth = canvas.width.toFloat().takeIf { it > 0f }
+            ?: priorCurrentGeometry?.canvasWidth
+            ?: 0f
+        val canvasHeight = canvas.height.toFloat().takeIf { it > 0f }
+            ?: priorCurrentGeometry?.canvasHeight
+            ?: 0f
+        var page = existing.copy(controls = copiedControls).withGeometry(
+            activeLayoutOrientation,
+            capturePageGeometry(copiedControls, canvasWidth, canvasHeight)
+        )
+        val otherOrientation = activeLayoutOrientation.opposite()
+        page = page.withGeometry(
+            otherOrientation,
+            page.geometryFor(otherOrientation)?.withOnlyControlIds(controlIds)
+        )
+        updated[index] = page
         controllerProfile = controllerProfile.copy(pages = updated)
     }
 
@@ -1314,7 +1401,15 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val page = controllerProfile.page(pageId) ?: return
         if (safeToDetach) clearControlViewsSafely() else clearControlViews()
         controls.clear()
-        controls.addAll(deepCopyControls(page.controls))
+        controls.addAll(
+            deepCopyControls(
+                page.controlsForOrientation(
+                    activeLayoutOrientation,
+                    canvas.width.toFloat(),
+                    canvas.height.toFloat()
+                )
+            )
+        )
         displayedPageId = page.id
         layoutManager.spawnControlViews()
         updatePageSelectorLabel()
@@ -1421,13 +1516,91 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     private fun finishLeavingEditMode() {
         syncDisplayedPageIntoProfile()
+        releaseOutputs(showFeedback = false)
+        cancelTouchAimCalibration("Calibration stopped because Play Mode started.")
         pageSession.resetToHome()
         editingPageId = controllerProfile.homePageId
         renderPage(controllerProfile.homePageId, safeToDetach = true)
         GlobalSettings.editMode = false
         btnEdit.text = "Edit"
         updateEditUi(false)
+        switchToOrientation(
+            orientation = orientationStore.readPlayOrientation(),
+            pageId = controllerProfile.homePageId
+        )
     }
+
+    private fun requestEditorOrientation(orientation: LayoutOrientation) {
+        if (!GlobalSettings.editMode || orientation == activeLayoutOrientation) return
+        syncDisplayedPageIntoProfile()
+        releaseOutputs(showFeedback = false)
+        cancelTouchAimCalibration("Calibration stopped because the editor orientation changed.")
+        switchToOrientation(orientation, editingPageId.ifBlank { displayedPageId })
+    }
+
+    private fun switchToOrientation(orientation: LayoutOrientation, pageId: String) {
+        pendingOrientationPageId = pageId
+        orientationRenderPending = true
+        if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = false
+        requestedOrientation = requestedOrientationFor(orientation)
+        updateOrientationButtonLabels()
+
+        // Android does not send another configuration callback when the requested orientation is
+        // already active. Complete the render after layout in that case.
+        if (layoutOrientationFrom(resources.configuration) == orientation) {
+            activeLayoutOrientation = orientation
+            pendingOrientationPageId = null
+            orientationRenderPending = false
+            renderPage(pageId, safeToDetach = true)
+            if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
+            updateOrientationButtonLabels()
+            return
+        }
+
+        canvas.postDelayed({
+            if (orientationRenderPending && pendingOrientationPageId == pageId &&
+                layoutOrientationFrom(resources.configuration) != orientation
+            ) {
+                pendingOrientationPageId = null
+                orientationRenderPending = false
+                activeLayoutOrientation = layoutOrientationFrom(resources.configuration)
+                if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
+                updateOrientationButtonLabels()
+                Toast.makeText(
+                    this,
+                    "Android did not allow the requested orientation on this display.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }, 1500L)
+    }
+
+    private fun updateOrientationButtonLabels() {
+        if (::btnEditOrientation.isInitialized) {
+            btnEditOrientation.text = when (activeLayoutOrientation.opposite()) {
+                LayoutOrientation.PORTRAIT -> "Edit in Portrait"
+                LayoutOrientation.LANDSCAPE -> "Edit in Landscape"
+            }
+        }
+        if (::btnPlayOrientation.isInitialized) {
+            btnPlayOrientation.text = when (orientationStore.readPlayOrientation()) {
+                LayoutOrientation.PORTRAIT -> "Play lock: Portrait"
+                LayoutOrientation.LANDSCAPE -> "Play lock: Landscape"
+            }
+        }
+    }
+
+    private fun requestedOrientationFor(orientation: LayoutOrientation): Int = when (orientation) {
+        LayoutOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        LayoutOrientation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+    }
+
+    private fun layoutOrientationFrom(configuration: Configuration): LayoutOrientation =
+        if (configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            LayoutOrientation.LANDSCAPE
+        } else {
+            LayoutOrientation.PORTRAIT
+        }
 
     private fun showControllerPageManager() {
         if (!GlobalSettings.editMode) return
@@ -1523,10 +1696,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 if (!validNewPageName(pageName)) return@setOnClickListener
                 syncDisplayedPageIntoProfile()
                 val id = newPageId()
-                val copiedNavigation = if (copyNavigation.isChecked) {
-                    deepCopyControls(controls.filter(Control::isLocalPageAction), regenerateIds = true)
-                } else emptyList()
-                addNewPageWithWarning(ControllerPage(id, pageName, copiedNavigation))
+                val source = controllerProfile.page(editingPageId) ?: return@setOnClickListener
+                val page = if (copyNavigation.isChecked) {
+                    detachedPageCopy(
+                        source = source,
+                        destinationPageId = id,
+                        newName = pageName,
+                        include = Control::isLocalPageAction,
+                        redirectSelfTargets = false
+                    )
+                } else ControllerPage(id, pageName, emptyList())
+                addNewPageWithWarning(page)
                 dialog.dismiss()
             }
         }
@@ -1550,10 +1730,14 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 syncDisplayedPageIntoProfile()
                 val current = controllerProfile.page(editingPageId) ?: return@setOnClickListener
                 val newId = newPageId()
-                val copied = deepCopyControls(current.controls, regenerateIds = true).map { control ->
-                    if (control.pageTargetId == current.id) control.copy(pageTargetId = newId) else control
-                }
-                addNewPage(ControllerPage(newId, name, copied))
+                addNewPage(
+                    detachedPageCopy(
+                        source = current,
+                        destinationPageId = newId,
+                        newName = name,
+                        redirectSelfTargets = true
+                    )
+                )
                 dialog.dismiss()
             }
         }
@@ -1628,16 +1812,37 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 if (!validNewPageName(pageName)) return@setOnClickListener
                 syncDisplayedPageIntoProfile()
                 val newId = newPageId()
-                val imported = deepCopyControls(source.controls, regenerateIds = true).map { control ->
-                    if (control.pageTargetId == source.id) control.copy(pageTargetId = newId) else control
-                }.toMutableList()
+                var importedPage = detachedPageCopy(
+                    source = source,
+                    destinationPageId = newId,
+                    newName = pageName,
+                    redirectSelfTargets = true
+                )
                 if (copyNavigation.isChecked) {
-                    imported += deepCopyControls(
-                        controls.filter(Control::isLocalPageAction),
-                        regenerateIds = true
+                    val current = controllerProfile.page(editingPageId)
+                        ?: return@setOnClickListener
+                    val navigationPage = detachedPageCopy(
+                        source = current,
+                        destinationPageId = newId,
+                        newName = pageName,
+                        include = Control::isLocalPageAction,
+                        redirectSelfTargets = false
+                    )
+                    val width = canvas.width.toFloat()
+                    val height = canvas.height.toFloat()
+                    val importedControls = importedPage.controlsForOrientation(
+                        activeLayoutOrientation, width, height
+                    )
+                    val navigationControls = navigationPage.controlsForOrientation(
+                        activeLayoutOrientation, width, height
+                    )
+                    val combined = importedControls + navigationControls
+                    importedPage = importedPage.copy(controls = combined).withGeometry(
+                        activeLayoutOrientation,
+                        capturePageGeometry(combined, width, height)
                     )
                 }
-                addNewPageWithWarning(ControllerPage(newId, pageName, imported))
+                addNewPageWithWarning(importedPage)
                 dialog.dismiss()
             }
         }
@@ -1667,6 +1872,40 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         pageSession.updateProfile(controllerProfile.homePageId, controllerProfile.pages.map { it.id })
         editingPageId = page.id
         renderPage(page.id, safeToDetach = true)
+    }
+
+    private fun detachedPageCopy(
+        source: ControllerPage,
+        destinationPageId: String,
+        newName: String,
+        include: (Control) -> Boolean = { true },
+        redirectSelfTargets: Boolean
+    ): ControllerPage {
+        val selected = source.controls.filter(include)
+        val detached = deepCopyControls(selected)
+        val idMap = selected.indices.associate { index ->
+            selected[index].id to "control_${newPageId()}"
+        }
+        val copiedControls = detached.map { control ->
+            control.copy(
+                id = idMap.getValue(control.id),
+                pageTargetId = if (redirectSelfTargets && control.pageTargetId == source.id) {
+                    destinationPageId
+                } else control.pageTargetId
+            )
+        }
+        val selectedIds = idMap.keys
+        return ControllerPage(
+            id = destinationPageId,
+            name = newName,
+            controls = copiedControls,
+            portraitGeometry = source.portraitGeometry
+                ?.withOnlyControlIds(selectedIds)
+                ?.remapControlIds(idMap),
+            landscapeGeometry = source.landscapeGeometry
+                ?.withOnlyControlIds(selectedIds)
+                ?.remapControlIds(idMap)
+        )
     }
 
     private fun promptRenameCurrentPage() {
@@ -2658,7 +2897,22 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         cancelTouchAimCalibration("Calibration stopped because the screen configuration changed.")
-        // Do nothing - keep controls exactly as they are
+        val newOrientation = layoutOrientationFrom(newConfig)
+        if (newOrientation == activeLayoutOrientation && pendingOrientationPageId == null) return
+
+        // Explicit editor/Play transitions release before requesting orientation. Keep this
+        // defensive cleanup for any configuration transition Android delivers independently.
+        releaseOutputs(showFeedback = false)
+        val pageId = pendingOrientationPageId ?: displayedPageId
+        orientationRenderPending = true
+        canvas.doOnNextLayout {
+            activeLayoutOrientation = newOrientation
+            renderPage(pageId, safeToDetach = true)
+            pendingOrientationPageId = null
+            orientationRenderPending = false
+            if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
+            updateOrientationButtonLabels()
+        }
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
