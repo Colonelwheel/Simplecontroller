@@ -68,7 +68,6 @@ import com.example.simplecontroller.model.OrientationPreferenceStore
 import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.TouchAimCalibrationProfile
 import com.example.simplecontroller.model.hasPageName
-import com.example.simplecontroller.model.hasUsablePageNavigation
 import com.example.simplecontroller.model.capturePageGeometry
 import com.example.simplecontroller.model.controlsForOrientation
 import com.example.simplecontroller.model.geometryFor
@@ -161,6 +160,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private lateinit var btnPageManager: Button
     private lateinit var btnEditOrientation: Button
     private lateinit var btnPlayOrientation: Button
+    private lateinit var orientationControlsRow: LinearLayout
 
     /* ---------- global switches ---------- */
     private lateinit var switchSnap: Switch
@@ -200,7 +200,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         ThemeManager.init(this)
 
         super.onCreate(savedInstanceState)
-        requestedOrientation = requestedOrientationFor(orientationStore.readPlayOrientation())
+        val startupPlayOrientation = orientationStore.readPlayOrientation()
         setContentView(R.layout.activity_main)
 
         // 1. Grab views
@@ -282,14 +282,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             ).show()
         }
 
-        // 7. Render current layout
-        layoutManager.spawnControlViews()
-        canvas.doOnNextLayout {
-            renderPage(displayedPageId, safeToDetach = true)
-        }
-
-        // 8. Setup window insets handling for split screen
+        // 7. Apply insets before the first measured profile render.
         setupWindowInsetsHandling()
+
+        // 8. Render only after the saved Play orientation and canvas size have settled. Rendering
+        // earlier can leave the startup controls detached until Edit Mode forces another render.
+        switchToOrientation(startupPlayOrientation, controllerProfile.homePageId)
         
         // 9. Misc startup
         loadNetworkSettings()
@@ -416,31 +414,45 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             showControllerPageManager()
         }
 
-        btnEditOrientation = uiBuilder.addCornerButton(
-            "Edit in Landscape",
-            Gravity.TOP or Gravity.END,
-            dp(16),
-            dp(184)
-        ) {
-            requestEditorOrientation(activeLayoutOrientation.opposite())
-        }.apply {
+        fun orientationButton(label: String, onClick: () -> Unit) = Button(this).apply {
+            text = label
             isAllCaps = false
             minHeight = dp(48)
+            alpha = 0.7f
+            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.dark_text_primary))
+            backgroundTintList = ContextCompat.getColorStateList(
+                this@MainActivity,
+                R.color.button_blue
+            )
+            setOnClickListener { view ->
+                view.performHapticFeedback(
+                    android.view.HapticFeedbackConstants.KEYBOARD_TAP,
+                    android.view.HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                )
+                onClick()
+            }
         }
 
-        btnPlayOrientation = uiBuilder.addCornerButton(
-            "Play lock: Portrait",
-            Gravity.TOP or Gravity.END,
-            dp(16),
-            dp(240)
-        ) {
+        btnEditOrientation = orientationButton("Edit in Landscape") {
+            requestEditorOrientation(activeLayoutOrientation.opposite())
+        }
+        btnPlayOrientation = orientationButton("Play lock: Portrait") {
             val updated = orientationStore.readPlayOrientation().opposite()
             orientationStore.writePlayOrientation(updated)
             updateOrientationButtonLabels()
-        }.apply {
-            isAllCaps = false
-            minHeight = dp(48)
         }
+        orientationControlsRow = LinearLayout(this).apply {
+            gravity = Gravity.CENTER
+            addView(btnEditOrientation)
+            addView(btnPlayOrientation)
+        }
+        canvas.addView(
+            orientationControlsRow,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
 
         /* --- Switches --------------------------------------------------- */
         switchSnap = uiBuilder.createSwitch("Snap", true) { on ->
@@ -893,10 +905,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             btnLoad,
             fabAdd,
             btnPageManager,
-            btnEditOrientation,
-            btnPlayOrientation
+            orientationControlsRow
         )
         uiBuilder.updateViewsVisibility(editWidgets, edit)
+        if (edit) orientationControlsRow.bringToFront()
 
         // Global switches stay visible in both modes
         val globalSwitches = listOf(switchSnap, switchHold, switchTurbo, switchSwipe)
@@ -1496,22 +1508,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         }
 
         syncDisplayedPageIntoProfile()
-        val validPageIds = controllerProfile.pages.mapTo(mutableSetOf()) { it.id }
-        val unsafePages = controllerProfile.pages.filter {
-            it.id != controllerProfile.homePageId && !it.hasUsablePageNavigation(validPageIds)
-        }
-        if (unsafePages.isNotEmpty()) {
-            AlertDialog.Builder(this)
-                .setTitle("Page navigation warning")
-                .setMessage(
-                    "These pages have no usable Return, Home, or valid Toggle button:\n\n" +
-                        unsafePages.joinToString("\n") { "• ${it.name}" } +
-                        "\n\nYou can still use Edit as an emergency route. Enter Play Mode anyway?"
-                )
-                .setPositiveButton("Enter Play Mode") { _, _ -> finishLeavingEditMode() }
-                .setNegativeButton("Keep editing", null)
-                .show()
-        } else finishLeavingEditMode()
+        finishLeavingEditMode()
     }
 
     private fun finishLeavingEditMode() {
@@ -1548,31 +1545,54 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Android does not send another configuration callback when the requested orientation is
         // already active. Complete the render after layout in that case.
         if (layoutOrientationFrom(resources.configuration) == orientation) {
-            activeLayoutOrientation = orientation
-            pendingOrientationPageId = null
-            orientationRenderPending = false
-            renderPage(pageId, safeToDetach = true)
-            if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
-            updateOrientationButtonLabels()
+            completeOrientationRender(orientation, pageId, waitForNextLayout = false)
             return
         }
 
         canvas.postDelayed({
-            if (orientationRenderPending && pendingOrientationPageId == pageId &&
-                layoutOrientationFrom(resources.configuration) != orientation
-            ) {
-                pendingOrientationPageId = null
-                orientationRenderPending = false
-                activeLayoutOrientation = layoutOrientationFrom(resources.configuration)
-                if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
-                updateOrientationButtonLabels()
-                Toast.makeText(
-                    this,
-                    "Android did not allow the requested orientation on this display.",
-                    Toast.LENGTH_LONG
-                ).show()
+            if (orientationRenderPending && pendingOrientationPageId == pageId) {
+                val actualOrientation = layoutOrientationFrom(resources.configuration)
+                completeOrientationRender(actualOrientation, pageId, waitForNextLayout = false)
+                if (actualOrientation != orientation) {
+                    Toast.makeText(
+                        this,
+                        "Android did not allow the requested orientation on this display.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         }, 1500L)
+    }
+
+    private fun completeOrientationRender(
+        orientation: LayoutOrientation,
+        pageId: String,
+        waitForNextLayout: Boolean
+    ) {
+        val complete = complete@{
+            if (!orientationRenderPending || pendingOrientationPageId != pageId) return@complete
+            activeLayoutOrientation = orientation
+            renderPage(pageId, safeToDetach = true)
+            canvas.requestLayout()
+            pendingOrientationPageId = null
+            orientationRenderPending = false
+            if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
+            updateOrientationButtonLabels()
+        }
+
+        if (waitForNextLayout || !canvas.isLaidOut || canvas.isLayoutRequested ||
+            canvas.width <= 0 || canvas.height <= 0
+        ) {
+            // doOnNextLayout runs from inside the parent's layout pass. Adding ControlViews there
+            // can leave them measured at 0x0 on Samsung devices, so render on the next UI-loop turn.
+            canvas.doOnNextLayout { canvas.post { complete() } }
+            // Some devices deliver onConfigurationChanged after their only layout pass. Force a
+            // new pass, and never allow the controller to remain blank if no callback follows.
+            canvas.requestLayout()
+            canvas.postDelayed({ complete() }, 300L)
+        } else {
+            complete()
+        }
     }
 
     private fun updateOrientationButtonLabels() {
@@ -1587,6 +1607,52 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 LayoutOrientation.PORTRAIT -> "Play lock: Portrait"
                 LayoutOrientation.LANDSCAPE -> "Play lock: Landscape"
             }
+        }
+        updateOrientationControlsPlacement()
+    }
+
+    private fun updateOrientationControlsPlacement() {
+        if (!::orientationControlsRow.isInitialized) return
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+        val rowParams = orientationControlsRow.layoutParams as? FrameLayout.LayoutParams ?: return
+
+        if (activeLayoutOrientation == LayoutOrientation.LANDSCAPE) {
+            orientationControlsRow.orientation = LinearLayout.HORIZONTAL
+            rowParams.width = minOf(
+                dp(410),
+                (canvas.width - canvas.paddingLeft - canvas.paddingRight - dp(16))
+                    .takeIf { it > 0 } ?: dp(410)
+            )
+            rowParams.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            rowParams.setMargins(dp(8), dp(52), dp(8), dp(8))
+            btnEditOrientation.layoutParams = LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply { marginEnd = dp(4) }
+            btnPlayOrientation.layoutParams = LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            ).apply { marginStart = dp(4) }
+        } else {
+            orientationControlsRow.orientation = LinearLayout.VERTICAL
+            rowParams.width = dp(220)
+            rowParams.gravity = Gravity.TOP or Gravity.END
+            rowParams.setMargins(dp(16), dp(184), dp(16), dp(8))
+            btnEditOrientation.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(4) }
+            btnPlayOrientation.layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { topMargin = dp(4) }
+        }
+        orientationControlsRow.layoutParams = rowParams
+        if (orientationControlsRow.visibility == View.VISIBLE) {
+            orientationControlsRow.bringToFront()
         }
     }
 
@@ -1706,7 +1772,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                         redirectSelfTargets = false
                     )
                 } else ControllerPage(id, pageName, emptyList())
-                addNewPageWithWarning(page)
+                addNewPage(page)
                 dialog.dismiss()
             }
         }
@@ -1842,28 +1908,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                         capturePageGeometry(combined, width, height)
                     )
                 }
-                addNewPageWithWarning(importedPage)
+                addNewPage(importedPage)
                 dialog.dismiss()
             }
         }
         dialog.show()
-    }
-
-    private fun addNewPageWithWarning(page: ControllerPage) {
-        val validIds = controllerProfile.pages.mapTo(mutableSetOf()) { it.id }.apply { add(page.id) }
-        if (page.hasUsablePageNavigation(validIds)) {
-            addNewPage(page)
-            return
-        }
-        AlertDialog.Builder(this)
-            .setTitle("No page-navigation button")
-            .setMessage(
-                "'${page.name}' has no usable Return, Home, or Toggle action. " +
-                    "Edit remains an emergency route, but this page may be difficult to leave in Play Mode."
-            )
-            .setPositiveButton("Add anyway") { _, _ -> addNewPage(page) }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     private fun addNewPage(page: ControllerPage) {
@@ -2905,14 +2954,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         releaseOutputs(showFeedback = false)
         val pageId = pendingOrientationPageId ?: displayedPageId
         orientationRenderPending = true
-        canvas.doOnNextLayout {
-            activeLayoutOrientation = newOrientation
-            renderPage(pageId, safeToDetach = true)
-            pendingOrientationPageId = null
-            orientationRenderPending = false
-            if (::btnEditOrientation.isInitialized) btnEditOrientation.isEnabled = true
-            updateOrientationButtonLabels()
-        }
+        pendingOrientationPageId = pageId
+        completeOrientationRender(newOrientation, pageId, waitForNextLayout = true)
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean) {
