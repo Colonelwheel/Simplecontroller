@@ -155,7 +155,7 @@ class ProfileBackupFormatTest {
     )
 
     private fun tuning() = ButtonAimTuning(
-        output = TouchAimOutput.MOUSE,
+        output = ButtonAimOutput.DPAD,
         sensitivity = 1f,
         invertY = false,
         stickProfile = ButtonAimStickProfile.LINEAR,
@@ -163,7 +163,10 @@ class ProfileBackupFormatTest {
         stickFullDisplacementPx = 220f,
         stickDeadzonePx = 8f,
         stickUsesTouchPosition = false,
-        haptics = true
+        haptics = true,
+        dpadMode = ButtonAimDpadMode.FOUR_WAY,
+        dpadOrigin = ButtonAimDpadOrigin.INITIAL_TOUCH,
+        dpadActivationDistancePx = 16f
     )
 
     private fun buttonAimProfile() = ButtonAimProfile(

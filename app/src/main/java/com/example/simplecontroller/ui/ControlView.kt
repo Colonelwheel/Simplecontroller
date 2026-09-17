@@ -261,6 +261,7 @@ class ControlView(
                 model = model,
                 aimOutput = buttonAimOutput,
                 payloadExecutor = uiHelper.createButtonAimPayloadExecutor(),
+                controlSize = { width.toFloat() to height.toFloat() },
                 isLatched = { isLatched },
                 setLatched = {
                     setButtonAimLatchedState(it)

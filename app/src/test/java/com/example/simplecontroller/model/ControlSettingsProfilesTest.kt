@@ -11,6 +11,30 @@ class ControlSettingsProfilesTest {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test
+    fun legacyButtonAimTuning_withoutDpadFields_usesSafeDefaults() {
+        val legacy = """
+            {
+              "output":"RIGHT_STICK",
+              "sensitivity":1.0,
+              "invertY":false,
+              "stickProfile":"LINEAR",
+              "mouseProfile":"SMOOTHED_NONLINEAR",
+              "stickFullDisplacementPx":220.0,
+              "stickDeadzonePx":8.0,
+              "stickUsesTouchPosition":false,
+              "haptics":true
+            }
+        """.trimIndent()
+
+        val tuning = json.decodeFromString(ButtonAimTuning.serializer(), legacy)
+
+        assertEquals(ButtonAimOutput.RIGHT_STICK, tuning.output)
+        assertEquals(ButtonAimDpadMode.EIGHT_WAY, tuning.dpadMode)
+        assertEquals(ButtonAimDpadOrigin.CONTROL_CENTER, tuning.dpadOrigin)
+        assertEquals(8f, tuning.dpadActivationDistancePx)
+    }
+
+    @Test
     fun manualThreeStage_captureRoundTripApply_copiesManualSnapshotOnly() {
         val source = touchAim().copy(
             touchAimMode = TouchAimMode.MANUAL_THREE_STAGE,
@@ -152,7 +176,7 @@ class ControlSettingsProfilesTest {
             holdDurationMs = 640L,
             buttonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
             buttonAimReleaseDelayMs = 35L,
-            buttonAimOutput = TouchAimOutput.RIGHT_STICK,
+            buttonAimOutput = ButtonAimOutput.RIGHT_STICK,
             buttonAimSensitivity = .65f,
             buttonAimInvertY = true,
             buttonAimStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -160,8 +184,11 @@ class ControlSettingsProfilesTest {
             buttonAimStickFullDisplacementPx = 170f,
             buttonAimStickDeadzonePx = 4f,
             buttonAimStickUsesTouchPosition = true,
+            buttonAimDpadMode = ButtonAimDpadMode.FOUR_WAY,
+            buttonAimDpadOrigin = ButtonAimDpadOrigin.INITIAL_TOUCH,
+            buttonAimDpadActivationDistancePx = 14f,
             buttonAimHaptics = false,
-            buttonAimAlternateOutput = TouchAimOutput.LEFT_STICK,
+            buttonAimAlternateOutput = ButtonAimOutput.LEFT_STICK,
             buttonAimAlternateSensitivity = .4f,
             buttonAimAlternateInvertY = true,
             buttonAimAlternateStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -169,6 +196,9 @@ class ControlSettingsProfilesTest {
             buttonAimAlternateStickFullDisplacementPx = 140f,
             buttonAimAlternateStickDeadzonePx = 3f,
             buttonAimAlternateStickUsesTouchPosition = true,
+            buttonAimAlternateDpadMode = ButtonAimDpadMode.FOUR_WAY,
+            buttonAimAlternateDpadOrigin = ButtonAimDpadOrigin.INITIAL_TOUCH,
+            buttonAimAlternateDpadActivationDistancePx = 17f,
             buttonAimAlternateHaptics = false,
             buttonAimOneShotAlternateEnabled = true,
             buttonAimAlternatePayload = "RT:1.0",
@@ -194,10 +224,13 @@ class ControlSettingsProfilesTest {
         assertTrue(profile.applyAimTuningTo(target))
         assertTrue(target.buttonAimEnabled)
         assertFalse(target.autoTapEnabled)
-        assertEquals(TouchAimOutput.RIGHT_STICK, target.buttonAimOutput)
+        assertEquals(ButtonAimOutput.RIGHT_STICK, target.buttonAimOutput)
         assertEquals(ButtonAimStickProfile.RESPONSE_CURVE, target.buttonAimStickProfile)
         assertEquals(170f, target.buttonAimStickFullDisplacementPx)
         assertEquals(4f, target.buttonAimStickDeadzonePx)
+        assertEquals(ButtonAimDpadMode.FOUR_WAY, target.buttonAimDpadMode)
+        assertEquals(ButtonAimDpadOrigin.INITIAL_TOUCH, target.buttonAimDpadOrigin)
+        assertEquals(14f, target.buttonAimDpadActivationDistancePx)
         assertEquals(.4f, target.buttonAimAlternateSensitivity)
         assertEquals("RT:1.0", target.payload)
         assertTrue(target.holdToggle)

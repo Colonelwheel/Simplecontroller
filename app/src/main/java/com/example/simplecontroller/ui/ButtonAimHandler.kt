@@ -3,8 +3,11 @@ package com.example.simplecontroller.ui
 import android.os.Handler
 import android.os.Looper
 import android.view.MotionEvent
+import com.example.simplecontroller.model.ButtonAimDpadOrigin
+import com.example.simplecontroller.model.ButtonAimOutput
 import com.example.simplecontroller.model.ButtonAimPayloadTiming
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.TouchAimOutput
 
 enum class ButtonAimVisualState {
     IDLE,
@@ -24,6 +27,7 @@ class ButtonAimHandler(
     private val model: Control,
     private val aimOutput: AimOutputSession,
     private val payloadExecutor: ButtonAimPayloadExecutor,
+    controlSize: () -> Pair<Float, Float>,
     private val isLatched: () -> Boolean,
     private val setLatched: (Boolean) -> Unit,
     private val setPressed: (Boolean) -> Unit,
@@ -38,6 +42,8 @@ class ButtonAimHandler(
     private val onPayloadError: (String) -> Unit,
     private val onStateChanged: () -> Unit
 ) {
+    private val dpadOutput = ButtonAimDpadSession(payloadExecutor, controlSize)
+
     private enum class GestureState {
         IDLE,
         BASE_IMMEDIATE_ACTIVE,
@@ -58,6 +64,7 @@ class ButtonAimHandler(
     private var legacyTurboActive = false
     private var baseLease: ButtonAimPayloadLease? = null
     private var alternateLease: ButtonAimPayloadLease? = null
+    private var usingDpadOutput = false
     private var holdThresholdRunnable: Runnable? = null
     private var recoveryResetRunnable: Runnable? = null
     private var delayedFireRunnable: Runnable? = null
@@ -73,7 +80,7 @@ class ButtonAimHandler(
             baseLease != null || alternateLease != null ||
             payloadExecutor.activeLeaseCount() != 0 || delayedFireRunnable != null ||
             finiteReleaseRunnable != null || baseUnlatchRunnable != null ||
-            recoveryResetRunnable != null || aimOutput.isActive()
+            recoveryResetRunnable != null || aimOutput.isActive() || dpadOutput.isActive()
 
     fun runtimeLabel(): String? = if (phaseState.phase == OneShotAlternatePhase.BASE) {
         null
@@ -123,6 +130,8 @@ class ButtonAimHandler(
         setPressed(false)
         if (isLatched()) setLatched(false)
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
         gestureState = GestureState.IDLE
@@ -160,31 +169,63 @@ class ButtonAimHandler(
         setPressed(true)
         if (if (alternate) model.buttonAimAlternateHaptics else model.buttonAimHaptics) vibrate(30L)
 
-        val aimConfig = if (alternate) model.buttonAimAlternateConfig() else model.buttonAimConfig()
-        val ownsAim = aimOutput.begin(
-            pointerId = activePointerId,
-            x = event.getX(event.actionIndex),
-            y = event.getY(event.actionIndex),
-            eventTime = event.eventTime,
-            newConfig = aimConfig
-        )
+        val x = event.getX(event.actionIndex)
+        val y = event.getY(event.actionIndex)
+        val selectedOutput = if (alternate) {
+            model.buttonAimAlternateOutput
+        } else {
+            model.buttonAimOutput
+        }
+        usingDpadOutput = selectedOutput == ButtonAimOutput.DPAD
+        val ownsAim = if (usingDpadOutput) {
+            dpadOutput.begin(
+                pointerId = activePointerId,
+                x = x,
+                y = y,
+                newConfig = if (alternate) {
+                    model.buttonAimAlternateDpadConfig()
+                } else {
+                    model.buttonAimDpadConfig()
+                }
+            )
+        } else {
+            aimOutput.begin(
+                pointerId = activePointerId,
+                x = x,
+                y = y,
+                eventTime = event.eventTime,
+                newConfig = if (alternate) {
+                    model.buttonAimAlternateConfig()
+                } else {
+                    model.buttonAimConfig()
+                }
+            )
+        }
         if (!ownsAim) {
             cancelUnexpectedGesture()
             return
         }
 
-        // Touch Aim-style stick origin: the down coordinate is already meaningful, so send it
-        // immediately instead of waiting for the first MOVE event.
-        if (aimConfig.originMode == AimOriginMode.CONTROL_CENTER &&
-            aimConfig.output.stickName() != null &&
-            !aimOutput.update(
-                activePointerId,
-                event.getX(event.actionIndex),
-                event.getY(event.actionIndex),
-                event.eventTime,
-                forceSend = true
-            )
-        ) {
+        // A fixed control-center origin makes ACTION_DOWN meaningful immediately.
+        val initialOutputSucceeded = if (usingDpadOutput) {
+            val origin = if (alternate) {
+                model.buttonAimAlternateDpadOrigin
+            } else {
+                model.buttonAimDpadOrigin
+            }
+            origin != ButtonAimDpadOrigin.CONTROL_CENTER ||
+                dpadOutput.update(activePointerId, x, y)
+        } else {
+            val aimConfig = if (alternate) {
+                model.buttonAimAlternateConfig()
+            } else {
+                model.buttonAimConfig()
+            }
+            aimConfig.originMode != AimOriginMode.CONTROL_CENTER ||
+                aimConfig.output.stickName() == null ||
+                aimOutput.update(activePointerId, x, y, event.eventTime, forceSend = true)
+        }
+        if (!initialOutputSucceeded) {
             cancelUnexpectedGesture()
             return
         }
@@ -273,13 +314,12 @@ class ButtonAimHandler(
             cancelUnexpectedGesture()
             return
         }
-        if (!aimOutput.update(
+        if (!updateActiveAimOutput(
                 activePointerId,
                 event.getX(pointerIndex),
                 event.getY(pointerIndex),
                 event.eventTime
-            )
-        ) cancelUnexpectedGesture()
+            )) cancelUnexpectedGesture()
     }
 
     private fun completeGesture(event: MotionEvent) {
@@ -289,7 +329,7 @@ class ButtonAimHandler(
             return
         }
 
-        aimOutput.update(
+        updateActiveAimOutput(
             activePointerId,
             event.getX(pointerIndex),
             event.getY(pointerIndex),
@@ -332,6 +372,8 @@ class ButtonAimHandler(
         }
 
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         resetGestureOnly()
         armAlternateAfterSuccessfulBase()
     }
@@ -342,10 +384,16 @@ class ButtonAimHandler(
         if (delayMs == 0L) {
             fireDelayedBase(latchOnFire)
             aimOutput.finish(flushMouse = false)
+            dpadOutput.finish()
+            usingDpadOutput = false
             resetGestureOnly(preservePresentation = true)
         } else {
             activePointerId = MotionEvent.INVALID_POINTER_ID
-            aimOutput.detachPointerKeepingOutput()
+            if (usingDpadOutput) {
+                dpadOutput.detachPointerKeepingOutput()
+            } else {
+                aimOutput.detachPointerKeepingOutput()
+            }
             gestureState = GestureState.BASE_WAITING_TO_FIRE
             setVisualState(ButtonAimVisualState.WAITING_TO_FIRE)
             delayedFireRunnable = Runnable {
@@ -353,6 +401,8 @@ class ButtonAimHandler(
                 if (gestureState != GestureState.BASE_WAITING_TO_FIRE) return@Runnable
                 fireDelayedBase(latchOnFire)
                 aimOutput.finish(flushMouse = false)
+                dpadOutput.finish()
+                usingDpadOutput = false
                 resetGestureOnly(preservePresentation = true)
             }.also { handler.postDelayed(it, delayMs) }
         }
@@ -389,6 +439,8 @@ class ButtonAimHandler(
         val returnToBase = shouldReturnToBaseAfterAlternateGesture()
         val waitForBaseUnlatch = releaseAlternateForCompletion(returnToBase)
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         resetGestureOnly(preservePresentation = true)
         if (waitForBaseUnlatch) scheduleBaseUnlatch() else finishAlternatePhase(returnToBase)
     }
@@ -413,6 +465,8 @@ class ButtonAimHandler(
 
         // Required order: final aim, alternate press, center, finite release, then base release.
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
         gestureState = GestureState.ALTERNATE_FINITE_RELEASE
@@ -473,6 +527,8 @@ class ButtonAimHandler(
         setPressed(false)
         if (isLatched()) setLatched(false)
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
         gestureState = GestureState.IDLE
@@ -486,6 +542,8 @@ class ButtonAimHandler(
         alternateLease = null
         setPressed(false)
         aimOutput.finish(flushMouse = false)
+        dpadOutput.finish()
+        usingDpadOutput = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
         gestureState = GestureState.IDLE
@@ -652,6 +710,18 @@ class ButtonAimHandler(
         if (!preservePresentation) setVisualState(ButtonAimVisualState.IDLE)
     }
 
+    private fun updateActiveAimOutput(
+        pointerId: Int,
+        x: Float,
+        y: Float,
+        eventTime: Long,
+        forceSend: Boolean = false
+    ): Boolean = if (usingDpadOutput) {
+        dpadOutput.update(pointerId, x, y)
+    } else {
+        aimOutput.update(pointerId, x, y, eventTime, forceSend)
+    }
+
     private fun reducePhase(event: OneShotAlternateEvent) {
         phaseState = OneShotAlternateStateMachine.reduce(phaseState, event)
         onStateChanged()
@@ -696,7 +766,7 @@ class ButtonAimHandler(
 }
 
 private fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
-    output = buttonAimOutput,
+    output = buttonAimOutput.toTouchAimOutput(),
     sensitivity = buttonAimSensitivity,
     invertY = buttonAimInvertY,
     stickProfile = buttonAimStickProfile,
@@ -712,7 +782,7 @@ private fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
 )
 
 private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfig(
-    output = buttonAimAlternateOutput,
+    output = buttonAimAlternateOutput.toTouchAimOutput(),
     sensitivity = buttonAimAlternateSensitivity,
     invertY = buttonAimAlternateInvertY,
     stickProfile = buttonAimAlternateStickProfile,
@@ -726,3 +796,24 @@ private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfi
     },
     sendNeutralOnBegin = !buttonAimAlternateStickUsesTouchPosition
 )
+
+private fun Control.buttonAimDpadConfig(): ButtonAimDpadConfig = ButtonAimDpadConfig(
+    mode = buttonAimDpadMode,
+    origin = buttonAimDpadOrigin,
+    activationDistancePx = buttonAimDpadActivationDistancePx,
+    owner = ButtonAimPayloadOwner.BASE
+)
+
+private fun Control.buttonAimAlternateDpadConfig(): ButtonAimDpadConfig = ButtonAimDpadConfig(
+    mode = buttonAimAlternateDpadMode,
+    origin = buttonAimAlternateDpadOrigin,
+    activationDistancePx = buttonAimAlternateDpadActivationDistancePx,
+    owner = ButtonAimPayloadOwner.ALTERNATE
+)
+
+private fun ButtonAimOutput.toTouchAimOutput(): TouchAimOutput = when (this) {
+    ButtonAimOutput.MOUSE -> TouchAimOutput.MOUSE
+    ButtonAimOutput.RIGHT_STICK -> TouchAimOutput.RIGHT_STICK
+    ButtonAimOutput.LEFT_STICK -> TouchAimOutput.LEFT_STICK
+    ButtonAimOutput.DPAD -> error("D-pad output uses ButtonAimDpadSession")
+}

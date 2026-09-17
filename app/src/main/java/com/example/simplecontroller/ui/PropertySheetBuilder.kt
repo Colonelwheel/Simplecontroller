@@ -12,6 +12,9 @@ import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.ButtonAimMouseProfile
+import com.example.simplecontroller.model.ButtonAimDpadMode
+import com.example.simplecontroller.model.ButtonAimDpadOrigin
+import com.example.simplecontroller.model.ButtonAimOutput
 import com.example.simplecontroller.model.ButtonAimPayloadTiming
 import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.TouchAimOutput
@@ -137,6 +140,9 @@ class PropertySheetBuilder(
         val stickFullDisplacement: EditText,
         val stickDeadzone: EditText,
         val stickUsesTouchPosition: CheckBox,
+        val dpadMode: Spinner,
+        val dpadOrigin: Spinner,
+        val dpadActivationDistance: EditText,
         val haptics: CheckBox,
         val oneShotAlternateEnabled: CheckBox,
         val alternatePayload: AutoCompleteTextView,
@@ -152,6 +158,9 @@ class PropertySheetBuilder(
         val alternateStickFullDisplacement: EditText,
         val alternateStickDeadzone: EditText,
         val alternateStickUsesTouchPosition: CheckBox,
+        val alternateDpadMode: Spinner,
+        val alternateDpadOrigin: Spinner,
+        val alternateDpadActivationDistance: EditText,
         val alternateHaptics: CheckBox
     )
 
@@ -686,11 +695,12 @@ class PropertySheetBuilder(
         val aimOutput = addChoice(
             details,
             "Aim output",
-            listOf("Mouse", "Right stick", "Left stick"),
+            listOf("Mouse", "Right stick", "Left stick", "D-pad"),
             when (model.buttonAimOutput) {
-                TouchAimOutput.MOUSE -> 0
-                TouchAimOutput.RIGHT_STICK -> 1
-                TouchAimOutput.LEFT_STICK -> 2
+                ButtonAimOutput.MOUSE -> 0
+                ButtonAimOutput.RIGHT_STICK -> 1
+                ButtonAimOutput.LEFT_STICK -> 2
+                ButtonAimOutput.DPAD -> 3
             }
         )
         val payloadTiming = addChoice(
@@ -708,12 +718,20 @@ class PropertySheetBuilder(
         )
         details.addView(TextView(context).apply { text = "Delay applies only to Send on release" })
         details.addView(createGap())
-        val sensitivity = addDecimalField(details, "Aim sensitivity", model.buttonAimSensitivity)
-        val invertY = addCheckBox(details, "Invert Y", model.buttonAimInvertY)
+        val continuousAimOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            details.addView(this)
+        }
+        val sensitivity = addDecimalField(
+            continuousAimOptions,
+            "Aim sensitivity",
+            model.buttonAimSensitivity
+        )
+        val invertY = addCheckBox(continuousAimOptions, "Invert Y", model.buttonAimInvertY)
 
         val mouseOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            details.addView(this)
+            continuousAimOptions.addView(this)
         }
         val mouseProfile = addChoice(
             mouseOptions,
@@ -724,7 +742,7 @@ class PropertySheetBuilder(
 
         val stickOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            details.addView(this)
+            continuousAimOptions.addView(this)
         }
         val stickProfile = addChoice(
             stickOptions,
@@ -750,6 +768,31 @@ class PropertySheetBuilder(
         stickOptions.addView(TextView(context).apply {
             text = "When enabled, touching a corner starts the stick in that corner."
         })
+
+        val dpadOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            details.addView(this)
+        }
+        val dpadMode = addChoice(
+            dpadOptions,
+            "D-pad directions",
+            listOf("4-way", "8-way"),
+            if (model.buttonAimDpadMode == ButtonAimDpadMode.FOUR_WAY) 0 else 1
+        )
+        val dpadOrigin = addChoice(
+            dpadOptions,
+            "D-pad zero point",
+            listOf("Initial touch", "Button center"),
+            if (model.buttonAimDpadOrigin == ButtonAimDpadOrigin.CONTROL_CENTER) 0 else 1
+        )
+        dpadOptions.addView(TextView(context).apply {
+            text = "Initial touch: the button center is neutral, so tapping a side immediately selects that direction.\n\nButton center: your first contact is neutral; slide from it to select a direction."
+        })
+        val dpadActivationDistance = addDecimalField(
+            dpadOptions,
+            "D-pad activation distance (px)",
+            model.buttonAimDpadActivationDistancePx
+        )
         val haptics = addCheckBox(details, "Button Aim haptics", model.buttonAimHaptics)
 
         addSectionTitle(details, "One-Shot Alternate")
@@ -832,27 +875,32 @@ class PropertySheetBuilder(
         val alternateOutput = addChoice(
             alternateDetails,
             "Alternate aim output",
-            listOf("Mouse", "Right stick", "Left stick"),
+            listOf("Mouse", "Right stick", "Left stick", "D-pad"),
             when (model.buttonAimAlternateOutput) {
-                TouchAimOutput.MOUSE -> 0
-                TouchAimOutput.RIGHT_STICK -> 1
-                TouchAimOutput.LEFT_STICK -> 2
+                ButtonAimOutput.MOUSE -> 0
+                ButtonAimOutput.RIGHT_STICK -> 1
+                ButtonAimOutput.LEFT_STICK -> 2
+                ButtonAimOutput.DPAD -> 3
             }
         )
+        val alternateContinuousAimOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            alternateDetails.addView(this)
+        }
         val alternateSensitivity = addDecimalField(
-            alternateDetails,
+            alternateContinuousAimOptions,
             "Alternate aim sensitivity",
             model.buttonAimAlternateSensitivity
         )
         val alternateInvertY = addCheckBox(
-            alternateDetails,
+            alternateContinuousAimOptions,
             "Alternate invert Y",
             model.buttonAimAlternateInvertY
         )
 
         val alternateMouseOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            alternateDetails.addView(this)
+            alternateContinuousAimOptions.addView(this)
         }
         val alternateMouseProfile = addChoice(
             alternateMouseOptions,
@@ -863,7 +911,7 @@ class PropertySheetBuilder(
 
         val alternateStickOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            alternateDetails.addView(this)
+            alternateContinuousAimOptions.addView(this)
         }
         val alternateStickProfile = addChoice(
             alternateStickOptions,
@@ -889,6 +937,30 @@ class PropertySheetBuilder(
         alternateStickOptions.addView(TextView(context).apply {
             text = "When enabled, touching a corner starts the alternate stick in that corner."
         })
+        val alternateDpadOptions = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            alternateDetails.addView(this)
+        }
+        val alternateDpadMode = addChoice(
+            alternateDpadOptions,
+            "Alternate D-pad directions",
+            listOf("4-way", "8-way"),
+            if (model.buttonAimAlternateDpadMode == ButtonAimDpadMode.FOUR_WAY) 0 else 1
+        )
+        val alternateDpadOrigin = addChoice(
+            alternateDpadOptions,
+            "Alternate D-pad zero point",
+            listOf("Initial touch", "Button center"),
+            if (model.buttonAimAlternateDpadOrigin == ButtonAimDpadOrigin.CONTROL_CENTER) 0 else 1
+        )
+        alternateDpadOptions.addView(TextView(context).apply {
+            text = "Initial touch: the button center is neutral, so tapping a side immediately selects that direction.\n\nButton center: your first contact is neutral; slide from it to select a direction."
+        })
+        val alternateDpadActivationDistance = addDecimalField(
+            alternateDpadOptions,
+            "Alternate D-pad activation distance (px)",
+            model.buttonAimAlternateDpadActivationDistancePx
+        )
         val alternateHaptics = addCheckBox(
             alternateDetails,
             "Alternate haptics",
@@ -897,8 +969,13 @@ class PropertySheetBuilder(
 
         fun updateOutputVisibility() {
             val mouseSelected = aimOutput.selectedItemPosition == 0
+            val stickSelected = aimOutput.selectedItemPosition == 1 ||
+                aimOutput.selectedItemPosition == 2
+            val dpadSelected = aimOutput.selectedItemPosition == 3
+            continuousAimOptions.visibility = if (dpadSelected) View.GONE else View.VISIBLE
             mouseOptions.visibility = if (mouseSelected) View.VISIBLE else View.GONE
-            stickOptions.visibility = if (mouseSelected) View.GONE else View.VISIBLE
+            stickOptions.visibility = if (stickSelected) View.VISIBLE else View.GONE
+            dpadOptions.visibility = if (dpadSelected) View.VISIBLE else View.GONE
         }
         aimOutput.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -908,8 +985,14 @@ class PropertySheetBuilder(
         }
         fun updateAlternateOutputVisibility() {
             val mouseSelected = alternateOutput.selectedItemPosition == 0
+            val stickSelected = alternateOutput.selectedItemPosition == 1 ||
+                alternateOutput.selectedItemPosition == 2
+            val dpadSelected = alternateOutput.selectedItemPosition == 3
+            alternateContinuousAimOptions.visibility =
+                if (dpadSelected) View.GONE else View.VISIBLE
             alternateMouseOptions.visibility = if (mouseSelected) View.VISIBLE else View.GONE
-            alternateStickOptions.visibility = if (mouseSelected) View.GONE else View.VISIBLE
+            alternateStickOptions.visibility = if (stickSelected) View.VISIBLE else View.GONE
+            alternateDpadOptions.visibility = if (dpadSelected) View.VISIBLE else View.GONE
         }
         alternateOutput.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
@@ -941,6 +1024,9 @@ class PropertySheetBuilder(
             stickFullDisplacement = stickFullDisplacement,
             stickDeadzone = stickDeadzone,
             stickUsesTouchPosition = stickUsesTouchPosition,
+            dpadMode = dpadMode,
+            dpadOrigin = dpadOrigin,
+            dpadActivationDistance = dpadActivationDistance,
             haptics = haptics,
             oneShotAlternateEnabled = oneShotAlternateEnabled,
             alternatePayload = alternatePayload,
@@ -956,6 +1042,9 @@ class PropertySheetBuilder(
             alternateStickFullDisplacement = alternateStickFullDisplacement,
             alternateStickDeadzone = alternateStickDeadzone,
             alternateStickUsesTouchPosition = alternateStickUsesTouchPosition,
+            alternateDpadMode = alternateDpadMode,
+            alternateDpadOrigin = alternateDpadOrigin,
+            alternateDpadActivationDistance = alternateDpadActivationDistance,
             alternateHaptics = alternateHaptics
         )
     }
@@ -2597,9 +2686,10 @@ class PropertySheetBuilder(
     private fun saveButtonAimProperties(fields: ButtonAimComponents) {
         model.buttonAimEnabled = fields.enabled.isChecked
         model.buttonAimOutput = when (fields.aimOutput.selectedItemPosition) {
-            1 -> TouchAimOutput.RIGHT_STICK
-            2 -> TouchAimOutput.LEFT_STICK
-            else -> TouchAimOutput.MOUSE
+            1 -> ButtonAimOutput.RIGHT_STICK
+            2 -> ButtonAimOutput.LEFT_STICK
+            3 -> ButtonAimOutput.DPAD
+            else -> ButtonAimOutput.MOUSE
         }
         model.buttonAimPayloadTiming = if (fields.payloadTiming.selectedItemPosition == 0) {
             ButtonAimPayloadTiming.IMMEDIATE
@@ -2631,6 +2721,20 @@ class PropertySheetBuilder(
             .floatValue(model.buttonAimStickDeadzonePx)
             .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
         model.buttonAimStickUsesTouchPosition = fields.stickUsesTouchPosition.isChecked
+        model.buttonAimDpadMode = if (fields.dpadMode.selectedItemPosition == 0) {
+            ButtonAimDpadMode.FOUR_WAY
+        } else {
+            ButtonAimDpadMode.EIGHT_WAY
+        }
+        model.buttonAimDpadOrigin = if (fields.dpadOrigin.selectedItemPosition == 0) {
+            // Labels are intentionally reversed at the user's request.
+            ButtonAimDpadOrigin.CONTROL_CENTER
+        } else {
+            ButtonAimDpadOrigin.INITIAL_TOUCH
+        }
+        model.buttonAimDpadActivationDistancePx = fields.dpadActivationDistance
+            .floatValue(model.buttonAimDpadActivationDistancePx)
+            .coerceAtLeast(0f)
         model.buttonAimHaptics = fields.haptics.isChecked
 
         val alternatePayload = fields.alternatePayload.text.toString().trim()
@@ -2662,9 +2766,10 @@ class PropertySheetBuilder(
             ?: model.buttonAimAlternateBaseUnlatchDelayMs
         model.buttonAimAlternateDisplayName = fields.alternateDisplayName.text.toString().trim()
         model.buttonAimAlternateOutput = when (fields.alternateOutput.selectedItemPosition) {
-            1 -> TouchAimOutput.RIGHT_STICK
-            2 -> TouchAimOutput.LEFT_STICK
-            else -> TouchAimOutput.MOUSE
+            1 -> ButtonAimOutput.RIGHT_STICK
+            2 -> ButtonAimOutput.LEFT_STICK
+            3 -> ButtonAimOutput.DPAD
+            else -> ButtonAimOutput.MOUSE
         }
         model.buttonAimAlternateSensitivity = fields.alternateSensitivity
             .floatValue(model.buttonAimAlternateSensitivity)
@@ -2691,6 +2796,23 @@ class PropertySheetBuilder(
             .coerceIn(0f, (alternateFullDisplacement - 1f).coerceAtLeast(0f))
         model.buttonAimAlternateStickUsesTouchPosition =
             fields.alternateStickUsesTouchPosition.isChecked
+        model.buttonAimAlternateDpadMode =
+            if (fields.alternateDpadMode.selectedItemPosition == 0) {
+                ButtonAimDpadMode.FOUR_WAY
+            } else {
+                ButtonAimDpadMode.EIGHT_WAY
+            }
+        model.buttonAimAlternateDpadOrigin =
+            if (fields.alternateDpadOrigin.selectedItemPosition == 0) {
+                // Labels are intentionally reversed at the user's request.
+                ButtonAimDpadOrigin.CONTROL_CENTER
+            } else {
+                ButtonAimDpadOrigin.INITIAL_TOUCH
+            }
+        model.buttonAimAlternateDpadActivationDistancePx =
+            fields.alternateDpadActivationDistance
+                .floatValue(model.buttonAimAlternateDpadActivationDistancePx)
+                .coerceAtLeast(0f)
         model.buttonAimAlternateHaptics = fields.alternateHaptics.isChecked
     }
 

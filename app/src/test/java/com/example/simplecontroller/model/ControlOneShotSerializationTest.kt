@@ -34,9 +34,12 @@ class ControlOneShotSerializationTest {
         assertEquals(ButtonAimPayloadTiming.IMMEDIATE, control.buttonAimAlternatePayloadTiming)
         assertEquals(2000L, control.buttonAimAlternateResetHoldDurationMs)
         assertEquals(0L, control.buttonAimAlternateBaseUnlatchDelayMs)
-        assertEquals(TouchAimOutput.MOUSE, control.buttonAimAlternateOutput)
+        assertEquals(ButtonAimOutput.MOUSE, control.buttonAimAlternateOutput)
         assertFalse(control.buttonAimStickUsesTouchPosition)
         assertFalse(control.buttonAimAlternateStickUsesTouchPosition)
+        assertEquals(ButtonAimDpadMode.EIGHT_WAY, control.buttonAimDpadMode)
+        assertEquals(ButtonAimDpadOrigin.CONTROL_CENTER, control.buttonAimDpadOrigin)
+        assertEquals(8f, control.buttonAimDpadActivationDistancePx)
     }
 
     @Test
@@ -59,7 +62,7 @@ class ControlOneShotSerializationTest {
             buttonAimAlternateResetHoldDurationMs = 2750L,
             buttonAimAlternateBaseUnlatchDelayMs = 140L,
             buttonAimAlternateDisplayName = "Fire",
-            buttonAimAlternateOutput = TouchAimOutput.LEFT_STICK,
+            buttonAimAlternateOutput = ButtonAimOutput.LEFT_STICK,
             buttonAimAlternateSensitivity = 1.7f,
             buttonAimAlternateInvertY = true,
             buttonAimAlternateStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -67,6 +70,13 @@ class ControlOneShotSerializationTest {
             buttonAimAlternateStickFullDisplacementPx = 310f,
             buttonAimAlternateStickDeadzonePx = 12f,
             buttonAimAlternateStickUsesTouchPosition = true,
+            buttonAimOutput = ButtonAimOutput.DPAD,
+            buttonAimDpadMode = ButtonAimDpadMode.FOUR_WAY,
+            buttonAimDpadOrigin = ButtonAimDpadOrigin.INITIAL_TOUCH,
+            buttonAimDpadActivationDistancePx = 18f,
+            buttonAimAlternateDpadMode = ButtonAimDpadMode.FOUR_WAY,
+            buttonAimAlternateDpadOrigin = ButtonAimDpadOrigin.INITIAL_TOUCH,
+            buttonAimAlternateDpadActivationDistancePx = 22f,
             buttonAimAlternateHaptics = false
         )
 

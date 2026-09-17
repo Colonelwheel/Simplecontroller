@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class ButtonAimTuning(
-    val output: TouchAimOutput,
+    val output: ButtonAimOutput,
     val sensitivity: Float,
     val invertY: Boolean,
     val stickProfile: ButtonAimStickProfile,
@@ -12,13 +12,17 @@ data class ButtonAimTuning(
     val stickFullDisplacementPx: Float,
     val stickDeadzonePx: Float,
     val stickUsesTouchPosition: Boolean,
-    val haptics: Boolean
+    val haptics: Boolean,
+    val dpadMode: ButtonAimDpadMode = ButtonAimDpadMode.EIGHT_WAY,
+    val dpadOrigin: ButtonAimDpadOrigin = ButtonAimDpadOrigin.CONTROL_CENTER,
+    val dpadActivationDistancePx: Float = 8f
 ) {
     fun validationError(): String? = if (
         !sensitivity.isFinite() || sensitivity !in 0f..5f ||
         !stickFullDisplacementPx.isFinite() || stickFullDisplacementPx < 1f ||
         !stickDeadzonePx.isFinite() || stickDeadzonePx < 0f ||
-        stickDeadzonePx >= stickFullDisplacementPx
+        stickDeadzonePx >= stickFullDisplacementPx ||
+        !dpadActivationDistancePx.isFinite() || dpadActivationDistancePx < 0f
     ) {
         "The saved sensitivity, displacement, or deadzone is invalid."
     } else null
@@ -76,7 +80,7 @@ data class ButtonAimProfile(
     val actions: ButtonAimActionSettings
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
         const val MAX_DISPLAY_NAME_LENGTH = 120
@@ -132,6 +136,9 @@ data class ButtonAimProfile(
         control.buttonAimStickFullDisplacementPx = base.stickFullDisplacementPx
         control.buttonAimStickDeadzonePx = base.stickDeadzonePx
         control.buttonAimStickUsesTouchPosition = base.stickUsesTouchPosition
+        control.buttonAimDpadMode = base.dpadMode
+        control.buttonAimDpadOrigin = base.dpadOrigin
+        control.buttonAimDpadActivationDistancePx = base.dpadActivationDistancePx
         control.buttonAimHaptics = base.haptics
 
         control.buttonAimAlternateOutput = alternate.output
@@ -142,6 +149,10 @@ data class ButtonAimProfile(
         control.buttonAimAlternateStickFullDisplacementPx = alternate.stickFullDisplacementPx
         control.buttonAimAlternateStickDeadzonePx = alternate.stickDeadzonePx
         control.buttonAimAlternateStickUsesTouchPosition = alternate.stickUsesTouchPosition
+        control.buttonAimAlternateDpadMode = alternate.dpadMode
+        control.buttonAimAlternateDpadOrigin = alternate.dpadOrigin
+        control.buttonAimAlternateDpadActivationDistancePx =
+            alternate.dpadActivationDistancePx
         control.buttonAimAlternateHaptics = alternate.haptics
     }
 }
@@ -164,7 +175,10 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
             buttonAimStickFullDisplacementPx,
             buttonAimStickDeadzonePx,
             buttonAimStickUsesTouchPosition,
-            buttonAimHaptics
+            buttonAimHaptics,
+            buttonAimDpadMode,
+            buttonAimDpadOrigin,
+            buttonAimDpadActivationDistancePx
         ),
         alternate = ButtonAimTuning(
             buttonAimAlternateOutput,
@@ -175,7 +189,10 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
             buttonAimAlternateStickFullDisplacementPx,
             buttonAimAlternateStickDeadzonePx,
             buttonAimAlternateStickUsesTouchPosition,
-            buttonAimAlternateHaptics
+            buttonAimAlternateHaptics,
+            buttonAimAlternateDpadMode,
+            buttonAimAlternateDpadOrigin,
+            buttonAimAlternateDpadActivationDistancePx
         ),
         actions = ButtonAimActionSettings(
             payload = payload.trim(),

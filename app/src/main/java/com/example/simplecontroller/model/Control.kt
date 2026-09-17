@@ -9,6 +9,15 @@ enum class ControlType { BUTTON, STICK, CURVED_STICK, TOUCHPAD, TOUCH_AIM, RECEN
 enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
 
 @Serializable
+enum class ButtonAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK, DPAD }
+
+@Serializable
+enum class ButtonAimDpadMode { FOUR_WAY, EIGHT_WAY }
+
+@Serializable
+enum class ButtonAimDpadOrigin { CONTROL_CENTER, INITIAL_TOUCH }
+
+@Serializable
 enum class TouchAimMode { MANUAL_THREE_STAGE, MANUAL_TWO_STATE, CALIBRATED_TWO_STATE }
 
 @Serializable
@@ -61,7 +70,7 @@ data class Control(
 
     /* Button Aim Surface (disabled by default for layout compatibility) */
     var buttonAimEnabled: Boolean = false,
-    var buttonAimOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    var buttonAimOutput: ButtonAimOutput = ButtonAimOutput.MOUSE,
     var buttonAimPayloadTiming: ButtonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
     var buttonAimReleaseDelayMs: Long = 0,
     var buttonAimSensitivity: Float = 1f,
@@ -71,6 +80,9 @@ data class Control(
     var buttonAimStickFullDisplacementPx: Float = 220f,
     var buttonAimStickDeadzonePx: Float = 8f,
     var buttonAimStickUsesTouchPosition: Boolean = false,
+    var buttonAimDpadMode: ButtonAimDpadMode = ButtonAimDpadMode.EIGHT_WAY,
+    var buttonAimDpadOrigin: ButtonAimDpadOrigin = ButtonAimDpadOrigin.CONTROL_CENTER,
+    var buttonAimDpadActivationDistancePx: Float = 8f,
     var buttonAimHaptics: Boolean = true,
 
     /* One-Shot Alternate Button Phase (disabled by default) */
@@ -80,7 +92,7 @@ data class Control(
     var buttonAimAlternateResetHoldDurationMs: Long = 2000L,
     var buttonAimAlternateBaseUnlatchDelayMs: Long = 0L,
     var buttonAimAlternateDisplayName: String = "",
-    var buttonAimAlternateOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    var buttonAimAlternateOutput: ButtonAimOutput = ButtonAimOutput.MOUSE,
     var buttonAimAlternateSensitivity: Float = 1f,
     var buttonAimAlternateInvertY: Boolean = false,
     var buttonAimAlternateStickProfile: ButtonAimStickProfile = ButtonAimStickProfile.LINEAR,
@@ -88,6 +100,9 @@ data class Control(
     var buttonAimAlternateStickFullDisplacementPx: Float = 220f,
     var buttonAimAlternateStickDeadzonePx: Float = 8f,
     var buttonAimAlternateStickUsesTouchPosition: Boolean = false,
+    var buttonAimAlternateDpadMode: ButtonAimDpadMode = ButtonAimDpadMode.EIGHT_WAY,
+    var buttonAimAlternateDpadOrigin: ButtonAimDpadOrigin = ButtonAimDpadOrigin.CONTROL_CENTER,
+    var buttonAimAlternateDpadActivationDistancePx: Float = 8f,
     var buttonAimAlternateHaptics: Boolean = true,
 
     /* 2a – mouse-pad one-finger drag */
