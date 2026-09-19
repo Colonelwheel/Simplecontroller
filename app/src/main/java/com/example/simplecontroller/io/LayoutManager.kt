@@ -161,8 +161,8 @@ class LayoutManager(
     fun showLoadDialog() {
         val savedNames = listLayouts(context)
         
-        // Add "New Layout" option at the top
-        val displayNames = mutableListOf("New Layout")
+        // Keep destructive profile management reachable with one tap instead of a long press.
+        val displayNames = mutableListOf("New Layout", "Delete multiple profiles…")
         displayNames.addAll(savedNames)
 
         val dialog = AlertDialog.Builder(context)
@@ -171,9 +171,13 @@ class LayoutManager(
                 if (i == 0) {
                     // "New Layout" option - create blank layout
                     if (callback?.onNewControllerProfileRequested() != true) createNewLayout()
+                } else if (i == 1) {
+                    showBulkDeleteDialog {
+                        showLoadDialog()
+                    }
                 } else {
                     // Regular saved layout
-                    val sel = savedNames[i - 1]
+                    val sel = savedNames[i - 2]
                     when (val stored = readControllerProfile(context, sel)) {
                         is StoredControllerProfileResult.Loaded -> {
                             val result = stored.result
@@ -210,12 +214,12 @@ class LayoutManager(
             }
             .create()
 
-        // Set up long press detection on list items (skip "New Layout" option)
+        // Keep the existing single-profile context menu for saved profiles only.
         dialog.setOnShowListener {
             val listView = dialog.listView
             listView?.setOnItemLongClickListener { _, _, position, _ ->
-                if (position > 0) { // Skip "New Layout" option
-                    val layoutName = savedNames[position - 1]
+                if (position > 1) {
+                    val layoutName = savedNames[position - 2]
                     showLayoutContextMenu(layoutName) {
                         // Refresh the dialog with updated names
                         dialog.dismiss()
@@ -229,6 +233,102 @@ class LayoutManager(
         }
 
         dialog.show()
+    }
+
+    private fun showBulkDeleteDialog(onComplete: () -> Unit) {
+        val activeName = callback?.activeLayoutName()
+        val candidates = controllerProfileDeleteCandidates(listLayouts(context), activeName)
+        if (candidates.isEmpty()) {
+            toast(
+                if (activeName.isNullOrBlank()) {
+                    "There are no saved profiles to delete"
+                } else {
+                    "There are no profiles to delete; the active profile is protected"
+                }
+            )
+            onComplete()
+            return
+        }
+
+        val selected = BooleanArray(candidates.size)
+        lateinit var selectionDialog: AlertDialog
+        selectionDialog = AlertDialog.Builder(context)
+            .setTitle(
+                if (activeName.isNullOrBlank()) {
+                    "Select profiles to delete"
+                } else {
+                    "Select profiles to delete\nActive profile is protected"
+                }
+            )
+            .setMultiChoiceItems(candidates.toTypedArray(), selected) { _, which, checked ->
+                selected[which] = checked
+                selectionDialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.text =
+                    if (selected.all { it }) "Clear all" else "Select all"
+            }
+            .setPositiveButton("Delete selected", null)
+            .setNeutralButton("Select all", null)
+            .setNegativeButton("Cancel") { _, _ -> onComplete() }
+            .create()
+
+        selectionDialog.setOnCancelListener { onComplete() }
+
+        selectionDialog.setOnShowListener {
+            selectionDialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val checkAll = selected.any { !it }
+                selected.indices.forEach { index ->
+                    selected[index] = checkAll
+                    selectionDialog.listView.setItemChecked(index, checkAll)
+                }
+                selectionDialog.getButton(AlertDialog.BUTTON_NEUTRAL).text =
+                    if (checkAll) "Clear all" else "Select all"
+            }
+            selectionDialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedNames = candidates.filterIndexed { index, _ -> selected[index] }
+                if (selectedNames.isEmpty()) {
+                    toast("Select at least one profile")
+                } else {
+                    confirmBulkDelete(selectionDialog, selectedNames, onComplete)
+                }
+            }
+        }
+        selectionDialog.show()
+    }
+
+    private fun confirmBulkDelete(
+        selectionDialog: AlertDialog,
+        selectedNames: List<String>,
+        onComplete: () -> Unit
+    ) {
+        val profileWord = if (selectedNames.size == 1) "profile" else "profiles"
+        AlertDialog.Builder(context)
+            .setTitle("Delete ${selectedNames.size} $profileWord?")
+            .setMessage(
+                "Only these profiles will be permanently deleted:\n\n" +
+                    selectedNames.joinToString("\n")
+            )
+            .setPositiveButton("Delete ${selectedNames.size}") { _, _ ->
+                val result = deleteSelectedControllerProfiles(
+                    selectedNames = selectedNames,
+                    activeName = callback?.activeLayoutName(),
+                    deleteOne = { deleteControllerProfile(context, it) }
+                )
+                selectionDialog.dismiss()
+                val message = when {
+                    result.failedNames.isEmpty() && result.protectedNames.isEmpty() ->
+                        "Deleted ${result.deletedNames.size} " +
+                            if (result.deletedNames.size == 1) "profile" else "profiles"
+                    result.deletedNames.isEmpty() ->
+                        "No profiles were deleted; ${result.failedNames.size} failed and " +
+                            "${result.protectedNames.size} were protected"
+                    else ->
+                        "Deleted ${result.deletedNames.size}; ${result.failedNames.size} failed and " +
+                            "${result.protectedNames.size} were protected"
+                }
+                toast(message)
+                onComplete()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     /**
