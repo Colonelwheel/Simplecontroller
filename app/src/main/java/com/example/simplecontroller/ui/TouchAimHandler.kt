@@ -131,15 +131,27 @@ class TouchAimHandler(
                 return
             }
         }
-        val aimStarted = aimOutput.begin(
+        val aimStart = aimOutput.begin(
             pointerId = activePointerId,
             x = event.getX(event.actionIndex),
             y = event.getY(event.actionIndex),
             eventTime = event.eventTime,
-            newConfig = model.touchAimConfig()
+            newConfig = model.touchAimConfig(),
+            allowRetainedTakeover = true
         )
+        if (aimStart.started && aimStart.replacedRetainedOwner &&
+            model.touchAimConfig().originMode == AimOriginMode.CONTROL_CENTER
+        ) {
+            aimOutput.update(
+                activePointerId,
+                event.getX(event.actionIndex),
+                event.getY(event.actionIndex),
+                event.eventTime,
+                forceSend = true
+            )
+        }
         if (isTwoStateMode()) {
-            if (!aimStarted) {
+            if (!aimStart.started) {
                 releaseAll()
                 return
             }

@@ -12,6 +12,7 @@ data class ButtonAimTuning(
     val stickFullDisplacementPx: Float,
     val stickDeadzonePx: Float,
     val stickUsesTouchPosition: Boolean,
+    val autoCenter: Boolean = true,
     val haptics: Boolean,
     val dpadMode: ButtonAimDpadMode = ButtonAimDpadMode.EIGHT_WAY,
     val dpadOrigin: ButtonAimDpadOrigin = ButtonAimDpadOrigin.CONTROL_CENTER,
@@ -80,7 +81,7 @@ data class ButtonAimProfile(
     val actions: ButtonAimActionSettings
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
         const val MAX_DISPLAY_NAME_LENGTH = 120
@@ -136,6 +137,7 @@ data class ButtonAimProfile(
         control.buttonAimStickFullDisplacementPx = base.stickFullDisplacementPx
         control.buttonAimStickDeadzonePx = base.stickDeadzonePx
         control.buttonAimStickUsesTouchPosition = base.stickUsesTouchPosition
+        control.buttonAimAutoCenter = base.autoCenter
         control.buttonAimDpadMode = base.dpadMode
         control.buttonAimDpadOrigin = base.dpadOrigin
         control.buttonAimDpadActivationDistancePx = base.dpadActivationDistancePx
@@ -149,6 +151,7 @@ data class ButtonAimProfile(
         control.buttonAimAlternateStickFullDisplacementPx = alternate.stickFullDisplacementPx
         control.buttonAimAlternateStickDeadzonePx = alternate.stickDeadzonePx
         control.buttonAimAlternateStickUsesTouchPosition = alternate.stickUsesTouchPosition
+        control.buttonAimAlternateAutoCenter = alternate.autoCenter
         control.buttonAimAlternateDpadMode = alternate.dpadMode
         control.buttonAimAlternateDpadOrigin = alternate.dpadOrigin
         control.buttonAimAlternateDpadActivationDistancePx =
@@ -175,6 +178,7 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
             buttonAimStickFullDisplacementPx,
             buttonAimStickDeadzonePx,
             buttonAimStickUsesTouchPosition,
+            buttonAimAutoCenter,
             buttonAimHaptics,
             buttonAimDpadMode,
             buttonAimDpadOrigin,
@@ -189,6 +193,7 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
             buttonAimAlternateStickFullDisplacementPx,
             buttonAimAlternateStickDeadzonePx,
             buttonAimAlternateStickUsesTouchPosition,
+            buttonAimAlternateAutoCenter,
             buttonAimAlternateHaptics,
             buttonAimAlternateDpadMode,
             buttonAimAlternateDpadOrigin,

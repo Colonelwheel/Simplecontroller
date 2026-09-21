@@ -140,6 +140,7 @@ class PropertySheetBuilder(
         val stickFullDisplacement: EditText,
         val stickDeadzone: EditText,
         val stickUsesTouchPosition: CheckBox,
+        val autoCenter: CheckBox,
         val dpadMode: Spinner,
         val dpadOrigin: Spinner,
         val dpadActivationDistance: EditText,
@@ -158,6 +159,7 @@ class PropertySheetBuilder(
         val alternateStickFullDisplacement: EditText,
         val alternateStickDeadzone: EditText,
         val alternateStickUsesTouchPosition: CheckBox,
+        val alternateAutoCenter: CheckBox,
         val alternateDpadMode: Spinner,
         val alternateDpadOrigin: Spinner,
         val alternateDpadActivationDistance: EditText,
@@ -768,6 +770,14 @@ class PropertySheetBuilder(
         stickOptions.addView(TextView(context).apply {
             text = "When enabled, touching a corner starts the stick in that corner."
         })
+        val autoCenter = addCheckBox(
+            stickOptions,
+            "Auto-center stick on release",
+            model.buttonAimAutoCenter
+        )
+        stickOptions.addView(TextView(context).apply {
+            text = "Turn off to retain the final stick position until Re-center, Release All, safety cleanup, or an intentional takeover. A tap without a deliberate swipe cannot replace an already retained position on the same stick."
+        })
 
         val dpadOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -937,6 +947,14 @@ class PropertySheetBuilder(
         alternateStickOptions.addView(TextView(context).apply {
             text = "When enabled, touching a corner starts the alternate stick in that corner."
         })
+        val alternateAutoCenter = addCheckBox(
+            alternateStickOptions,
+            "Auto-center stick on release",
+            model.buttonAimAlternateAutoCenter
+        )
+        alternateStickOptions.addView(TextView(context).apply {
+            text = "Turn off to retain the final alternate stick position. Tap-only gestures preserve an existing retained position on the same stick."
+        })
         val alternateDpadOptions = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             alternateDetails.addView(this)
@@ -1024,6 +1042,7 @@ class PropertySheetBuilder(
             stickFullDisplacement = stickFullDisplacement,
             stickDeadzone = stickDeadzone,
             stickUsesTouchPosition = stickUsesTouchPosition,
+            autoCenter = autoCenter,
             dpadMode = dpadMode,
             dpadOrigin = dpadOrigin,
             dpadActivationDistance = dpadActivationDistance,
@@ -1042,6 +1061,7 @@ class PropertySheetBuilder(
             alternateStickFullDisplacement = alternateStickFullDisplacement,
             alternateStickDeadzone = alternateStickDeadzone,
             alternateStickUsesTouchPosition = alternateStickUsesTouchPosition,
+            alternateAutoCenter = alternateAutoCenter,
             alternateDpadMode = alternateDpadMode,
             alternateDpadOrigin = alternateDpadOrigin,
             alternateDpadActivationDistance = alternateDpadActivationDistance,
@@ -2721,6 +2741,7 @@ class PropertySheetBuilder(
             .floatValue(model.buttonAimStickDeadzonePx)
             .coerceIn(0f, (fullDisplacement - 1f).coerceAtLeast(0f))
         model.buttonAimStickUsesTouchPosition = fields.stickUsesTouchPosition.isChecked
+        model.buttonAimAutoCenter = fields.autoCenter.isChecked
         model.buttonAimDpadMode = if (fields.dpadMode.selectedItemPosition == 0) {
             ButtonAimDpadMode.FOUR_WAY
         } else {
@@ -2796,6 +2817,7 @@ class PropertySheetBuilder(
             .coerceIn(0f, (alternateFullDisplacement - 1f).coerceAtLeast(0f))
         model.buttonAimAlternateStickUsesTouchPosition =
             fields.alternateStickUsesTouchPosition.isChecked
+        model.buttonAimAlternateAutoCenter = fields.alternateAutoCenter.isChecked
         model.buttonAimAlternateDpadMode =
             if (fields.alternateDpadMode.selectedItemPosition == 0) {
                 ButtonAimDpadMode.FOUR_WAY

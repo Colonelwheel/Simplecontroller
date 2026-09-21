@@ -38,11 +38,13 @@ class ButtonAimHandler(
     private val isGlobalHold: () -> Boolean,
     private val isGlobalTurbo: () -> Boolean,
     private val shouldSkipImmediateRelease: () -> Boolean,
+    touchSlopPx: Float,
     private val vibrate: (Long) -> Unit,
     private val onPayloadError: (String) -> Unit,
     private val onStateChanged: () -> Unit
 ) {
     private val dpadOutput = ButtonAimDpadSession(payloadExecutor, controlSize)
+    private val deliberateSwipe = DeliberateSwipeTracker(touchSlopPx)
 
     private enum class GestureState {
         IDLE,
@@ -65,6 +67,13 @@ class ButtonAimHandler(
     private var baseLease: ButtonAimPayloadLease? = null
     private var alternateLease: ButtonAimPayloadLease? = null
     private var usingDpadOutput = false
+    private var gestureOwnsAimOutput = false
+    private var deferStickAimUntilSwipe = false
+    private var gestureDownX = 0f
+    private var gestureDownY = 0f
+    private var gestureDownTime = 0L
+    private var gestureAutoCenter = true
+    private var gestureAimConfig: AimOutputConfig? = null
     private var holdThresholdRunnable: Runnable? = null
     private var recoveryResetRunnable: Runnable? = null
     private var delayedFireRunnable: Runnable? = null
@@ -139,8 +148,12 @@ class ButtonAimHandler(
             phaseState,
             OneShotAlternateEvent.HARD_RESET
         )
+        clearGestureAimTracking()
         setVisualState(ButtonAimVisualState.IDLE)
     }
+
+    /** Centers only retained/pending stick aim. Payload and Alternate state are untouched. */
+    fun recenterStickOutput(): Boolean = aimOutput.centerRetainedOrPending()
 
     private fun startGesture(event: MotionEvent) {
         when (gestureState) {
@@ -171,12 +184,34 @@ class ButtonAimHandler(
 
         val x = event.getX(event.actionIndex)
         val y = event.getY(event.actionIndex)
+        gestureDownX = x
+        gestureDownY = y
+        gestureDownTime = event.eventTime
+        deliberateSwipe.reset(x, y)
         val selectedOutput = if (alternate) {
             model.buttonAimAlternateOutput
         } else {
             model.buttonAimOutput
         }
         usingDpadOutput = selectedOutput == ButtonAimOutput.DPAD
+        gestureAutoCenter = if (alternate) {
+            model.buttonAimAlternateAutoCenter
+        } else {
+            model.buttonAimAutoCenter
+        }
+        gestureAimConfig = if (!usingDpadOutput) {
+            if (alternate) model.buttonAimAlternateConfig() else model.buttonAimConfig()
+        } else {
+            null
+        }
+        val stickName = gestureAimConfig?.output?.stickName()
+        val retainedByThisSurface = aimOutput.retainedStickName()
+        deferStickAimUntilSwipe = stickName != null && shouldDeferButtonAimStick(
+            gestureAutoCenter,
+            ManualStickArbiter.hasRetainedOwner(stickName) ||
+                (retainedByThisSurface != null && retainedByThisSurface != stickName)
+        )
+
         val ownsAim = if (usingDpadOutput) {
             dpadOutput.begin(
                 pointerId = activePointerId,
@@ -188,6 +223,8 @@ class ButtonAimHandler(
                     model.buttonAimDpadConfig()
                 }
             )
+        } else if (deferStickAimUntilSwipe) {
+            true
         } else {
             aimOutput.begin(
                 pointerId = activePointerId,
@@ -199,15 +236,18 @@ class ButtonAimHandler(
                 } else {
                     model.buttonAimConfig()
                 }
-            )
+            ).started
         }
+        gestureOwnsAimOutput = ownsAim && !deferStickAimUntilSwipe
         if (!ownsAim) {
             cancelUnexpectedGesture()
             return
         }
 
         // A fixed control-center origin makes ACTION_DOWN meaningful immediately.
-        val initialOutputSucceeded = if (usingDpadOutput) {
+        val initialOutputSucceeded = if (deferStickAimUntilSwipe) {
+            true
+        } else if (usingDpadOutput) {
             val origin = if (alternate) {
                 model.buttonAimAlternateDpadOrigin
             } else {
@@ -314,10 +354,31 @@ class ButtonAimHandler(
             cancelUnexpectedGesture()
             return
         }
+        val x = event.getX(pointerIndex)
+        val y = event.getY(pointerIndex)
+        if (deferStickAimUntilSwipe && !gestureOwnsAimOutput) {
+            if (!deliberateSwipe.update(x, y)) return
+            val config = gestureAimConfig ?: return
+            val result = aimOutput.begin(
+                pointerId = activePointerId,
+                x = gestureDownX,
+                y = gestureDownY,
+                eventTime = gestureDownTime,
+                newConfig = config,
+                allowRetainedTakeover = true
+            )
+            if (!result.started) return
+            gestureOwnsAimOutput = true
+            if (!aimOutput.update(activePointerId, x, y, event.eventTime, forceSend = true)) {
+                gestureOwnsAimOutput = false
+            }
+            return
+        }
+        if (!gestureOwnsAimOutput && !usingDpadOutput) return
         if (!updateActiveAimOutput(
                 activePointerId,
-                event.getX(pointerIndex),
-                event.getY(pointerIndex),
+                x,
+                y,
                 event.eventTime
             )) cancelUnexpectedGesture()
     }
@@ -329,13 +390,15 @@ class ButtonAimHandler(
             return
         }
 
-        updateActiveAimOutput(
-            activePointerId,
-            event.getX(pointerIndex),
-            event.getY(pointerIndex),
-            event.eventTime,
-            forceSend = true
-        )
+        if (usingDpadOutput || gestureOwnsAimOutput) {
+            updateActiveAimOutput(
+                activePointerId,
+                event.getX(pointerIndex),
+                event.getY(pointerIndex),
+                event.eventTime,
+                forceSend = true
+            )
+        }
         cancelHoldThreshold()
         cancelRecoveryResetThreshold()
         setPressed(false)
@@ -371,8 +434,7 @@ class ButtonAimHandler(
             legacyPayloadHeld = false
         }
 
-        aimOutput.finish(flushMouse = false)
-        dpadOutput.finish()
+        finishOrdinaryAimOutput()
         usingDpadOutput = false
         resetGestureOnly()
         armAlternateAfterSuccessfulBase()
@@ -383,15 +445,14 @@ class ButtonAimHandler(
         val delayMs = model.buttonAimReleaseDelayMs.coerceAtLeast(0L)
         if (delayMs == 0L) {
             fireDelayedBase(latchOnFire)
-            aimOutput.finish(flushMouse = false)
-            dpadOutput.finish()
+            finishOrdinaryAimOutput()
             usingDpadOutput = false
             resetGestureOnly(preservePresentation = true)
         } else {
             activePointerId = MotionEvent.INVALID_POINTER_ID
             if (usingDpadOutput) {
                 dpadOutput.detachPointerKeepingOutput()
-            } else {
+            } else if (gestureOwnsAimOutput) {
                 aimOutput.detachPointerKeepingOutput()
             }
             gestureState = GestureState.BASE_WAITING_TO_FIRE
@@ -400,8 +461,7 @@ class ButtonAimHandler(
                 delayedFireRunnable = null
                 if (gestureState != GestureState.BASE_WAITING_TO_FIRE) return@Runnable
                 fireDelayedBase(latchOnFire)
-                aimOutput.finish(flushMouse = false)
-                dpadOutput.finish()
+                finishPendingAimOutput()
                 usingDpadOutput = false
                 resetGestureOnly(preservePresentation = true)
             }.also { handler.postDelayed(it, delayMs) }
@@ -438,8 +498,7 @@ class ButtonAimHandler(
     private fun completeImmediateAlternate() {
         val returnToBase = shouldReturnToBaseAfterAlternateGesture()
         val waitForBaseUnlatch = releaseAlternateForCompletion(returnToBase)
-        aimOutput.finish(flushMouse = false)
-        dpadOutput.finish()
+        finishOrdinaryAimOutput()
         usingDpadOutput = false
         resetGestureOnly(preservePresentation = true)
         if (waitForBaseUnlatch) scheduleBaseUnlatch() else finishAlternatePhase(returnToBase)
@@ -463,9 +522,8 @@ class ButtonAimHandler(
             }
         }
 
-        // Required order: final aim, alternate press, center, finite release, then base release.
-        aimOutput.finish(flushMouse = false)
-        dpadOutput.finish()
+        // Required order: final aim, alternate press, center/retain, finite release, then base release.
+        prepareAlternateFiniteReleaseAim()
         usingDpadOutput = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
@@ -480,6 +538,7 @@ class ButtonAimHandler(
             } else {
                 gestureState = GestureState.IDLE
                 finishAlternatePhase(returnToBase)
+                finishPendingAimOutput()
             }
         }.also { handler.postDelayed(it, FINITE_PRESS_DURATION_MS) }
     }
@@ -533,6 +592,7 @@ class ButtonAimHandler(
         holdThresholdReached = false
         gestureState = GestureState.IDLE
         reducePhase(OneShotAlternateEvent.BASE_CANCELLATION)
+        clearGestureAimTracking()
         setVisualState(ButtonAimVisualState.IDLE)
     }
 
@@ -554,6 +614,7 @@ class ButtonAimHandler(
                 OneShotAlternateEvent.ALTERNATE_CANCELLATION
             }
         )
+        clearGestureAimTracking()
         if (model.buttonAimAlternateHaptics) vibrate(120L)
         setVisualState(ButtonAimVisualState.ALTERNATE_RECOVERY)
     }
@@ -626,6 +687,7 @@ class ButtonAimHandler(
         } else {
             gestureState = GestureState.IDLE
             finishAlternatePhase(returnToBase)
+            finishPendingAimOutput()
         }
     }
 
@@ -662,6 +724,7 @@ class ButtonAimHandler(
             if (gestureState != GestureState.WAITING_FOR_BASE_UNLATCH) return@Runnable
             gestureState = GestureState.IDLE
             finishAlternatePhase(returnToBase = true)
+            finishPendingAimOutput()
         }.also {
             handler.postDelayed(it, model.buttonAimAlternateBaseUnlatchDelayMs.coerceAtLeast(0L))
         }
@@ -673,6 +736,7 @@ class ButtonAimHandler(
         if (gestureState != GestureState.WAITING_FOR_BASE_UNLATCH) return
         gestureState = GestureState.IDLE
         finishAlternatePhase(returnToBase = true)
+        finishPendingAimOutput()
     }
 
     private fun releaseBaseOwnership() {
@@ -707,7 +771,52 @@ class ButtonAimHandler(
         activePointerId = MotionEvent.INVALID_POINTER_ID
         holdThresholdReached = false
         gestureState = GestureState.IDLE
+        clearGestureAimTracking()
         if (!preservePresentation) setVisualState(ButtonAimVisualState.IDLE)
+    }
+
+    private fun finishOrdinaryAimOutput() {
+        when {
+            usingDpadOutput -> dpadOutput.finish()
+            !gestureOwnsAimOutput -> Unit
+            gestureAimConfig?.output?.stickName() != null ->
+                aimOutput.completeGesture(gestureAutoCenter)
+            else -> aimOutput.finish(flushMouse = false)
+        }
+        usingDpadOutput = false
+    }
+
+    private fun finishPendingAimOutput() {
+        when {
+            usingDpadOutput -> dpadOutput.finish()
+            !gestureOwnsAimOutput -> Unit
+            gestureAimConfig?.output?.stickName() != null ->
+                aimOutput.completePending(gestureAutoCenter)
+            else -> aimOutput.finish(flushMouse = false)
+        }
+        usingDpadOutput = false
+    }
+
+    private fun prepareAlternateFiniteReleaseAim() {
+        when {
+            usingDpadOutput -> dpadOutput.finish()
+            !gestureOwnsAimOutput -> Unit
+            gestureAimConfig?.output?.stickName() == null -> aimOutput.finish(flushMouse = false)
+            else -> {
+                aimOutput.detachPointerKeepingOutput()
+                if (gestureAutoCenter) aimOutput.centerRetainedOrPending()
+            }
+        }
+    }
+
+    private fun clearGestureAimTracking() {
+        gestureOwnsAimOutput = false
+        deferStickAimUntilSwipe = false
+        gestureAimConfig = null
+        gestureAutoCenter = true
+        gestureDownX = 0f
+        gestureDownY = 0f
+        gestureDownTime = 0L
     }
 
     private fun updateActiveAimOutput(

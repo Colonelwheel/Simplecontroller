@@ -471,13 +471,45 @@ Button Aim lets the same finger both touch a Button and move outside it to aim o
 
 1. Add or edit a normal Button.
 2. Enable **Aim while pressed**.
-3. Choose Mouse, right stick, or left stick output.
+3. Choose Mouse, right stick, left stick, or D-pad output.
 4. Choose **Immediate** to activate the Button payload as soon as the touch starts, or **Send on release** to decide based on the completed gesture.
 5. Adjust sensitivity, dead zone, response curve, and optional send-on-release delay.
+6. For right-stick or left-stick output, leave **Auto-center stick on release** on for the existing behavior, or turn it off to retain the final aimed direction.
 
 Once the gesture begins, you can slide beyond the Button's visible edge without losing it. Button Aim suppresses Swipe behavior so that a moving aim finger does not accidentally activate neighboring controls.
 
 Button Aim is mutually exclusive with Hold Toggle and Toggle Auto-Tap.
+
+### Retaining a left-stick or right-stick position
+
+**Auto-center stick on release** is separate for Base and Alternate. It defaults to on in new and
+existing layouts and in older Button Aim profiles.
+
+- **On:** when no position is already retained, Button Aim begins and releases exactly as before.
+  Touch-position mode can react on the initial touch, and the stick centers when the gesture ends.
+- **Off:** the initial touch is stick-inert. Movement must pass Android's normal touch-slop distance
+  before it counts as an intentional swipe. Lifting after that swipe retains and continuously
+  resends the final LS or RS vector. A tap or small finger jitter activates the configured Button
+  payload normally but does not move the aiming stick.
+
+A retained position belongs to the whole canonical stick, not merely to the Button that created it.
+For example, after one Button retains LS, tapping another LS Button Aim surface cannot replace or
+center that position—even if the second surface has Auto-center on. Deliberately swiping the second
+surface transfers LS ownership without a neutral packet between the two positions. The second
+surface then centers or retains on release according to its own setting. LS and RS remain
+independent.
+
+A normal on-screen Stick or TouchAim surface can intentionally take over the same retained stick on
+its initial touch. A pending delayed Button Aim action or Alternate finite-release sequence keeps
+ownership until that sequence completes. A small `LS` or `RS` badge appears on the Button that owns
+an ordinary retained position. Use **Re-center** to center retained Button Aim output without
+changing its payload or One-Shot Alternate phase; **Release All** also centers it and performs the
+rest of the normal safety cleanup.
+
+The protection above applies to the Button Aim movement layer. A Button payload may still contain
+an explicit `LS:` or `RS:` direction macro, and that macro intentionally follows the receiver's
+existing priority rules. Mouse and D-pad Button Aim output do not use this Auto-center setting.
+ConsoleBridge/Pico behavior for retained stick output has not been verified on hardware.
 
 ### Button Aim profiles
 
@@ -487,7 +519,7 @@ all one-shot Alternate payload/timing settings. It does not store the button's n
 or swipe setting.
 
 When loading a profile, choose **Apply aiming feel only** to reuse the output, sensitivity,
-Linear/Response Curve choice, displacement, deadzone, touch-position origin, inversion, and haptics
+Linear/Response Curve choice, displacement, deadzone, touch-position origin, Auto-center, inversion, and haptics
 without changing the target button's actions. This is useful for giving Fire and ADS islands the
 same feel. Choose **Apply complete profile** to restore the saved payloads and action behavior too.
 Either choice enables Button Aim and turns off conflicting Auto-Tap. A size warning appears when
@@ -902,6 +934,14 @@ A Button can start a persistent timed repeater with one tap and stop it with the
 - The format is the migration path from this debug APK to a separately signed API 36 release APK.
 - **Export all profiles** and **Import all** also move every saved controller profile plus reusable
   TouchAim calibration/manual, Button Aim, and Directional/Stick+ profiles.
+
+### 16. Retained Button Aim sticks — September 21
+
+- Base and Alternate stick aiming have separate **Auto-center stick on release** settings.
+- Turning Auto-center off makes taps stick-inert and retains only deliberate swipes beyond Android's
+  touch-slop threshold.
+- Retained LS/RS ownership is stick-wide, supports no-center handoff to another Button Aim, normal
+  Stick, or TouchAim surface, and can be cleared with Re-center or Release All.
 
 ---
 

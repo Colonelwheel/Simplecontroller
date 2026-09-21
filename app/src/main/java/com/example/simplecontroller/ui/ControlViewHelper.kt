@@ -688,6 +688,9 @@ object SwipeManager {
      * This is triggered by the Re-center button
      */
     fun recenterAllSticks() {
+        // Button Aim retention owns a canonical stick independently of ordinary Stick views.
+        // Center it first so its generation is invalidated before any terminal packet is sent.
+        allViews.forEach { it.recenterButtonAimStick() }
         allViews.forEach { view ->
             if (view.model.type == ControlType.STICK ||
                 view.model.type == ControlType.CURVED_STICK

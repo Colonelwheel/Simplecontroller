@@ -32,6 +32,7 @@ class ControlSettingsProfilesTest {
         assertEquals(ButtonAimDpadMode.EIGHT_WAY, tuning.dpadMode)
         assertEquals(ButtonAimDpadOrigin.CONTROL_CENTER, tuning.dpadOrigin)
         assertEquals(8f, tuning.dpadActivationDistancePx)
+        assertTrue(tuning.autoCenter)
     }
 
     @Test
@@ -177,6 +178,7 @@ class ControlSettingsProfilesTest {
             buttonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
             buttonAimReleaseDelayMs = 35L,
             buttonAimOutput = ButtonAimOutput.RIGHT_STICK,
+            buttonAimAutoCenter = false,
             buttonAimSensitivity = .65f,
             buttonAimInvertY = true,
             buttonAimStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -189,6 +191,7 @@ class ControlSettingsProfilesTest {
             buttonAimDpadActivationDistancePx = 14f,
             buttonAimHaptics = false,
             buttonAimAlternateOutput = ButtonAimOutput.LEFT_STICK,
+            buttonAimAlternateAutoCenter = true,
             buttonAimAlternateSensitivity = .4f,
             buttonAimAlternateInvertY = true,
             buttonAimAlternateStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -212,6 +215,9 @@ class ControlSettingsProfilesTest {
             json.encodeToString(ButtonAimProfile.serializer(), captured)
         )
         assertEquals(captured, profile)
+        assertEquals(3, profile.schemaVersion)
+        assertFalse(profile.base.autoCenter)
+        assertTrue(profile.alternate.autoCenter)
         val target = button().copy(
             payload = "RT:1.0",
             holdToggle = true,
@@ -225,6 +231,7 @@ class ControlSettingsProfilesTest {
         assertTrue(target.buttonAimEnabled)
         assertFalse(target.autoTapEnabled)
         assertEquals(ButtonAimOutput.RIGHT_STICK, target.buttonAimOutput)
+        assertFalse(target.buttonAimAutoCenter)
         assertEquals(ButtonAimStickProfile.RESPONSE_CURVE, target.buttonAimStickProfile)
         assertEquals(170f, target.buttonAimStickFullDisplacementPx)
         assertEquals(4f, target.buttonAimStickDeadzonePx)
@@ -232,6 +239,7 @@ class ControlSettingsProfilesTest {
         assertEquals(ButtonAimDpadOrigin.INITIAL_TOUCH, target.buttonAimDpadOrigin)
         assertEquals(14f, target.buttonAimDpadActivationDistancePx)
         assertEquals(.4f, target.buttonAimAlternateSensitivity)
+        assertTrue(target.buttonAimAlternateAutoCenter)
         assertEquals("RT:1.0", target.payload)
         assertTrue(target.holdToggle)
         assertEquals(ButtonAimPayloadTiming.SEND_ON_RELEASE, target.buttonAimPayloadTiming)

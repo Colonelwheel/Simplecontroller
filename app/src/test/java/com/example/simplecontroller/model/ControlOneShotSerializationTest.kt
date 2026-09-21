@@ -4,6 +4,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ControlOneShotSerializationTest {
@@ -35,6 +36,8 @@ class ControlOneShotSerializationTest {
         assertEquals(2000L, control.buttonAimAlternateResetHoldDurationMs)
         assertEquals(0L, control.buttonAimAlternateBaseUnlatchDelayMs)
         assertEquals(ButtonAimOutput.MOUSE, control.buttonAimAlternateOutput)
+        assertTrue(control.buttonAimAutoCenter)
+        assertTrue(control.buttonAimAlternateAutoCenter)
         assertFalse(control.buttonAimStickUsesTouchPosition)
         assertFalse(control.buttonAimAlternateStickUsesTouchPosition)
         assertEquals(ButtonAimDpadMode.EIGHT_WAY, control.buttonAimDpadMode)
@@ -55,6 +58,7 @@ class ControlOneShotSerializationTest {
             autoTapEnabled = true,
             autoTapIntervalMs = 175L,
             buttonAimEnabled = true,
+            buttonAimAutoCenter = false,
             buttonAimStickUsesTouchPosition = true,
             buttonAimOneShotAlternateEnabled = true,
             buttonAimAlternatePayload = "RT:1.0,X360A",
@@ -63,6 +67,7 @@ class ControlOneShotSerializationTest {
             buttonAimAlternateBaseUnlatchDelayMs = 140L,
             buttonAimAlternateDisplayName = "Fire",
             buttonAimAlternateOutput = ButtonAimOutput.LEFT_STICK,
+            buttonAimAlternateAutoCenter = true,
             buttonAimAlternateSensitivity = 1.7f,
             buttonAimAlternateInvertY = true,
             buttonAimAlternateStickProfile = ButtonAimStickProfile.RESPONSE_CURVE,
@@ -80,6 +85,9 @@ class ControlOneShotSerializationTest {
             buttonAimAlternateHaptics = false
         )
 
-        assertEquals(source, json.decodeFromString<Control>(json.encodeToString(source)))
+        val restored = json.decodeFromString<Control>(json.encodeToString(source))
+        assertEquals(source, restored)
+        assertFalse(restored.buttonAimAutoCenter)
+        assertTrue(restored.buttonAimAlternateAutoCenter)
     }
 }

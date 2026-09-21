@@ -2,6 +2,46 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## 2026-09-21 Retained Button Aim Stick Output
+
+Button Aim Base and Alternate tuning each serialize an independent `autoCenter` setting. Both
+`Control` defaults and the schema-3 `ButtonAimTuning` default are `true`, so layouts and profiles
+from schemas 1 and 2 preserve their previous centering behavior. The property sheet exposes the
+setting only for LS/RS output; Mouse and D-pad behavior is unchanged. D-pad's intentionally reversed
+legacy labels remain intact: `Initial touch` selects control-center origin, while `Button center`
+selects initial-contact origin.
+
+With Auto-center off, `ButtonAimHandler` defers aim acquisition until a pure touch-slop tracker
+confirms a deliberate swipe. Payload Immediate/Send-on-release timing still begins normally. The
+same deferred path protects a canonical stick whenever any Button Aim surface has retained it, so a
+tap cannot send a touch-position vector, neutral, or center. A deliberate swipe uses the original
+down point for initial-touch-relative mapping, or the current position for control-center mapping.
+If one surface changes from an already retained stick to the other stick, only a deliberate swipe
+centers its old stick before acquiring the new one.
+
+`ManualStickArbiter` owns canonical `STICK_L` and `STICK_R` independently and distinguishes active,
+delay-locked, retained, and centered-pending states. Retained takeover replaces the registry entry
+atomically, then notifies the old session outside the lock so its generation-guarded 16 ms resend
+callback and indicator stop without an intermediate center. Delay-locked and centered-pending
+owners cannot be stolen. Normal Stick and TouchAim input may immediately replace only an ordinary
+retained owner; RS manual/Camera-Follow suppression stays active across an RS-to-RS transfer.
+
+Auto-center-off completion changes the session to retained state and shows a small LS/RS badge on
+the owning Button without replacing Base/Alternate colors. Re-center invalidates the resend first,
+centers and releases ordinary retention, or centers a pending delay while preserving its payload
+timer and ownership lock. Release All and all existing hard-reset/lifecycle paths still center and
+release the session. Explicit `LS:`/`RS:` commands inside the separately configured Button payload
+remain valid and retain their existing receiver-side macro priority.
+
+Primary files:
+
+- `app/src/main/java/com/example/simplecontroller/model/Control.kt`
+- `app/src/main/java/com/example/simplecontroller/model/ButtonAimProfile.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/AimOutputController.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/ButtonAimHandler.kt`
+- `app/src/main/java/com/example/simplecontroller/ui/ControlView.kt`
+- `app/src/test/java/com/example/simplecontroller/ui/ButtonAimStickOwnershipTest.kt`
+
 ## 2026-09-15 App-Controlled Portrait/Landscape Layouts
 
 `MainActivity` explicitly requests Portrait or Landscape and never depends on Android auto-rotate.

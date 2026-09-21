@@ -12,6 +12,7 @@ import android.os.VibrationEffect
 import android.os.Build
 import android.util.Log
 import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.Toast
@@ -136,15 +137,21 @@ class ControlView(
     private val autoTapPayloadExecutor: ButtonAimPayloadExecutor?
     private val autoTapController: ButtonAutoTapController?
     private var autoTapLease: ButtonAimPayloadLease? = null
+    private var retainedButtonAimStickName: String? = null
     private val buttonAimOutput = AimOutputSession(
         ownerToken = Any(),
         controlSize = { width.toFloat() to height.toFloat() },
-        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick
+        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick,
+        onRetainedStickChanged = {
+            retainedButtonAimStickName = it
+            invalidate()
+        }
     )
     private val buttonAimHandler: ButtonAimHandler?
     private val manualStickOwnerToken = Any()
     private var ownsManualStick = false
     private var manualStickPointerId = MotionEvent.INVALID_POINTER_ID
+    private var manualStickReplacedRetained = false
 
     // Paint for drawing the control
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -281,6 +288,7 @@ class ControlView(
                     model.payload.contains("RT:1.0P", ignoreCase = true) ||
                         model.payload.contains("LT:1.0P", ignoreCase = true)
                 },
+                touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop.toFloat(),
                 vibrate = ::triggerStrongVibration,
                 onPayloadError = { reason ->
                     Toast.makeText(context, "One-shot alternate: $reason", Toast.LENGTH_SHORT).show()
@@ -358,6 +366,26 @@ class ControlView(
                     paint.strokeWidth = 4f
                     paint.color = ContextCompat.getColor(context, R.color.button_blue)
                     c.drawRoundRect(0f, 0f, width.toFloat(), height.toFloat(), cornerRadius, cornerRadius, paint)
+                }
+                retainedButtonAimStickName?.let { stickName ->
+                    val badgeRadius = (min(width, height) * 0.13f).coerceAtLeast(11f)
+                    val badgeX = width - badgeRadius - 6f
+                    val badgeY = badgeRadius + 6f
+                    paint.style = Style.FILL
+                    paint.color = Color.BLACK
+                    c.drawCircle(badgeX, badgeY, badgeRadius, paint)
+                    paint.style = Style.STROKE
+                    paint.strokeWidth = 3f
+                    paint.color = Color.WHITE
+                    c.drawCircle(badgeX, badgeY, badgeRadius, paint)
+                    paint.style = Style.FILL
+                    paint.color = Color.WHITE
+                    paint.textAlign = Paint.Align.CENTER
+                    paint.textSize = badgeRadius
+                    paint.isFakeBoldText = true
+                    c.drawText(if (stickName == "STICK_R") "RS" else "LS", badgeX, badgeY + badgeRadius * 0.35f, paint)
+                    paint.isFakeBoldText = false
+                    paint.textAlign = Paint.Align.LEFT
                 }
             }
             ControlType.RECENTER -> {
@@ -672,14 +700,20 @@ class ControlView(
                     if (!model.directionalMode) {
                         val stickName = ManualStickArbiter.canonicalStickName(model.payload)
                         SwipeManager.stopContinuousSendingForStick(stickName)
-                        ownsManualStick = ManualStickArbiter.acquire(stickName, manualStickOwnerToken)
+                        val acquisition = ManualStickArbiter.acquire(
+                            stickName,
+                            manualStickOwnerToken,
+                            allowRetainedTakeover = true
+                        )
+                        ownsManualStick = acquisition.acquired
+                        manualStickReplacedRetained = acquisition.replacedRetainedOwner
                         manualStickPointerId = e.getPointerId(e.actionIndex)
-                        if (ownsManualStick && stickName == "STICK_R") {
-                            UdpClient.setManualRightStickActive(manualStickOwnerToken, true)
-                        }
                     }
                 }
                 handleStickOrPad(e)
+                if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+                    manualStickReplacedRetained = false
+                }
                 if (e.actionMasked == MotionEvent.ACTION_UP ||
                     e.actionMasked == MotionEvent.ACTION_CANCEL ||
                     (e.actionMasked == MotionEvent.ACTION_POINTER_UP &&
@@ -929,7 +963,9 @@ class ControlView(
         if (e.actionMasked !in listOf(
                 MotionEvent.ACTION_MOVE,
                 MotionEvent.ACTION_UP,
-                MotionEvent.ACTION_CANCEL)) return
+                MotionEvent.ACTION_CANCEL) &&
+            !(e.actionMasked == MotionEvent.ACTION_DOWN && manualStickReplacedRetained)
+        ) return
 
         val cx = width/2f
         val cy = height/2f
@@ -1057,9 +1093,6 @@ class ControlView(
         if (!ownsManualStick) return
         val stickName = ManualStickArbiter.canonicalStickName(model.payload)
         ManualStickArbiter.release(stickName, manualStickOwnerToken, center)
-        if (stickName == "STICK_R") {
-            UdpClient.setManualRightStickActive(manualStickOwnerToken, false)
-        }
         ownsManualStick = false
         manualStickPointerId = MotionEvent.INVALID_POINTER_ID
     }
@@ -1105,6 +1138,8 @@ class ControlView(
             }
         }
     }
+
+    fun recenterButtonAimStick(): Boolean = buttonAimHandler?.recenterStickOutput() == true
 
     /**
      * Clear every held, delayed, latched, or repeating state owned by this view.

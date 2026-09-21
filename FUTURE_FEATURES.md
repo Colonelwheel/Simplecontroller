@@ -170,7 +170,7 @@ Payload and aim output must remain independent. For example, a mouse-button payl
 - [ ] For Mouse, use relative deltas from the previous sample. Let the user choose raw Linear Relative movement or the proven TouchAim/touchpad Smoothed/Nonlinear scaling; keep cadence and rate limiting safe in both modes.
 - [x] For Left/Right Stick, keep displacement from the initial finger-down point as the safe default, with an optional Touch Aim-style setting that maps the touched position within the button directly to the stick. Both modes support Linear or Response Curve mapping.
 - [ ] Clamp stick output, resend it at the established cadence, use ordered stick packets, and explicitly center on every terminal path.
-- [ ] Decide whether return-to-origin centers the stick and whether a configurable floating-origin/recenter behavior is desirable.
+- [x] Add independent Base/Alternate Auto-center settings: On preserves centering; Off retains only a deliberate swipe, with stick-wide tap protection and Re-center/Release All cleanup.
 
 ### Output ordering and arbitration
 

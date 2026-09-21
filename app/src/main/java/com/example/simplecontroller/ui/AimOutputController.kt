@@ -23,42 +23,165 @@ data class AimOutputConfig(
     val sendNeutralOnBegin: Boolean = false
 )
 
+internal class DeliberateSwipeTracker(private val touchSlopPx: Float) {
+    private var downX = 0f
+    private var downY = 0f
+    var crossed: Boolean = false
+        private set
+
+    fun reset(x: Float, y: Float) {
+        downX = x
+        downY = y
+        crossed = false
+    }
+
+    fun update(x: Float, y: Float): Boolean {
+        if (!crossed && hypot(x - downX, y - downY) > touchSlopPx.coerceAtLeast(0f)) {
+            crossed = true
+        }
+        return crossed
+    }
+}
+
+internal fun shouldDeferButtonAimStick(autoCenter: Boolean, hasRetainedOwner: Boolean): Boolean =
+    !autoCenter || hasRetainedOwner
+
+internal class CallbackGeneration {
+    private var value = 0
+
+    fun invalidate() {
+        value++
+    }
+
+    fun snapshot(): Int = value
+
+    fun isCurrent(snapshot: Int): Boolean = snapshot == value
+}
+
+internal enum class ManualStickOwnerState { ACTIVE, DELAY_LOCKED, RETAINED, CENTERED_PENDING }
+
+internal data class ManualStickOwnership(
+    val owner: Any,
+    val state: ManualStickOwnerState,
+    val onYielded: (String) -> Unit
+)
+
+data class ManualStickAcquireResult(
+    val acquired: Boolean,
+    val replacedRetainedOwner: Boolean = false
+)
+
+internal class ManualStickOwnershipRegistry {
+    private val owners = mutableMapOf<String, ManualStickOwnership>()
+
+    fun acquire(
+        stickName: String,
+        owner: Any,
+        state: ManualStickOwnerState,
+        allowRetainedTakeover: Boolean,
+        onYielded: (String) -> Unit
+    ): Pair<ManualStickAcquireResult, ManualStickOwnership?> {
+        val current = owners[stickName]
+        if (current != null && current.owner !== owner) {
+            if (!allowRetainedTakeover || current.state != ManualStickOwnerState.RETAINED) {
+                return ManualStickAcquireResult(false) to null
+            }
+            owners[stickName] = ManualStickOwnership(owner, state, onYielded)
+            return ManualStickAcquireResult(true, replacedRetainedOwner = true) to current
+        }
+        owners[stickName] = ManualStickOwnership(owner, state, onYielded)
+        return ManualStickAcquireResult(true) to null
+    }
+
+    fun owns(stickName: String, owner: Any): Boolean = owners[stickName]?.owner === owner
+
+    fun state(stickName: String): ManualStickOwnerState? = owners[stickName]?.state
+
+    fun updateState(stickName: String, owner: Any, state: ManualStickOwnerState): Boolean {
+        val current = owners[stickName] ?: return false
+        if (current.owner !== owner) return false
+        owners[stickName] = current.copy(state = state)
+        return true
+    }
+
+    fun release(stickName: String, owner: Any): Boolean {
+        if (owners[stickName]?.owner !== owner) return false
+        owners.remove(stickName)
+        return true
+    }
+
+    fun hasRetainedOwner(stickName: String): Boolean =
+        owners[stickName]?.state == ManualStickOwnerState.RETAINED
+
+    fun isOccupied(stickName: String): Boolean = owners.containsKey(stickName)
+}
+
 /**
  * First-active-gesture ownership for ordinary/manual analog stick output.
  * Directional button macros intentionally stay outside this arbiter because the receiver
  * already gives their STICK_MACRO packets higher priority.
  */
 object ManualStickArbiter {
-    private val owners = mutableMapOf<String, Any>()
+    private val registry = ManualStickOwnershipRegistry()
+    private val rightStickSuppressionToken = Any()
 
-    @Synchronized
-    fun acquire(stickName: String, owner: Any): Boolean {
+    fun acquire(
+        stickName: String,
+        owner: Any,
+        allowRetainedTakeover: Boolean = false,
+        onYielded: (String) -> Unit = {}
+    ): ManualStickAcquireResult {
         val canonical = canonicalStickName(stickName)
-        val current = owners[canonical]
-        if (current != null && current !== owner) return false
-        owners[canonical] = owner
-        return true
+        val wasOccupied: Boolean
+        val transition: Pair<ManualStickAcquireResult, ManualStickOwnership?>
+        synchronized(this) {
+            wasOccupied = registry.isOccupied(canonical)
+            transition = registry.acquire(
+                canonical,
+                owner,
+                ManualStickOwnerState.ACTIVE,
+                allowRetainedTakeover,
+                onYielded
+            )
+            if (transition.first.acquired && canonical == "STICK_R" && !wasOccupied) {
+                UdpClient.setManualRightStickActive(rightStickSuppressionToken, true)
+            }
+        }
+        if (!transition.first.acquired) return transition.first
+        transition.second?.onYielded?.invoke(canonical)
+        return transition.first
     }
 
     @Synchronized
     fun owns(stickName: String, owner: Any): Boolean =
-        owners[canonicalStickName(stickName)] === owner
+        registry.owns(canonicalStickName(stickName), owner)
 
+    @Synchronized
+    fun hasRetainedOwner(stickName: String): Boolean =
+        registry.hasRetainedOwner(canonicalStickName(stickName))
+
+    @Synchronized
+    internal fun setState(stickName: String, owner: Any, state: ManualStickOwnerState): Boolean =
+        registry.updateState(canonicalStickName(stickName), owner, state)
+
+    @Synchronized
     fun send(stickName: String, owner: Any, x: Float, y: Float): Boolean {
-        if (!owns(stickName, owner)) return false
-        UdpClient.sendStickPosition(stickName, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f))
+        val canonical = canonicalStickName(stickName)
+        if (!registry.owns(canonical, owner)) return false
+        UdpClient.sendStickPosition(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f))
         return true
     }
 
     fun release(stickName: String, owner: Any, center: Boolean = true): Boolean {
         val canonical = canonicalStickName(stickName)
         val released = synchronized(this) {
-            if (owners[canonical] !== owner) false else {
-                owners.remove(canonical)
-                true
+            val didRelease = registry.release(canonical, owner)
+            if (didRelease && center) UdpClient.sendStickPosition(canonical, 0f, 0f)
+            if (didRelease && canonical == "STICK_R") {
+                UdpClient.setManualRightStickActive(rightStickSuppressionToken, false)
             }
+            didRelease
         }
-        if (released && center) UdpClient.sendStickPosition(canonical, 0f, 0f)
         return released
     }
 
@@ -78,13 +201,15 @@ object ManualStickArbiter {
 class AimOutputSession(
     private val ownerToken: Any,
     private val controlSize: () -> Pair<Float, Float>,
-    private val beforeStickAcquire: (String) -> Unit = {}
+    private val beforeStickAcquire: (String) -> Unit = {},
+    private val onRetainedStickChanged: (String?) -> Unit = {}
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var config: AimOutputConfig? = null
     private var sessionActive = false
     private var activePointerId = INVALID_POINTER_ID
     private var ownsStick = false
+    private var ownerState = ManualStickOwnerState.ACTIVE
     private var originX = 0f
     private var originY = 0f
     private var lastX = 0f
@@ -96,25 +221,28 @@ class AimOutputSession(
     private var lastAimSendTime = 0L
     private var lastStickX = 0f
     private var lastStickY = 0f
-
-    private val resendStick = object : Runnable {
-        override fun run() {
-            val activeConfig = config
-            val stickName = activeConfig?.output?.stickName()
-            if (!sessionActive || !ownsStick || stickName == null) return
-            ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY)
-            handler.postDelayed(this, STICK_SEND_INTERVAL_MS)
-        }
-    }
+    private val resendGeneration = CallbackGeneration()
+    private var resendStick: Runnable? = null
 
     fun begin(
         pointerId: Int,
         x: Float,
         y: Float,
         eventTime: Long,
-        newConfig: AimOutputConfig
-    ): Boolean {
-        if (sessionActive) finish(flushMouse = false)
+        newConfig: AimOutputConfig,
+        allowRetainedTakeover: Boolean = false
+    ): AimOutputBeginResult {
+        val newStickName = newConfig.output.stickName()
+        val existingStickName = config?.output?.stickName()
+        val continuingRetainedStick = sessionActive && ownsStick &&
+            ownerState == ManualStickOwnerState.RETAINED &&
+            existingStickName != null && existingStickName == newStickName
+
+        if (sessionActive && !continuingRetainedStick) finish(flushMouse = false)
+        if (continuingRetainedStick) {
+            invalidateStickResend()
+            onRetainedStickChanged(null)
+        }
         config = newConfig
         sessionActive = true
         activePointerId = pointerId
@@ -125,19 +253,33 @@ class AimOutputSession(
         lastAimSendTime = eventTime
         resetMotionState()
 
-        val stickName = newConfig.output.stickName()
+        val stickName = newStickName
+        var replacedRetainedOwner = false
         if (stickName != null) {
             beforeStickAcquire(stickName)
-            ownsStick = ManualStickArbiter.acquire(stickName, ownerToken)
+            val acquisition = if (continuingRetainedStick) {
+                ManualStickArbiter.setState(stickName, ownerToken, ManualStickOwnerState.ACTIVE)
+                ManualStickAcquireResult(acquired = true)
+            } else {
+                ManualStickArbiter.acquire(
+                    stickName,
+                    ownerToken,
+                    allowRetainedTakeover,
+                    ::yieldWithoutCenterFromArbiter
+                )
+            }
+            ownsStick = acquisition.acquired
+            replacedRetainedOwner = acquisition.replacedRetainedOwner
             if (ownsStick) {
-                if (stickName == "STICK_R") UdpClient.setManualRightStickActive(ownerToken, true)
+                ownerState = ManualStickOwnerState.ACTIVE
                 if (newConfig.sendNeutralOnBegin) {
                     ManualStickArbiter.send(stickName, ownerToken, 0f, 0f)
                     startStickResend()
                 }
             }
         }
-        return stickName == null || ownsStick
+        if (stickName != null && !ownsStick) resetSessionState()
+        return AimOutputBeginResult(stickName == null || ownsStick, replacedRetainedOwner)
     }
 
     /** Returns false when the initiating pointer is no longer present/owned. */
@@ -168,6 +310,43 @@ class AimOutputSession(
     /** Keep the final absolute stick value alive while a configured release delay runs. */
     fun detachPointerKeepingOutput() {
         activePointerId = INVALID_POINTER_ID
+        val stickName = config?.output?.stickName() ?: return
+        if (ownsStick) {
+            ownerState = ManualStickOwnerState.DELAY_LOCKED
+            ManualStickArbiter.setState(stickName, ownerToken, ownerState)
+        }
+    }
+
+    fun completeGesture(autoCenter: Boolean) {
+        if (autoCenter) finish(flushMouse = false) else retainStick()
+    }
+
+    fun completePending(autoCenter: Boolean) {
+        if (ownerState == ManualStickOwnerState.CENTERED_PENDING) {
+            finishCenteredPending()
+        } else {
+            completeGesture(autoCenter)
+        }
+    }
+
+    fun centerRetainedOrPending(): Boolean {
+        val stickName = config?.output?.stickName() ?: return false
+        if (!sessionActive || !ownsStick || ownerState !in setOf(
+                ManualStickOwnerState.RETAINED,
+                ManualStickOwnerState.DELAY_LOCKED
+            )
+        ) return false
+        invalidateStickResend()
+        onRetainedStickChanged(null)
+        if (ownerState == ManualStickOwnerState.DELAY_LOCKED) {
+            ManualStickArbiter.send(stickName, ownerToken, 0f, 0f)
+            ownerState = ManualStickOwnerState.CENTERED_PENDING
+            ManualStickArbiter.setState(stickName, ownerToken, ownerState)
+        } else {
+            ManualStickArbiter.release(stickName, ownerToken, center = true)
+            resetSessionState()
+        }
+        return true
     }
 
     fun finish(flushMouse: Boolean = true) {
@@ -175,26 +354,21 @@ class AimOutputSession(
         if (!sessionActive && activeConfig == null) return
         if (flushMouse && activeConfig?.output == TouchAimOutput.MOUSE) sendMouse(activeConfig)
 
-        handler.removeCallbacks(resendStick)
+        invalidateStickResend()
         val stickName = activeConfig?.output?.stickName()
         if (stickName != null && ownsStick) {
             ManualStickArbiter.release(stickName, ownerToken, center = true)
-            if (stickName == "STICK_R") UdpClient.setManualRightStickActive(ownerToken, false)
         }
-
-        config = null
-        sessionActive = false
-        activePointerId = INVALID_POINTER_ID
-        ownsStick = false
-        originX = 0f
-        originY = 0f
-        lastX = 0f
-        lastY = 0f
-        lastAimSendTime = 0L
-        resetMotionState()
+        onRetainedStickChanged(null)
+        resetSessionState()
     }
 
     fun isActive(): Boolean = sessionActive
+
+    fun isRetained(): Boolean = sessionActive && ownerState == ManualStickOwnerState.RETAINED
+
+    fun retainedStickName(): String? =
+        config?.output?.stickName()?.takeIf { isRetained() }
 
     /** Change only the response strength while preserving pointer ownership and aim continuity. */
     fun updateSensitivity(sensitivity: Float) {
@@ -262,8 +436,69 @@ class AimOutputSession(
     }
 
     private fun startStickResend() {
-        handler.removeCallbacks(resendStick)
-        handler.postDelayed(resendStick, STICK_SEND_INTERVAL_MS)
+        invalidateStickResend()
+        val generation = resendGeneration.snapshot()
+        resendStick = object : Runnable {
+            override fun run() {
+                val activeConfig = config
+                val stickName = activeConfig?.output?.stickName()
+                if (!resendGeneration.isCurrent(generation) || !sessionActive || !ownsStick ||
+                    stickName == null || ownerState == ManualStickOwnerState.CENTERED_PENDING
+                ) return
+                ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY)
+                handler.postDelayed(this, STICK_SEND_INTERVAL_MS)
+            }
+        }.also { handler.postDelayed(it, STICK_SEND_INTERVAL_MS) }
+    }
+
+    private fun retainStick() {
+        val stickName = config?.output?.stickName()
+        if (stickName == null || !ownsStick) {
+            finish(flushMouse = false)
+            return
+        }
+        activePointerId = INVALID_POINTER_ID
+        ownerState = ManualStickOwnerState.RETAINED
+        ManualStickArbiter.setState(stickName, ownerToken, ownerState)
+        onRetainedStickChanged(stickName)
+        startStickResend()
+    }
+
+    private fun finishCenteredPending() {
+        val stickName = config?.output?.stickName()
+        invalidateStickResend()
+        if (stickName != null && ownsStick) {
+            ManualStickArbiter.release(stickName, ownerToken, center = false)
+        }
+        onRetainedStickChanged(null)
+        resetSessionState()
+    }
+
+    private fun yieldWithoutCenterFromArbiter(stickName: String) {
+        if (config?.output?.stickName() != stickName) return
+        invalidateStickResend()
+        onRetainedStickChanged(null)
+        resetSessionState()
+    }
+
+    private fun invalidateStickResend() {
+        resendGeneration.invalidate()
+        resendStick?.let(handler::removeCallbacks)
+        resendStick = null
+    }
+
+    private fun resetSessionState() {
+        config = null
+        sessionActive = false
+        activePointerId = INVALID_POINTER_ID
+        ownsStick = false
+        ownerState = ManualStickOwnerState.ACTIVE
+        originX = 0f
+        originY = 0f
+        lastX = 0f
+        lastY = 0f
+        lastAimSendTime = 0L
+        resetMotionState()
     }
 
     private fun resetMotionState() {
@@ -292,6 +527,11 @@ class AimOutputSession(
         private const val MOUSE_DEADZONE = 0.02f
     }
 }
+
+data class AimOutputBeginResult(
+    val started: Boolean,
+    val replacedRetainedOwner: Boolean = false
+)
 
 fun TouchAimOutput.stickName(): String? = when (this) {
     TouchAimOutput.MOUSE -> null
