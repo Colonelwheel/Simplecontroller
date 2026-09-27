@@ -2,6 +2,7 @@ package com.example.simplecontroller.ui
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
@@ -14,8 +15,12 @@ import kotlin.math.abs
  */
 class DirectionalStickHandler(
     private val model: Control,
-    private val uiHandler: Handler = Handler(Looper.getMainLooper())
+    private val uiHandler: Handler = Handler(Looper.getMainLooper()),
+    payloadExecutor: ButtonAimPayloadExecutor
 ) {
+    private val commandState = DirectionalCommandStateController(payloadExecutor) { reason ->
+        Log.w("DirectionalStick", "Ignored invalid held payload: $reason")
+    }
     // Track which directional commands are being continuously sent
     private var continuousDirectional: Runnable? = null
     private var sendingUp = false
@@ -52,99 +57,11 @@ class DirectionalStickHandler(
         lastStickX = x
         lastStickY = y
 
-        // Track whether we've sent commands for each direction this frame
-        var sentUp = false
-        var sentDown = false
-        var sentLeft = false
-        var sentRight = false
-
-        // Determine the main direction(s) to send
-        val absX = abs(x)
-        val absY = abs(y)
-
-        // Check if we're close enough to center to not send any commands
-        if (absX < 0.1f && absY < 0.1f) {
-            // Near center - stop all continuous commands if this is a MOVE event
-            if (action == MotionEvent.ACTION_MOVE) {
-                stopDirectionalCommands()
-            }
+        if (action == MotionEvent.ACTION_CANCEL) {
+            commandState.clear()
             return
         }
-
-        // Helper function to send a command and update tracking
-        fun sendCommand(command: String, intensity: Float, update: () -> Unit) {
-            command.split(',', ' ')
-                .filter { it.isNotBlank() }
-                .forEach { cmd ->
-                    val trimmedCmd = cmd.trim()
-                    
-                    // Check if this is an analog trigger command that needs intensity
-                    val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
-                        // For analog triggers, append the intensity value
-                        "$trimmedCmd:${"%.2f".format(intensity)}"
-                    } else {
-                        // For regular buttons, send as-is
-                        trimmedCmd
-                    }
-                    
-                    if (useUdp) {
-                        // Try UDP first for lower latency
-                        try {
-                            UdpClient.sendCommand(finalCmd)
-                        } catch (e: Exception) {
-                            // Fall back to TCP if UDP fails
-                            UdpClient.sendCommand(finalCmd)
-                        }
-                    } else {
-                        UdpClient.sendCommand(finalCmd)
-                    }
-                }
-            update()
-        }
-
-        // Send commands based on direction and intensity
-        if (y < -0.1f) { // Up direction
-            if (absY > model.superBoostThreshold) {
-                sendCommand(model.upSuperBoostCommand, absY) { sentUp = true }
-            } else if (absY > model.boostThreshold) {
-                sendCommand(model.upBoostCommand, absY) { sentUp = true }
-            } else {
-                sendCommand(model.upCommand, absY) { sentUp = true }
-            }
-        }
-
-        if (y > 0.1f) { // Down direction
-            if (absY > model.superBoostThreshold) {
-                sendCommand(model.downSuperBoostCommand, absY) { sentDown = true }
-            } else if (absY > model.boostThreshold) {
-                sendCommand(model.downBoostCommand, absY) { sentDown = true }
-            } else {
-                sendCommand(model.downCommand, absY) { sentDown = true }
-            }
-        }
-
-        if (x < -0.1f) { // Left direction
-            if (absX > model.superBoostThreshold) {
-                sendCommand(model.leftSuperBoostCommand, absX) { sentLeft = true }
-            } else if (absX > model.boostThreshold) {
-                sendCommand(model.leftBoostCommand, absX) { sentLeft = true }
-            } else {
-                sendCommand(model.leftCommand, absX) { sentLeft = true }
-            }
-        }
-
-        if (x > 0.1f) { // Right direction
-            if (absX > model.superBoostThreshold) {
-                sendCommand(model.rightSuperBoostCommand, absX) { sentRight = true }
-            } else if (absX > model.boostThreshold) {
-                sendCommand(model.rightBoostCommand, absX) { sentRight = true }
-            } else {
-                sendCommand(model.rightCommand, absX) { sentRight = true }
-            }
-        }
-
-        // For Stick+ mode, we don't do continuous sending of directional commands
-        // since the analog output is already continuous. Only send commands on actual input.
+        commandState.reconcile(desiredPayloads(x, y))
     }
 
     /**
@@ -173,102 +90,62 @@ class DirectionalStickHandler(
             }
         }
 
-        // Track whether we've sent commands for each direction this frame
-        var sentUp = false
-        var sentDown = false
-        var sentLeft = false
-        var sentRight = false
+        if (action == MotionEvent.ACTION_CANCEL) {
+            commandState.clear()
+            return
+        }
+        commandState.reconcile(desiredPayloads(x, y))
+    }
 
-        // Determine the main direction(s) to send
+    private fun desiredPayloads(x: Float, y: Float): Map<DirectionalCommandSlot, String> {
+        val desired = linkedMapOf<DirectionalCommandSlot, String>()
         val absX = abs(x)
         val absY = abs(y)
 
-        // Check if we're close enough to center to not send any commands
-        if (absX < 0.1f && absY < 0.1f) {
-            // Near center - stop all continuous commands if this is a MOVE event
-            if (action == MotionEvent.ACTION_MOVE) {
-                stopDirectionalCommands()
-            }
-            return
+        if (y < -DIRECTION_DEAD_ZONE) {
+            desired[DirectionalCommandSlot.UP] = selectPayload(
+                absY,
+                model.upCommand,
+                model.upBoostCommand,
+                model.upSuperBoostCommand
+            )
+        } else if (y > DIRECTION_DEAD_ZONE) {
+            desired[DirectionalCommandSlot.DOWN] = selectPayload(
+                absY,
+                model.downCommand,
+                model.downBoostCommand,
+                model.downSuperBoostCommand
+            )
         }
 
-        // Helper function to send a command and update tracking
-        fun sendCommand(command: String, intensity: Float, update: () -> Unit) {
-            command.split(',', ' ')
-                .filter { it.isNotBlank() }
-                .forEach { cmd ->
-                    val trimmedCmd = cmd.trim()
-                    
-                    // Check if this is an analog trigger command that needs intensity
-                    val finalCmd = if (trimmedCmd.matches(Regex("X360[LR]T|PS[LR]2|TRIGGER_.*"))) {
-                        // For analog triggers, append the intensity value
-                        "$trimmedCmd:${"%.2f".format(intensity)}"
-                    } else {
-                        // For regular buttons, send as-is
-                        trimmedCmd
-                    }
-                    
-                    if (useUdp) {
-                        // Try UDP first for lower latency
-                        try {
-                            UdpClient.sendCommand(finalCmd)
-                        } catch (e: Exception) {
-                            // Fall back to TCP if UDP fails
-                            UdpClient.sendCommand(finalCmd)
-                        }
-                    } else {
-                        UdpClient.sendCommand(finalCmd)
-                    }
-                }
-            update()
+        if (x < -DIRECTION_DEAD_ZONE) {
+            desired[DirectionalCommandSlot.LEFT] = selectPayload(
+                absX,
+                model.leftCommand,
+                model.leftBoostCommand,
+                model.leftSuperBoostCommand
+            )
+        } else if (x > DIRECTION_DEAD_ZONE) {
+            desired[DirectionalCommandSlot.RIGHT] = selectPayload(
+                absX,
+                model.rightCommand,
+                model.rightBoostCommand,
+                model.rightSuperBoostCommand
+            )
         }
 
-        // Send commands based on direction and intensity
-        if (y < -0.1f) { // Up direction
-            if (absY > model.superBoostThreshold) {
-                sendCommand(model.upSuperBoostCommand, absY) { sentUp = true }
-            } else if (absY > model.boostThreshold) {
-                sendCommand(model.upBoostCommand, absY) { sentUp = true }
-            } else {
-                sendCommand(model.upCommand, absY) { sentUp = true }
-            }
-        }
+        return desired
+    }
 
-        if (y > 0.1f) { // Down direction
-            if (absY > model.superBoostThreshold) {
-                sendCommand(model.downSuperBoostCommand, absY) { sentDown = true }
-            } else if (absY > model.boostThreshold) {
-                sendCommand(model.downBoostCommand, absY) { sentDown = true }
-            } else {
-                sendCommand(model.downCommand, absY) { sentDown = true }
-            }
-        }
-
-        if (x < -0.1f) { // Left direction
-            if (absX > model.superBoostThreshold) {
-                sendCommand(model.leftSuperBoostCommand, absX) { sentLeft = true }
-            } else if (absX > model.boostThreshold) {
-                sendCommand(model.leftBoostCommand, absX) { sentLeft = true }
-            } else {
-                sendCommand(model.leftCommand, absX) { sentLeft = true }
-            }
-        }
-
-        if (x > 0.1f) { // Right direction
-            if (absX > model.superBoostThreshold) {
-                sendCommand(model.rightSuperBoostCommand, absX) { sentRight = true }
-            } else if (absX > model.boostThreshold) {
-                sendCommand(model.rightBoostCommand, absX) { sentRight = true }
-            } else {
-                sendCommand(model.rightCommand, absX) { sentRight = true }
-            }
-        }
-
-        // Store the directions we sent commands for so we can start continuous sending
-        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-            // On release, start continuous sending for the last direction
-            startDirectionalSending(sentUp, sentDown, sentLeft, sentRight)
-        }
+    private fun selectPayload(
+        intensity: Float,
+        normal: String,
+        boost: String,
+        superBoost: String
+    ): String = when {
+        intensity > model.superBoostThreshold -> superBoost
+        intensity > model.boostThreshold -> boost
+        else -> normal
     }
 
     /**
@@ -429,6 +306,7 @@ class DirectionalStickHandler(
      * Stop any continuous directional commands being sent
      */
     fun stopDirectionalCommands() {
+        commandState.clear()
         continuousDirectional?.let { uiHandler.removeCallbacks(it) }
         continuousDirectional = null
         sendingUp = false
@@ -458,5 +336,9 @@ class DirectionalStickHandler(
      */
     fun setUseUdp(enabled: Boolean) {
         useUdp = enabled
+    }
+
+    private companion object {
+        const val DIRECTION_DEAD_ZONE = 0.1f
     }
 }
