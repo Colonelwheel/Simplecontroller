@@ -248,7 +248,11 @@ class ControlView(
             )
         }
 
-        directionalHandler = DirectionalStickHandler(model, uiHandler)
+        directionalHandler = DirectionalStickHandler(
+            model,
+            uiHandler,
+            uiHelper.createButtonAimPayloadExecutor()
+        )
         continuousSender = ContinuousSender(model, uiHandler)
         touchAimHandler = if (model.type == ControlType.TOUCH_AIM) {
             TouchAimHandler(
