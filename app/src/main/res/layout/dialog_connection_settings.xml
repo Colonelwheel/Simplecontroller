@@ -1,105 +1,92 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:background="@color/dark_surface">
-
-    <TextView
+    android:clipToPadding="false"
+    android:background="@color/ui_surface">
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Server Connection Settings"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:textColor="@color/dark_text_primary"
-        android:layout_marginBottom="16dp"/>
-
-    <Button
-        android:id="@+id/buttonUsbTetherMode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:text="USB Tether Mode"
-        android:textAllCaps="false"
-        android:textColor="@color/dark_text_primary"
-        android:backgroundTint="@color/primary_blue" />
-
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:textColorHint="@color/dark_text_secondary">
-
+        android:orientation="vertical"
+        android:paddingHorizontal="20dp"
+        android:paddingBottom="12dp">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_connection_intro"
+            android:textColor="@color/ui_text_muted"
+            android:layout_marginBottom="16dp" />
+        <Button
+            android:id="@+id/buttonUsbTetherMode"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="20dp"
+            android:text="@string/ui_usb_tether" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_receiver_section"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08" />
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:labelFor="@id/editServerHost"
+            android:text="@string/ui_server_host" />
         <EditText
             android:id="@+id/editServerHost"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Server IP Address"
             android:inputType="text"
-            android:textColor="@color/dark_text_primary"
-            android:backgroundTint="@color/primary_blue"
             android:singleLine="true" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <com.google.android.material.textfield.TextInputLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:textColorHint="@color/dark_text_secondary">
-
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:labelFor="@id/editServerPort"
+            android:text="@string/ui_server_port" />
         <EditText
             android:id="@+id/editServerPort"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Port Number"
             android:inputType="number"
-            android:textColor="@color/dark_text_primary"
-            android:backgroundTint="@color/primary_blue"
-            android:singleLine="true" />
-    </com.google.android.material.textfield.TextInputLayout>
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Player Selection"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:textColor="@color/dark_text_primary"
-        android:layout_marginBottom="8dp"/>
-
-    <RadioGroup
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
-
-        <RadioButton
-            android:id="@+id/radioPlayer1"
-            android:layout_width="wrap_content"
+            android:singleLine="true"
+            android:layout_marginBottom="20dp" />
+        <TextView
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Player 1"
-            android:textColor="@color/dark_text_primary"
-            android:buttonTint="@color/primary_blue"
-            android:checked="true"
-            android:layout_weight="1"/>
-
-        <RadioButton
-            android:id="@+id/radioPlayer2"
-            android:layout_width="wrap_content"
+            android:text="@string/ui_player_section"
+            android:fontFamily="sans-serif-medium"
+            android:letterSpacing="0.08" />
+        <RadioGroup
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Player 2"
-            android:textColor="@color/dark_text_primary"
-            android:buttonTint="@color/primary_blue"
-            android:layout_weight="1"/>
-    </RadioGroup>
-
-    <CheckBox
-        android:id="@+id/checkboxAutoReconnect"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Auto-reconnect when connection lost"
-        android:textColor="@color/dark_text_primary"
-        android:buttonTint="@color/primary_blue"/>
-
-</LinearLayout>
+            android:orientation="horizontal"
+            android:layout_marginBottom="12dp">
+            <RadioButton
+                android:id="@+id/radioPlayer1"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_weight="1"
+                android:text="@string/ui_player_one"
+                android:textColor="@color/ui_text"
+                android:buttonTint="@color/ui_accent"
+                android:checked="true" />
+            <RadioButton
+                android:id="@+id/radioPlayer2"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:minHeight="52dp"
+                android:layout_weight="1"
+                android:text="@string/ui_player_two"
+                android:textColor="@color/ui_text"
+                android:buttonTint="@color/ui_accent" />
+        </RadioGroup>
+        <CheckBox
+            android:id="@+id/checkboxAutoReconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/ui_reconnect" />
+    </LinearLayout>
+</ScrollView>

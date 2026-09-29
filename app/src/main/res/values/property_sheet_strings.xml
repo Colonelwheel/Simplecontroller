@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="property_sheet_title">Control properties</string>
+    <string name="property_sheet_subtitle">Appearance, actions and tuning</string>
+    <string name="property_sheet_appearance">Appearance</string>
+    <string name="property_sheet_label">Label</string>
+    <string name="property_sheet_behavior">Button behavior</string>
+    <string name="property_sheet_actions">Control actions</string>
+    <string name="property_sheet_save">Save</string>
+    <item name="property_sheet_heading" type="id" />
+</resources>

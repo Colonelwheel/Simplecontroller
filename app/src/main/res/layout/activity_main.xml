@@ -12,11 +12,14 @@
         android:layout_gravity="top|center_horizontal"
         android:background="@drawable/connection_status_background"
         android:paddingHorizontal="12dp"
-        android:paddingVertical="6dp"
-        android:layout_margin="8dp"
+        android:paddingVertical="10dp"
+        android:layout_margin="16dp"
+        android:textSize="12sp"
+        android:fontFamily="sans-serif-medium"
+        android:gravity="center"
         android:text="Disconnected"
         android:textColor="#FFFFFF"
-        android:adjustViewBounds="true"/>
+        />
 
     <!-- Connect button (will be added programmatically) -->
 

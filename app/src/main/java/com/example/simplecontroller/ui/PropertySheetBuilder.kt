@@ -1,7 +1,6 @@
 package com.example.simplecontroller.ui
 
 import android.content.Context
-import android.graphics.Typeface
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -56,6 +55,8 @@ class PropertySheetBuilder(
     private val model: Control,
     private val onPropertiesUpdated: () -> Unit
 ) {
+    private val sheetStyle = PropertySheetStyle(context)
+
     // UI components that need to be accessible across methods
     private data class UIComponents(
         val nameField: EditText,
@@ -186,13 +187,15 @@ class PropertySheetBuilder(
         val scrollView = createScrollView()
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(32, 24, 32, 8)
-            setBackgroundColor(ContextCompat.getColor(context, R.color.dark_surface))
+            setPadding(sheetStyle.dp(16), 0, sheetStyle.dp(16), sheetStyle.dp(12))
+            setBackgroundColor(ContextCompat.getColor(context, R.color.ui_surface))
         }
         scrollView.addView(container)
 
         // Build all UI components
         val components = buildUIComponents(container)
+
+        addSectionTitle(container, context.getString(R.string.property_sheet_actions))
 
         // Add a horizontal row of buttons for Delete and Duplicate
         val buttonRow = LinearLayout(context).apply {
@@ -223,20 +226,24 @@ class PropertySheetBuilder(
             }
         }
 
-        buttonRow.addView(btnDuplicate)
-        buttonRow.addView(btnDelete)
+        buttonRow.addView(btnDuplicate, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
+            marginEnd = sheetStyle.dp(8)
+        })
+        buttonRow.addView(btnDelete, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         container.addView(buttonRow)
+        sheetStyle.styleContent(container)
+        sheetStyle.button(btnDelete, destructive = true)
 
         // Create and show the dialog
         val alertDialog = AlertDialog.Builder(context)
-            .setTitle("Properties")
+            .setCustomTitle(sheetStyle.title())
             .setView(scrollView)
-            .setPositiveButton("OK") { _, _ -> saveProperties(components) }
+            .setPositiveButton(R.string.property_sheet_save) { _, _ -> saveProperties(components) }
             .setNegativeButton("Cancel", null)
             .create()
 
-        alertDialog.window?.setBackgroundDrawableResource(R.color.dark_surface)
         alertDialog.show()
+        sheetStyle.dialog(alertDialog)
 
         components.touchAim?.let { fields ->
             fields.calibrateButton.setOnClickListener {
@@ -293,13 +300,6 @@ class PropertySheetBuilder(
             }
         }
 
-        // Style dialog buttons
-        alertDialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
-            ContextCompat.getColor(context, R.color.primary_blue)
-        )
-        alertDialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(
-            ContextCompat.getColor(context, R.color.primary_blue)
-        )
     }
 
     /**
@@ -378,6 +378,8 @@ class PropertySheetBuilder(
      */
     private fun buildUIComponents(container: LinearLayout): UIComponents {
         // Basic properties
+        addSectionTitle(container, context.getString(R.string.property_sheet_appearance))
+        container.addView(TextView(context).apply { setText(R.string.property_sheet_label) })
         val nameField = addTextField(container, model.name, "Label")
         
         // Size controls
@@ -418,6 +420,9 @@ class PropertySheetBuilder(
         } else null
         
         // Button-specific controls
+        if (model.type == ControlType.BUTTON) {
+            addSectionTitle(container, context.getString(R.string.property_sheet_behavior))
+        }
         val holdToggle = addCheckBox(
             container, 
             "Hold toggles", 
@@ -648,7 +653,7 @@ class PropertySheetBuilder(
         val target = Spinner(context).apply {
             adapter = ArrayAdapter(
                 context,
-                android.R.layout.simple_spinner_dropdown_item,
+                R.layout.property_sheet_spinner_item,
                 names
             )
             setSelection(ids.indexOf(model.pageTargetId).takeIf { it >= 0 } ?: 0)
@@ -2059,7 +2064,7 @@ class PropertySheetBuilder(
     ): Spinner {
         container.addView(TextView(context).apply { text = label })
         return Spinner(context).apply {
-            adapter = ArrayAdapter(context, android.R.layout.simple_spinner_dropdown_item, choices)
+            adapter = ArrayAdapter(context, R.layout.property_sheet_spinner_item, choices)
             setSelection(selection.coerceIn(choices.indices))
             container.addView(this)
             container.addView(createGap())
@@ -2206,9 +2211,8 @@ class PropertySheetBuilder(
         textView: TextView? = null
     ): SeekBar {
         // Create label if not provided
-        val label = textView ?: TextView(context).apply {
-            container.addView(this)
-        }
+        val label = textView ?: TextView(context)
+        container.addView(label)
         label.text = initialLabelText
         
         // Create seekbar
@@ -2314,11 +2318,7 @@ class PropertySheetBuilder(
      * Add a section title
      */
     private fun addSectionTitle(container: LinearLayout, title: String) {
-        container.addView(TextView(context).apply {
-            text = title
-            setPadding(0, 16, 0, 8)
-            setTypeface(null, Typeface.BOLD)
-        })
+        sheetStyle.sectionTitle(container, title)
     }
     
     /**
@@ -2379,7 +2379,7 @@ class PropertySheetBuilder(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply {
-                width = 100
+                width = sheetStyle.dp(92)
                 gravity = Gravity.CENTER_VERTICAL
             }
             

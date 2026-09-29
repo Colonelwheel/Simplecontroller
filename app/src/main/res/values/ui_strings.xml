@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ui_add_control">Add control</string>
+    <string name="ui_apply_turbo">Apply turbo interval</string>
+    <string name="ui_turbo_interval">Turbo interval in milliseconds</string>
+    <string name="ui_connection_intro">Choose a receiver and player.</string>
+    <string name="ui_receiver_section">RECEIVER</string>
+    <string name="ui_player_section">PLAYER</string>
+    <string name="ui_server_host">Server IP address</string>
+    <string name="ui_server_port">Port</string>
+    <string name="ui_usb_tether">USB tether mode</string>
+    <string name="ui_player_one">Player 1</string>
+    <string name="ui_player_two">Player 2</string>
+    <string name="ui_reconnect">Reconnect automatically</string>
+</resources>

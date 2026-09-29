@@ -3,9 +3,9 @@
     <!-- Dark theme with black and blue -->
     <style name="Theme.SimpleController" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Primary colors -->
-        <item name="colorPrimary">@color/primary_blue</item>
+        <item name="colorPrimary">@color/ui_accent</item>
         <item name="colorPrimaryVariant">@color/secondary_blue</item>
-        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorOnPrimary">@color/ui_on_accent</item>
 
         <!-- Secondary colors -->
         <item name="colorSecondary">@color/accent_blue</item>
@@ -13,20 +13,20 @@
         <item name="colorOnSecondary">@color/black</item>
 
         <!-- Background and surface colors -->
-        <item name="android:colorBackground">@color/dark_background</item>
-        <item name="colorSurface">@color/dark_surface</item>
-        <item name="colorOnBackground">@color/dark_text_primary</item>
-        <item name="colorOnSurface">@color/dark_text_primary</item>
+        <item name="android:colorBackground">@color/ui_canvas</item>
+        <item name="colorSurface">@color/ui_surface</item>
+        <item name="colorOnBackground">@color/ui_text</item>
+        <item name="colorOnSurface">@color/ui_text</item>
 
         <!-- Status and navigation bar colors -->
         <item name="android:statusBarColor">@color/darker_black</item>
         <item name="android:navigationBarColor">@color/darker_black</item>
 
         <!-- Text colors -->
-        <item name="android:textColorPrimary">@color/dark_text_primary</item>
-        <item name="android:textColorSecondary">@color/dark_text_secondary</item>
+        <item name="android:textColorPrimary">@color/ui_text</item>
+        <item name="android:textColorSecondary">@color/ui_text_muted</item>
 
         <!-- Other theme attributes -->
-        <item name="android:windowBackground">@color/dark_background</item>
+        <item name="android:windowBackground">@color/ui_canvas</item>
     </style>
 </resources>

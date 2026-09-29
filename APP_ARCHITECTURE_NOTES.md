@@ -2,6 +2,20 @@
 
 This note explains how the SimpleController project is currently organized, how input moves through the app, and what each meaningful file does.
 
+## App and property-editor presentation
+
+`AppUiStyle` styles the built-in app buttons; `PropertySheetStyle` styles the existing property
+and connection dialog widgets. Their shared slate/blue palette lives in `ui_colors.xml`, separately
+from controller/profile colors. The property editor keeps its scrollable form and pinned Save/Cancel
+actions, and preserves existing field instances, listeners, values, visibility rules, and save paths.
+The connection form scrolls in short windows while its actions remain reachable.
+
+The compact global switches keep their existing callbacks and the Turbo interval editor remains
+conditional on Turbo. Toolbar spacing and the connection badge width use display density/window
+space. These are presentation changes only: startup still renders the saved profile directly, and
+profile geometry, input handlers, Hold/Swipe/Turbo/aim behavior, networking, and serialization are
+not changed by the styling helpers.
+
 ## 2026-09-21 Retained Button Aim Stick Output
 
 Button Aim Base and Alternate tuning each serialize an independent `autoCenter` setting. Both

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Presentation palette; independent of serialized controller colors. -->
+    <color name="ui_canvas">#0B1018</color>
+    <color name="ui_surface">#141E2B</color>
+    <color name="ui_surface_raised">#1C2939</color>
+    <color name="ui_outline">#33465A</color>
+    <color name="ui_accent">#95CCFF</color>
+    <color name="ui_on_accent">#10253A</color>
+    <color name="ui_text">#EAF2FA</color>
+    <color name="ui_text_muted">#ADBCCD</color>
+    <color name="ui_danger">#FFB4B0</color>
+    <color name="ui_ripple">#3395CCFF</color>
+    <color name="ui_switch_track">#42698C</color>
+</resources>

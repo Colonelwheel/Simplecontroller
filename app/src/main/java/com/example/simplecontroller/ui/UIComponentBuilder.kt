@@ -1,6 +1,7 @@
 package com.example.simplecontroller.ui
 
 import android.content.Context
+import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
@@ -25,11 +26,9 @@ class UIComponentBuilder(
     private val context: Context,
     private val canvas: FrameLayout
 ) {
-    /** Tint the native button without changing its padding, dimensions, or ripple. */
-    fun styleAppButton(button: Button) {
-        button.alpha = 1f
-        button.setTextColor(ContextCompat.getColorStateList(context, R.color.app_control_text))
-        button.backgroundTintList = ContextCompat.getColorStateList(context, R.color.app_button_tint)
+    /** Presentation only: listeners and control state stay with their existing owners. */
+    fun styleAppButton(button: Button, primary: Boolean = false) {
+        AppUiStyle.button(button, primary)
     }
 
     /**
@@ -77,6 +76,15 @@ class UIComponentBuilder(
         onChange: (Boolean) -> Unit
     ): Switch = Switch(context).apply {
         text = label
+        textSize = 12f
+        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+        gravity = Gravity.CENTER_VERTICAL
+        minHeight = AppUiStyle.dp(context, 28)
+        minimumWidth = AppUiStyle.dp(context, 112)
+        setSingleLine(true)
+        switchPadding = AppUiStyle.dp(context, 6)
+        setPadding(AppUiStyle.dp(context, 8), 0, AppUiStyle.dp(context, 8), 0)
+        background = AppUiStyle.ripple(context, R.color.ui_surface, 10)
         setTextColor(ContextCompat.getColorStateList(context, R.color.app_control_text))
         thumbTintList = ContextCompat.getColorStateList(context, R.color.app_switch_thumb_tint)
         trackTintList = ContextCompat.getColorStateList(context, R.color.app_switch_track_tint)
@@ -103,8 +111,11 @@ class UIComponentBuilder(
     ): FloatingActionButton {
         return FloatingActionButton(context).apply {
             setImageResource(iconResource)
-            backgroundTintList = ContextCompat.getColorStateList(context, R.color.app_button_tint)
-            imageTintList = ContextCompat.getColorStateList(context, R.color.app_control_text)
+            contentDescription = context.getString(R.string.ui_add_control)
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.ui_accent)
+            imageTintList = ContextCompat.getColorStateList(context, R.color.ui_on_accent)
+            shapeAppearanceModel = shapeAppearanceModel.toBuilder()
+                .setAllCornerSizes(AppUiStyle.dp(context, 18).toFloat()).build()
             setOnClickListener { 
                 it.performHapticFeedback(
                     android.view.HapticFeedbackConstants.KEYBOARD_TAP,
@@ -152,6 +163,10 @@ class UIComponentBuilder(
     ) {
         switches.forEachIndexed { index, switch ->
             addViewToCanvas(switch, baseGravity, startMarginH, startMarginV + (index * spacing))
+            switch.layoutParams = (switch.layoutParams as FrameLayout.LayoutParams).apply {
+                width = FrameLayout.LayoutParams.WRAP_CONTENT
+                height = FrameLayout.LayoutParams.WRAP_CONTENT
+            }
         }
     }
 
@@ -190,6 +205,7 @@ class UIComponentBuilder(
         // Create container layout
         val container = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
+            this.gravity = Gravity.CENTER_VERTICAL
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -203,24 +219,31 @@ class UIComponentBuilder(
         val editText = EditText(context).apply {
             setText(initialValue)
             this.hint = hint
+            contentDescription = context.getString(R.string.ui_turbo_interval)
+            textSize = 14f
+            this.gravity = Gravity.CENTER
             inputType = InputType.TYPE_CLASS_NUMBER
             layoutParams = LinearLayout.LayoutParams(
-                width,
-                ViewGroup.LayoutParams.WRAP_CONTENT
+                maxOf(width, AppUiStyle.dp(context, 52)),
+                AppUiStyle.dp(context, 48)
             )
-            background = ContextCompat.getDrawable(context, android.R.drawable.edit_text)
-            setPadding(8, 0, 8, 0)
+            background = AppUiStyle.surface(context)
+            setPadding(AppUiStyle.dp(context, 8), 0, AppUiStyle.dp(context, 8), 0)
             // Add theme-specific styling
             setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
             setHintTextColor(ContextCompat.getColor(context, R.color.dark_text_secondary))
-            backgroundTintList = ContextCompat.getColorStateList(context, R.color.dark_surface)
         }
 
         // Create apply button
         val applyButton = ImageButton(context).apply {
             setImageResource(android.R.drawable.ic_menu_save)
-            background = null
-            setPadding(4, 4, 4, 4)
+            contentDescription = context.getString(R.string.ui_apply_turbo)
+            background = AppUiStyle.ripple(context)
+            layoutParams = LinearLayout.LayoutParams(
+                AppUiStyle.dp(context, 48), AppUiStyle.dp(context, 48)
+            ).apply { marginStart = AppUiStyle.dp(context, 4) }
+            setPadding(AppUiStyle.dp(context, 12), AppUiStyle.dp(context, 12),
+                AppUiStyle.dp(context, 12), AppUiStyle.dp(context, 12))
             // Add theme-specific styling
             imageTintList = ContextCompat.getColorStateList(context, R.color.app_control_text)
             setOnClickListener {

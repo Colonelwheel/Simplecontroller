@@ -86,6 +86,7 @@ import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
 import com.example.simplecontroller.ui.ThemeManager
 import com.example.simplecontroller.ui.UIComponentBuilder
+import com.example.simplecontroller.ui.PropertySheetStyle
 import com.example.simplecontroller.ui.ReleaseAllCoordinator
 import com.example.simplecontroller.ui.TouchAimCalibrationWizard
 import com.google.android.material.floatingactionbutton.FloatingActionButton
@@ -210,7 +211,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         activeLayoutOrientation = layoutOrientationFrom(resources.configuration)
 
         // 2. Apply theme colours
-        canvas.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_background))
+        canvas.setBackgroundColor(ContextCompat.getColor(this, R.color.ui_canvas))
         connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
         // 3. Network / player-role state
@@ -395,6 +396,15 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         ) {
             requestEditModeChange(!GlobalSettings.editMode)
         }
+        uiBuilder.styleAppButton(btnEdit, primary = true)
+
+        // Keep the status badge between the two tool columns on narrow windows.
+        canvas.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            val available = canvas.width - canvas.paddingLeft - canvas.paddingRight
+            val leftTools = maxOf(switchSnap.right, switchHold.right, switchTurbo.right, switchSwipe.right)
+            val sideSpace = maxOf(leftTools - canvas.paddingLeft + dp(8), btnEdit.width + dp(24))
+            connectionStatusText.maxWidth = minOf(dp(160), (available - 2 * sideSpace).coerceAtLeast(dp(56)))
+        }
 
         /* --- Connection button ------------------------------------------ */
         btnConnect = uiBuilder.addCornerButton(
@@ -474,7 +484,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         uiBuilder.addVerticalSwitches(
             listOf(switchSnap, switchHold, switchTurbo, switchSwipe),
             Gravity.TOP or Gravity.START,  // TOP instead of CENTER_VERTICAL
-            16, 16, 48
+            dp(8), dp(12), dp(30)
         )
 
         // Add the turbo speed control (initially hidden)
@@ -500,7 +510,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         turboSpeedContainer.visibility = View.GONE
         switchTurbo.doOnNextLayout { turboSwitch ->
             val params = turboSpeedContainer.layoutParams as FrameLayout.LayoutParams
-            params.leftMargin = turboSwitch.right + 8
+            params.leftMargin = turboSwitch.right + dp(6)
             params.topMargin = turboSwitch.top
             turboSpeedContainer.layoutParams = params
         }
@@ -508,7 +518,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         /* --- Save / Load ------------------------------------------------- */
         btnSave = uiBuilder.addCornerButton("Save", Gravity.BOTTOM or Gravity.START) {
             layoutManager.showSaveDialog()
-        }
+        }.also { uiBuilder.styleAppButton(it, primary = true) }
 
         btnLoad = uiBuilder.addCornerButton("Load", Gravity.BOTTOM or Gravity.END) {
             layoutManager.showLoadDialog()
@@ -755,11 +765,13 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         radioPlayer2.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
         // Apply dark theme to dialog background
-        dialogView.setBackgroundColor(ContextCompat.getColor(this, R.color.dark_surface))
+        dialogView.setBackgroundColor(ContextCompat.getColor(this, R.color.ui_surface))
+        val connectionStyle = PropertySheetStyle(this)
+        connectionStyle.styleContent(dialogView)
 
         // Show the dialog with themed appearance
         val dialog = AlertDialog.Builder(this)
-            .setTitle("Server Connection")
+            .setTitle("Connection")
             .setView(dialogView)
             .setPositiveButton("Connect") { _, _ ->
                 // --- Read fields ---
@@ -802,12 +814,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Apply styling to dialog buttons
         dialog.show()
-        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(
-            ContextCompat.getColor(this, R.color.primary_blue)
-        )
-        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(
-            ContextCompat.getColor(this, R.color.primary_blue)
-        )
+        connectionStyle.dialog(dialog)
         buttonUsbTetherMode.setOnClickListener {
             dialog.dismiss()
             openUsbTetherSettings()
@@ -1621,7 +1628,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     .takeIf { it > 0 } ?: dp(410)
             )
             rowParams.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            rowParams.setMargins(dp(8), dp(52), dp(8), dp(8))
+            rowParams.setMargins(dp(8), dp(60), dp(8), dp(8))
             btnEditOrientation.layoutParams = LinearLayout.LayoutParams(
                 0,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
