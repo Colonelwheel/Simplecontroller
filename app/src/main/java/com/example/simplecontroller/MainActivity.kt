@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ActivityInfo
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Bundle
@@ -418,12 +419,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             text = label
             isAllCaps = false
             minHeight = dp(48)
-            alpha = 0.7f
-            setTextColor(ContextCompat.getColor(this@MainActivity, R.color.dark_text_primary))
-            backgroundTintList = ContextCompat.getColorStateList(
-                this@MainActivity,
-                R.color.button_blue
-            )
+            uiBuilder.styleAppButton(this)
             setOnClickListener { view ->
                 view.performHapticFeedback(
                     android.view.HapticFeedbackConstants.KEYBOARD_TAP,
@@ -581,22 +577,22 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val color = when (status) {
             NetworkClient.ConnectionStatus.DISCONNECTED -> ContextCompat.getColor(
                 this,
-                R.color.dark_text_secondary
+                R.color.dark_text_primary
             )
 
             NetworkClient.ConnectionStatus.CONNECTING -> ContextCompat.getColor(
                 this,
-                R.color.primary_blue
+                R.color.app_status_connecting_text
             )
 
             NetworkClient.ConnectionStatus.CONNECTED -> ContextCompat.getColor(
                 this,
-                R.color.button_pressed_blue
+                R.color.app_status_connected_text
             )
 
             NetworkClient.ConnectionStatus.ERROR -> ContextCompat.getColor(
                 this,
-                android.R.color.holo_red_dark
+                R.color.app_status_error_text
             )
         }
 
@@ -843,7 +839,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             NetworkClient.PlayerRole.PLAYER1 -> ContextCompat.getColor(this, R.color.player1_color)
             NetworkClient.PlayerRole.PLAYER2 -> ContextCompat.getColor(this, R.color.player2_color)
         }
-        connectionStatusText.setBackgroundColor(bgColor)
+        connectionStatusText.backgroundTintList = ColorStateList.valueOf(bgColor)
     }
 
     /**

@@ -34,4 +34,16 @@
     <color name="status_connecting">#FFFFEB3B</color>
     <color name="status_disconnected">#FF9E9E9E</color>
     <color name="status_error">#FFF44336</color>
+
+    <!-- App chrome only: keep controller/profile colors above unchanged. -->
+    <color name="app_button_blue">#FF1D5FA7</color>
+    <color name="app_control_disabled_surface">#FF314156</color>
+    <color name="app_control_disabled_text">#FFAEBCCC</color>
+    <color name="app_switch_thumb_on">#FF8BCBFF</color>
+    <color name="app_switch_thumb_off">#FFB0B8C4</color>
+    <color name="app_switch_track_on">#FF285E96</color>
+    <color name="app_switch_track_off">#FF485362</color>
+    <color name="app_status_connecting_text">#FFC8E3FF</color>
+    <color name="app_status_connected_text">#FFCBF2D4</color>
+    <color name="app_status_error_text">#FFFFE1E1</color>
 </resources>

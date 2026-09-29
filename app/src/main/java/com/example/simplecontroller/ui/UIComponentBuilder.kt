@@ -25,6 +25,13 @@ class UIComponentBuilder(
     private val context: Context,
     private val canvas: FrameLayout
 ) {
+    /** Tint the native button without changing its padding, dimensions, or ripple. */
+    fun styleAppButton(button: Button) {
+        button.alpha = 1f
+        button.setTextColor(ContextCompat.getColorStateList(context, R.color.app_control_text))
+        button.backgroundTintList = ContextCompat.getColorStateList(context, R.color.app_button_tint)
+    }
+
     /**
      * Add a button to a corner of the canvas
      *
@@ -44,10 +51,7 @@ class UIComponentBuilder(
     ): Button {
         return Button(context).apply {
             text = label
-            alpha = 0.7f
-            // Add theme-specific styling
-            setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
-            backgroundTintList = ContextCompat.getColorStateList(context, R.color.button_blue)
+            styleAppButton(this)
             setOnClickListener { view ->
                 view.performHapticFeedback(
                     android.view.HapticFeedbackConstants.KEYBOARD_TAP,
@@ -73,11 +77,9 @@ class UIComponentBuilder(
         onChange: (Boolean) -> Unit
     ): Switch = Switch(context).apply {
         text = label
-        alpha = 0.7f
-        // Add theme-specific styling
-        setTextColor(ContextCompat.getColor(context, R.color.dark_text_primary))
-        thumbTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
-        trackTintList = ContextCompat.getColorStateList(context, R.color.secondary_blue)
+        setTextColor(ContextCompat.getColorStateList(context, R.color.app_control_text))
+        thumbTintList = ContextCompat.getColorStateList(context, R.color.app_switch_thumb_tint)
+        trackTintList = ContextCompat.getColorStateList(context, R.color.app_switch_track_tint)
         isChecked = initialState
         setOnCheckedChangeListener { _, isChecked -> onChange(isChecked) }
     }
@@ -101,10 +103,8 @@ class UIComponentBuilder(
     ): FloatingActionButton {
         return FloatingActionButton(context).apply {
             setImageResource(iconResource)
-            alpha = 0.85f
-            // Add theme-specific styling
-            backgroundTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
-            imageTintList = ContextCompat.getColorStateList(context, R.color.dark_text_primary)
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.app_button_tint)
+            imageTintList = ContextCompat.getColorStateList(context, R.color.app_control_text)
             setOnClickListener { 
                 it.performHapticFeedback(
                     android.view.HapticFeedbackConstants.KEYBOARD_TAP,
@@ -220,10 +220,9 @@ class UIComponentBuilder(
         val applyButton = ImageButton(context).apply {
             setImageResource(android.R.drawable.ic_menu_save)
             background = null
-            alpha = 0.8f
             setPadding(4, 4, 4, 4)
             // Add theme-specific styling
-            imageTintList = ContextCompat.getColorStateList(context, R.color.primary_blue)
+            imageTintList = ContextCompat.getColorStateList(context, R.color.app_control_text)
             setOnClickListener {
                 it.performHapticFeedback(
                     android.view.HapticFeedbackConstants.KEYBOARD_TAP,
