@@ -343,6 +343,14 @@ Relevant files:
 
 ### Response Curve Stick
 
+`RADIAL_CURVED_STICK` is a separate opt-in Add-menu control type. It reuses the existing curved
+stick UI, ownership, directional/Stick+, resend, Auto-center, Swipe, and profile paths. Its X/Y
+output uses `StickResponseCurve.applyRadial`, which curves the clamped vector magnitude and scales
+both axes together. Directional and boost thresholds still use physical stick travel. Existing
+`CURVED_STICK` remains per-axis, and `STICK` remains unchanged. Saved controls serialize the new
+enum value; older apps that do not know it reject the new type instead of silently treating it as
+the existing curve.
+
 `Response Curve Stick` is a separate Add-menu control type. Existing controls remain `STICK` and keep the original linear sensitivity behavior; saved layouts are not migrated automatically. The new serialized type is `CURVED_STICK`, uses the same `STICK` payload by default, and reuses normal stick drawing, packet ordering, auto-center, recenter, swipe, Directional mode, and Stick+ infrastructure.
 
 For one axis, the opt-in curve is:

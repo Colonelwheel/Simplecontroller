@@ -108,6 +108,7 @@ class LayoutManager(
             ControlType.BUTTON -> "X360"
             ControlType.STICK -> "STICK"
             ControlType.CURVED_STICK -> "STICK"
+            ControlType.RADIAL_CURVED_STICK -> "STICK"
             ControlType.TOUCHPAD -> "TOUCHPAD"
             ControlType.TOUCH_AIM -> "TOUCH_AIM"
             ControlType.RECENTER -> "RECENTER"

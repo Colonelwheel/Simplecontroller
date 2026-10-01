@@ -129,7 +129,8 @@ class ContinuousSender(
         continuousSender = null
         lastStickX = 0f
         lastStickY = 0f
-        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK) {
             sendCenter()
         }
     }
@@ -149,7 +150,8 @@ class ContinuousSender(
     private fun applyResponseCurve(value: Float): Float {
         // Response Curve Stick values are already shaped in ControlView. Passing them
         // through here avoids applying the curve twice during non-auto-center resends.
-        if (model.type == ControlType.CURVED_STICK) return value
+        if (model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK) return value
 
         // Square response curve with sign preservation
         return value * abs(value)

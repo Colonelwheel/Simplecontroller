@@ -693,7 +693,8 @@ object SwipeManager {
         allViews.forEach { it.recenterButtonAimStick() }
         allViews.forEach { view ->
             if (view.model.type == ControlType.STICK ||
-                view.model.type == ControlType.CURVED_STICK
+                view.model.type == ControlType.CURVED_STICK ||
+                view.model.type == ControlType.RADIAL_CURVED_STICK
             ) {
                 // Stop any continuous sending or directional commands
                 view.stopContinuousSending()

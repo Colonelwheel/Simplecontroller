@@ -150,4 +150,5 @@ fun Control.captureStickDirectionalProfile(
 }
 
 private fun Control.isStickControl(): Boolean =
-    type == ControlType.STICK || type == ControlType.CURVED_STICK
+    type == ControlType.STICK || type == ControlType.CURVED_STICK ||
+        type == ControlType.RADIAL_CURVED_STICK

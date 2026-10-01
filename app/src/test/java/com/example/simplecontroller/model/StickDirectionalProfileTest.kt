@@ -11,6 +11,20 @@ class StickDirectionalProfileTest {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test
+    fun directionalProfile_appliesToRadialStickWithoutChangingItsType() {
+        val profile = requireNotNull(
+            stick().copy(directionalMode = true, upCommand = "X360Y")
+                .captureStickDirectionalProfile(ID, "Directions", 10L)
+        )
+        val target = stick(ControlType.RADIAL_CURVED_STICK).copy(sensitivity = 0.2f)
+
+        assertTrue(profile.applyCommandsTo(target))
+        assertEquals(ControlType.RADIAL_CURVED_STICK, target.type)
+        assertEquals(0.2f, target.sensitivity)
+        assertEquals("X360Y", target.upCommand)
+    }
+
+    @Test
     fun captureRoundTripAndCommandsOnlyApply_preservesTargetStickBehavior() {
         val source = stick().copy(
             directionalMode = false,

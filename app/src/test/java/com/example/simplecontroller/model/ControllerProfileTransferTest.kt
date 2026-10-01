@@ -18,6 +18,31 @@ import org.junit.Test
 
 class ControllerProfileTransferTest {
     @Test
+    fun transferEnvelope_preservesBothCurveStickTypes() {
+        val perAxis = button("per-axis", "STICK_R").copy(
+            type = ControlType.CURVED_STICK,
+            sensitivity = 0.2f
+        )
+        val radial = button("radial", "STICK_R").copy(
+            type = ControlType.RADIAL_CURVED_STICK,
+            sensitivity = 0.2f,
+            autoCenter = false
+        )
+        val page = ControllerPage("base", "Base", listOf(perAxis, radial))
+        val profile = ControllerProfile(homePageId = page.id, pages = listOf(page))
+
+        val imported = decodeControllerProfileTransfer(
+            encodeControllerProfileTransfer("Curves", profile),
+            "fallback"
+        ).result.profile.pages.single().controls
+
+        assertEquals(ControlType.CURVED_STICK, imported[0].type)
+        assertEquals(ControlType.RADIAL_CURVED_STICK, imported[1].type)
+        assertEquals(0.2f, imported[1].sensitivity)
+        assertEquals(false, imported[1].autoCenter)
+    }
+
+    @Test
     fun transferEnvelope_roundTripsCompleteMultipageProfileWithoutChangingIdsOrTargets() {
         val base = ControllerPage(
             id = "base-id",

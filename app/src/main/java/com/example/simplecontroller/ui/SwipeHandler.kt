@@ -94,6 +94,7 @@ class SwipeHandler {
                             // Sticks / Touchpads take over their own sending while we swipe away
                             if (prev.model.type == ControlType.STICK ||
                                 prev.model.type == ControlType.CURVED_STICK ||
+                                prev.model.type == ControlType.RADIAL_CURVED_STICK ||
                                 prev.model.type == ControlType.TOUCHPAD
                             ) {
                                 prev.startContinuousSending()

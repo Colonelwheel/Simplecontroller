@@ -89,7 +89,7 @@ A saved **profile** is the complete controller setup. Older versions called thes
 1. Tap **Edit** in the upper-right corner. It changes to **Done**.
 2. If you want to begin from an empty page, tap **Load**, then **New Layout**.
 3. Tap **+** at the bottom of the screen.
-4. Choose a control: Button, Stick, Response Curve Stick, TouchPad, Touch Aim, Re-center Button, or a preset layout.
+4. Choose a control: Button, Stick, Response Curve Stick, Radial Response Curve Stick, TouchPad, Touch Aim, Re-center Button, or a preset layout.
 5. A new control opens its properties automatically. To edit an existing control, long-press it while Edit mode is active.
 6. Drag a control to move it. Use its width and height settings to resize it.
 7. Set its label, payload, colors, and behavior.
@@ -404,8 +404,8 @@ and whether the profile was created in Directional/WASD or Stick+ mode.
 When loading a profile, choose **Apply commands only** to copy the commands and thresholds while
 keeping the target stick's current mode. Choose **Apply and switch** to copy them and select the
 profile's saved WASD or Stick+ mode. Both choices preserve the target stick's position, size, LS/RS
-payload, sensitivity, auto-center setting, and normal/Response Curve stick type. Profiles work
-between normal Stick and Response Curve Stick controls and can be renamed or deleted.
+payload, sensitivity, auto-center setting, and normal/Response Curve/Radial Response Curve stick type.
+Profiles work between all three stick types and can be renamed or deleted.
 
 ### Response Curve Stick
 
@@ -417,6 +417,16 @@ A Response Curve Stick changes how quickly analog output grows as your finger mo
 - `0`: curve processing disabled.
 
 The full outer travel still reaches 100%. This can make aiming or steering less twitchy without sacrificing full movement.
+
+### Radial Response Curve Stick
+
+Add **Radial Response Curve Stick** to curve the distance from center while keeping the direction
+of diagonal movement. Its **Curve sensitivity** uses the same values as Response Curve Stick:
+`1.0` is linear within the circular stick range, lower values soften movement near center, and
+higher values strengthen it. The existing Response Curve Stick still curves X and Y separately.
+The radial stick caps output to a circle, so diagonal travel can reach full output before a corner
+of the rectangular control. It supports the same left/right stick payload, Auto-center, Swipe,
+Directional mode, Stick+, and stick directional profiles as the existing stick types.
 
 ### Fixed-direction Stick macros on Buttons
 

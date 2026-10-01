@@ -397,23 +397,27 @@ class PropertySheetBuilder(
         val sensitivitySeek = if (
             model.type == ControlType.STICK ||
             model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK ||
             model.type == ControlType.TOUCHPAD ||
             model.type == ControlType.TOUCH_AIM
         ) {
             addSeekBarWithLabel(
                 container, 
-                if (model.type == ControlType.CURVED_STICK) {
-                    "Curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
-                } else {
-                    "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                when (model.type) {
+                    ControlType.CURVED_STICK ->
+                        "Curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                    ControlType.RADIAL_CURVED_STICK ->
+                        "Radial curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                    else -> "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
                 },
                 500,
                 (model.sensitivity * 100).roundToInt(),
                 {
-                    if (model.type == ControlType.CURVED_STICK) {
-                        "Curve sensitivity: ${it / 100f}"
-                    } else {
-                        "Sensitivity: ${it / 100f}"
+                    when (model.type) {
+                        ControlType.CURVED_STICK -> "Curve sensitivity: ${it / 100f}"
+                        ControlType.RADIAL_CURVED_STICK ->
+                            "Radial curve sensitivity: ${it / 100f}"
+                        else -> "Sensitivity: ${it / 100f}"
                     }
                 }
             )
@@ -520,6 +524,7 @@ class PropertySheetBuilder(
             model.autoCenter,
             model.type == ControlType.STICK ||
                 model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.RADIAL_CURVED_STICK ||
                 model.type == ControlType.TOUCHPAD
         )
         
@@ -561,7 +566,9 @@ class PropertySheetBuilder(
         }
         
         // Directional mode (for sticks)
-        val isStick = model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK
+        val isStick = model.type == ControlType.STICK ||
+            model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK
         val stickProfileComponents = if (isStick) {
             addStickDirectionalProfileUI(container)
         } else null
@@ -2569,7 +2576,8 @@ class PropertySheetBuilder(
         }
         
         // Stick-specific directional mode properties
-        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK) {
             model.directionalMode = components.directionalMode.isChecked
             model.stickPlusMode = components.stickPlusMode.isChecked
             

@@ -408,7 +408,7 @@ class ControlView(
                     c.drawCircle(width / 2f, height / 2f, radius, paint)
                 }
             }
-            ControlType.STICK, ControlType.CURVED_STICK -> {
+            ControlType.STICK, ControlType.CURVED_STICK, ControlType.RADIAL_CURVED_STICK -> {
                 // Background of the stick area with theme colors
                 paint.style = Style.FILL
                 paint.color = ContextCompat.getColor(context, R.color.touchpad_blue)
@@ -696,7 +696,7 @@ class ControlView(
             }
 
             /* ----- STICK ----- */
-            ControlType.STICK, ControlType.CURVED_STICK -> {
+            ControlType.STICK, ControlType.CURVED_STICK, ControlType.RADIAL_CURVED_STICK -> {
                 // Stop continuous sending when touching the stick again
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                     stopContinuousSending()
@@ -975,18 +975,17 @@ class ControlView(
         val cy = height/2f
         val rawX = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f)
         val rawY = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f)
-        val nx = if (model.type == ControlType.CURVED_STICK) {
-            StickResponseCurve.apply(rawX, model.sensitivity)
-        } else {
-            rawX * model.sensitivity
-        }
-        val ny = if (model.type == ControlType.CURVED_STICK) {
-            StickResponseCurve.apply(rawY, model.sensitivity)
-        } else {
-            rawY * model.sensitivity
+        val (nx, ny) = when (model.type) {
+            ControlType.CURVED_STICK ->
+                StickResponseCurve.apply(rawX, model.sensitivity) to
+                    StickResponseCurve.apply(rawY, model.sensitivity)
+            ControlType.RADIAL_CURVED_STICK ->
+                StickResponseCurve.applyRadial(rawX, rawY, model.sensitivity)
+            else -> rawX * model.sensitivity to rawY * model.sensitivity
         }
         val isStickControl =
-            model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK
+            model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.RADIAL_CURVED_STICK
 
         // Only snap if snapEnabled is true AND the control's autoCenter is true AND it's an UP/CANCEL event
         val isLift = e.actionMasked == MotionEvent.ACTION_UP ||
@@ -997,8 +996,10 @@ class ControlView(
         val (sx, sy) = if (shouldSnap) 0f to 0f else nx to ny
         // Boost/super-boost thresholds on the curved type follow physical travel,
         // independent of curve sensitivity. Existing Stick threshold behavior is untouched.
-        val directionalX = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawX else sx
-        val directionalY = if (model.type == ControlType.CURVED_STICK && !shouldSnap) rawY else sy
+        val curvedStick = model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK
+        val directionalX = if (curvedStick && !shouldSnap) rawX else sx
+        val directionalY = if (curvedStick && !shouldSnap) rawY else sy
 
         val canSendAnalog = ownsManualStick &&
             ManualStickArbiter.owns(model.payload, manualStickOwnerToken)
@@ -1084,7 +1085,8 @@ class ControlView(
     }
 
     fun stopContinuousSendingForStick(stickName: String) {
-        if ((model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) &&
+        if ((model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.RADIAL_CURVED_STICK) &&
             ManualStickArbiter.canonicalStickName(model.payload) ==
             ManualStickArbiter.canonicalStickName(stickName) &&
             continuousSender.isActive()

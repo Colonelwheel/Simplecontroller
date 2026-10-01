@@ -3,7 +3,7 @@ package com.example.simplecontroller.model
 import kotlinx.serialization.Serializable
 
 @Serializable
-enum class ControlType { BUTTON, STICK, CURVED_STICK, TOUCHPAD, TOUCH_AIM, RECENTER }
+enum class ControlType { BUTTON, STICK, CURVED_STICK, RADIAL_CURVED_STICK, TOUCHPAD, TOUCH_AIM, RECENTER }
 
 @Serializable
 enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
@@ -242,6 +242,7 @@ fun ControlType.defaultPayload(): String = when (this) {
     ControlType.BUTTON   -> "BUTTON_PRESSED"
     ControlType.STICK    -> "STICK"
     ControlType.CURVED_STICK -> "STICK"
+    ControlType.RADIAL_CURVED_STICK -> "STICK"
     ControlType.TOUCHPAD -> "TOUCHPAD"
     ControlType.TOUCH_AIM -> "TOUCH_AIM"
     ControlType.RECENTER -> "RECENTER"

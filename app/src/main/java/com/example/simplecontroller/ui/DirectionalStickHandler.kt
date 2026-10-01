@@ -85,7 +85,8 @@ class DirectionalStickHandler(
         // This helps with smoother transitions between directional zones
         if (action == MotionEvent.ACTION_MOVE && (abs(x) > 0.05f || abs(y) > 0.05f)) {
             // Only send this for actual STICK type controls, not buttons
-            if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+            if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.RADIAL_CURVED_STICK) {
                 UdpClient.sendStickPosition(model.payload, analogX, analogY)
             }
         }
@@ -323,7 +324,8 @@ class DirectionalStickHandler(
         sendingRightSuperBoost = false
 
         // Only send stop command for actual stick controls
-        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK) {
+        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK) {
             // Also send a final zero position via UDP to ensure server knows we've stopped
             UdpClient.sendStickPosition(model.id, 0f, 0f)
         }
