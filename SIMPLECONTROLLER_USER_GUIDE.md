@@ -473,12 +473,20 @@ Button Aim lets the same finger both touch a Button and move outside it to aim o
 2. Enable **Aim while pressed**.
 3. Choose Mouse, right stick, left stick, or D-pad output.
 4. Choose **Immediate** to activate the Button payload as soon as the touch starts, or **Send on release** to decide based on the completed gesture.
-5. Adjust sensitivity, dead zone, response curve, and optional send-on-release delay.
+5. Adjust sensitivity, dead zone, stick movement profile, and optional send-on-release delay.
 6. For right-stick or left-stick output, leave **Auto-center stick on release** on for the existing behavior, or turn it off to retain the final aimed direction.
 
 Once the gesture begins, you can slide beyond the Button's visible edge without losing it. Button Aim suppresses Swipe behavior so that a moving aim finger does not accidentally activate neighboring controls.
 
 Button Aim is mutually exclusive with Hold Toggle and Toggle Auto-Tap.
+
+For left- or right-stick output, **Stick movement profile** offers Linear, the existing
+**Response Curve** (which shapes horizontal and vertical input separately), and **Radial Response
+Curve** (which shapes distance from center while preserving the swipe direction). Each mode keeps
+the same Aim sensitivity field. Base and One-Shot Alternate can choose their profiles independently.
+Older layouts and saved Button Aim profiles retain their existing profile selection. Radial mode
+limits the output to a circular stick range, so diagonal positions near a button corner can reach
+full output before the finger reaches the corner.
 
 ### Retaining a left-stick or right-stick position
 
@@ -519,7 +527,7 @@ all one-shot Alternate payload/timing settings. It does not store the button's n
 or swipe setting.
 
 When loading a profile, choose **Apply aiming feel only** to reuse the output, sensitivity,
-Linear/Response Curve choice, displacement, deadzone, touch-position origin, Auto-center, inversion, and haptics
+Linear/Response Curve/Radial Response Curve choice, displacement, deadzone, touch-position origin, Auto-center, inversion, and haptics
 without changing the target button's actions. This is useful for giving Fire and ADS islands the
 same feel. Choose **Apply complete profile** to restore the saved payloads and action behavior too.
 Either choice enables Button Aim and turns off conflicting Auto-Tap. A size warning appears when

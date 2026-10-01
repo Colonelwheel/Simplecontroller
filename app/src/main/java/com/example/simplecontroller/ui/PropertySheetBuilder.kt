@@ -754,9 +754,16 @@ class PropertySheetBuilder(
         val stickProfile = addChoice(
             stickOptions,
             "Stick movement profile",
-            listOf("Linear", "Response Curve"),
-            if (model.buttonAimStickProfile == ButtonAimStickProfile.LINEAR) 0 else 1
+            listOf("Linear", "Response Curve", "Radial Response Curve"),
+            when (model.buttonAimStickProfile) {
+                ButtonAimStickProfile.LINEAR -> 0
+                ButtonAimStickProfile.RESPONSE_CURVE -> 1
+                ButtonAimStickProfile.RADIAL_RESPONSE_CURVE -> 2
+            }
         )
+        stickOptions.addView(TextView(context).apply {
+            text = "Response Curve shapes X and Y separately. Radial Response Curve shapes overall distance while preserving swipe direction."
+        })
         val stickFullDisplacement = addDecimalField(
             stickOptions,
             "Full stick displacement (px)",
@@ -931,9 +938,16 @@ class PropertySheetBuilder(
         val alternateStickProfile = addChoice(
             alternateStickOptions,
             "Alternate stick movement profile",
-            listOf("Linear", "Response Curve"),
-            if (model.buttonAimAlternateStickProfile == ButtonAimStickProfile.LINEAR) 0 else 1
+            listOf("Linear", "Response Curve", "Radial Response Curve"),
+            when (model.buttonAimAlternateStickProfile) {
+                ButtonAimStickProfile.LINEAR -> 0
+                ButtonAimStickProfile.RESPONSE_CURVE -> 1
+                ButtonAimStickProfile.RADIAL_RESPONSE_CURVE -> 2
+            }
         )
+        alternateStickOptions.addView(TextView(context).apply {
+            text = "Response Curve shapes X and Y separately. Radial Response Curve shapes overall distance while preserving swipe direction."
+        })
         val alternateStickFullDisplacement = addDecimalField(
             alternateStickOptions,
             "Alternate full stick displacement (px)",
@@ -2723,10 +2737,10 @@ class PropertySheetBuilder(
         model.buttonAimSensitivity = fields.sensitivity.floatValue(model.buttonAimSensitivity)
             .coerceAtLeast(0f)
         model.buttonAimInvertY = fields.invertY.isChecked
-        model.buttonAimStickProfile = if (fields.stickProfile.selectedItemPosition == 0) {
-            ButtonAimStickProfile.LINEAR
-        } else {
-            ButtonAimStickProfile.RESPONSE_CURVE
+        model.buttonAimStickProfile = when (fields.stickProfile.selectedItemPosition) {
+            1 -> ButtonAimStickProfile.RESPONSE_CURVE
+            2 -> ButtonAimStickProfile.RADIAL_RESPONSE_CURVE
+            else -> ButtonAimStickProfile.LINEAR
         }
         model.buttonAimMouseProfile = if (fields.mouseProfile.selectedItemPosition == 0) {
             ButtonAimMouseProfile.LINEAR_RELATIVE
@@ -2796,12 +2810,11 @@ class PropertySheetBuilder(
             .floatValue(model.buttonAimAlternateSensitivity)
             .coerceAtLeast(0f)
         model.buttonAimAlternateInvertY = fields.alternateInvertY.isChecked
-        model.buttonAimAlternateStickProfile =
-            if (fields.alternateStickProfile.selectedItemPosition == 0) {
-                ButtonAimStickProfile.LINEAR
-            } else {
-                ButtonAimStickProfile.RESPONSE_CURVE
-            }
+        model.buttonAimAlternateStickProfile = when (fields.alternateStickProfile.selectedItemPosition) {
+            1 -> ButtonAimStickProfile.RESPONSE_CURVE
+            2 -> ButtonAimStickProfile.RADIAL_RESPONSE_CURVE
+            else -> ButtonAimStickProfile.LINEAR
+        }
         model.buttonAimAlternateMouseProfile =
             if (fields.alternateMouseProfile.selectedItemPosition == 0) {
                 ButtonAimMouseProfile.LINEAR_RELATIVE

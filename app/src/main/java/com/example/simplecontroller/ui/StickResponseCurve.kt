@@ -1,9 +1,10 @@
 package com.example.simplecontroller.ui
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.pow
 
-/** Response mapping used only by the opt-in Response Curve Stick control. */
+/** Shared curve math for Response Curve Stick, Button Aim, and TouchAim. */
 internal object StickResponseCurve {
     fun apply(value: Float, sensitivity: Float): Float {
         val input = value.coerceIn(-1f, 1f)
@@ -14,5 +15,14 @@ internal object StickResponseCurve {
         val exponent = 1.0 / sensitivity.coerceAtMost(5f).toDouble()
         val magnitude = abs(input).toDouble().pow(exponent).toFloat()
         return if (input < 0f) -magnitude else magnitude
+    }
+
+    /** Curve distance from center while retaining the input direction. */
+    fun applyRadial(x: Float, y: Float, sensitivity: Float): Pair<Float, Float> {
+        val magnitude = hypot(x, y)
+        if (magnitude == 0f || sensitivity <= 0f) return 0f to 0f
+        val curvedMagnitude = apply(magnitude.coerceAtMost(1f), sensitivity)
+        val scale = curvedMagnitude / magnitude
+        return x * scale to y * scale
     }
 }

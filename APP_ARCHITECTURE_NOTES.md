@@ -18,6 +18,13 @@ not changed by the styling helpers.
 
 ## 2026-09-21 Retained Button Aim Stick Output
 
+Button Aim now offers an opt-in `RADIAL_RESPONSE_CURVE` stick movement profile in Base and
+Alternate. Existing `RESPONSE_CURVE` values still apply the curve to X and Y independently;
+`RADIAL_RESPONSE_CURVE` applies the same sensitivity exponent to the clamped vector magnitude
+and rescales X/Y together. This preserves swipe angle, caps diagonal output at a circular full
+tilt, and leaves Linear, Mouse, D-pad, and TouchAim mapping unchanged. The enum is serialized
+with each control and each Button Aim profile tuning, so old saved values retain their meaning.
+
 Button Aim Base and Alternate tuning each serialize an independent `autoCenter` setting. Both
 `Control` defaults and the schema-3 `ButtonAimTuning` default are `true`, so layouts and profiles
 from schemas 1 and 2 preserve their previous centering behavior. The property sheet exposes the

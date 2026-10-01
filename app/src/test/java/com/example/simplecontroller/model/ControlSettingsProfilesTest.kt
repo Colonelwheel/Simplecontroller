@@ -36,6 +36,24 @@ class ControlSettingsProfilesTest {
     }
 
     @Test
+    fun radialButtonAimProfile_roundTripsBothPhases() {
+        val source = button().copy(
+            buttonAimOutput = ButtonAimOutput.RIGHT_STICK,
+            buttonAimStickProfile = ButtonAimStickProfile.RADIAL_RESPONSE_CURVE,
+            buttonAimAlternateOutput = ButtonAimOutput.RIGHT_STICK,
+            buttonAimAlternateStickProfile = ButtonAimStickProfile.RADIAL_RESPONSE_CURVE
+        )
+        val captured = requireNotNull(source.captureButtonAimProfile("radial", "Radial", 1L))
+        val restored = json.decodeFromString<ButtonAimProfile>(
+            json.encodeToString(ButtonAimProfile.serializer(), captured)
+        )
+        val target = button()
+        assertTrue(restored.applyAimTuningTo(target))
+        assertEquals(ButtonAimStickProfile.RADIAL_RESPONSE_CURVE, target.buttonAimStickProfile)
+        assertEquals(ButtonAimStickProfile.RADIAL_RESPONSE_CURVE, target.buttonAimAlternateStickProfile)
+    }
+
+    @Test
     fun manualThreeStage_captureRoundTripApply_copiesManualSnapshotOnly() {
         val source = touchAim().copy(
             touchAimMode = TouchAimMode.MANUAL_THREE_STAGE,

@@ -391,8 +391,15 @@ class AimOutputSession(
             AimOriginMode.INITIAL_TOUCH -> radialDisplacement(activeConfig, x - originX, y - originY)
         }
 
-        val mappedX = mapStickAxis(activeConfig, rawX)
-        val mappedY = mapStickAxis(activeConfig, rawY)
+        val sensitivity = activeConfig.sensitivity.coerceAtLeast(0f)
+        val (mappedX, mappedY) = when (activeConfig.stickProfile) {
+            ButtonAimStickProfile.LINEAR -> rawX * sensitivity to rawY * sensitivity
+            ButtonAimStickProfile.RESPONSE_CURVE ->
+                StickResponseCurve.apply(rawX, sensitivity) to
+                    StickResponseCurve.apply(rawY, sensitivity)
+            ButtonAimStickProfile.RADIAL_RESPONSE_CURVE ->
+                StickResponseCurve.applyRadial(rawX, rawY, sensitivity)
+        }
         lastStickX = mappedX.coerceIn(-1f, 1f)
         lastStickY = (if (activeConfig.invertY) -mappedY else mappedY).coerceIn(-1f, 1f)
         ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY)
@@ -407,13 +414,6 @@ class AimOutputSession(
         val normalizedMagnitude = ((magnitude - deadzone) / (full - deadzone)).coerceIn(0f, 1f)
         return (dx / magnitude) * normalizedMagnitude to (dy / magnitude) * normalizedMagnitude
     }
-
-    private fun mapStickAxis(config: AimOutputConfig, value: Float): Float =
-        when (config.stickProfile) {
-            ButtonAimStickProfile.LINEAR -> value * config.sensitivity.coerceAtLeast(0f)
-            ButtonAimStickProfile.RESPONSE_CURVE ->
-                StickResponseCurve.apply(value, config.sensitivity.coerceAtLeast(0f))
-        }
 
     private fun sendMouse(activeConfig: AimOutputConfig) {
         if (pendingDx == 0f && pendingDy == 0f) return

@@ -40,6 +40,8 @@ class ControlOneShotSerializationTest {
         assertTrue(control.buttonAimAlternateAutoCenter)
         assertFalse(control.buttonAimStickUsesTouchPosition)
         assertFalse(control.buttonAimAlternateStickUsesTouchPosition)
+        assertEquals(ButtonAimStickProfile.LINEAR, control.buttonAimStickProfile)
+        assertEquals(ButtonAimStickProfile.LINEAR, control.buttonAimAlternateStickProfile)
         assertEquals(ButtonAimDpadMode.EIGHT_WAY, control.buttonAimDpadMode)
         assertEquals(ButtonAimDpadOrigin.CONTROL_CENTER, control.buttonAimDpadOrigin)
         assertEquals(8f, control.buttonAimDpadActivationDistancePx)
@@ -58,6 +60,7 @@ class ControlOneShotSerializationTest {
             autoTapEnabled = true,
             autoTapIntervalMs = 175L,
             buttonAimEnabled = true,
+            buttonAimStickProfile = ButtonAimStickProfile.RADIAL_RESPONSE_CURVE,
             buttonAimAutoCenter = false,
             buttonAimStickUsesTouchPosition = true,
             buttonAimOneShotAlternateEnabled = true,
@@ -87,6 +90,7 @@ class ControlOneShotSerializationTest {
 
         val restored = json.decodeFromString<Control>(json.encodeToString(source))
         assertEquals(source, restored)
+        assertEquals(ButtonAimStickProfile.RADIAL_RESPONSE_CURVE, restored.buttonAimStickProfile)
         assertFalse(restored.buttonAimAutoCenter)
         assertTrue(restored.buttonAimAlternateAutoCenter)
     }

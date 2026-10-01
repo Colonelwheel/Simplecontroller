@@ -34,7 +34,7 @@ enum class TouchStageAction { PRESS, HOLD }
 enum class ButtonAimPayloadTiming { IMMEDIATE, SEND_ON_RELEASE }
 
 @Serializable
-enum class ButtonAimStickProfile { LINEAR, RESPONSE_CURVE }
+enum class ButtonAimStickProfile { LINEAR, RESPONSE_CURVE, RADIAL_RESPONSE_CURVE }
 
 @Serializable
 enum class ButtonAimMouseProfile { LINEAR_RELATIVE, SMOOTHED_NONLINEAR }
