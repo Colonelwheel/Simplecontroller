@@ -287,6 +287,7 @@ class ButtonAimHandler(
                 legacyTurboActive = true
                 legacyPayloadHeld = true
             } else if (usesPayloadExecutor()) {
+                if (model.buttonDirectional.enabled && model.payload.isBlank()) return
                 if (isGlobalHold() && !model.holdToggle) setLatched(true)
                 val pulseMode = if (isLatched()) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE
                 when (val result = payloadExecutor.activate(
@@ -442,7 +443,7 @@ class ButtonAimHandler(
         finishOrdinaryAimOutput()
         usingDpadOutput = false
         resetGestureOnly()
-        armAlternateAfterSuccessfulBase()
+        if (model.payload.isNotBlank()) armAlternateAfterSuccessfulBase()
     }
 
     private fun completeDelayedBase() {
@@ -474,6 +475,7 @@ class ButtonAimHandler(
     }
 
     private fun fireDelayedBase(latchOnFire: Boolean) {
+        if (model.buttonDirectional.enabled && model.payload.isBlank()) return
         if (latchOnFire) setLatched(true)
         if (usesPayloadExecutor()) {
             val pulseMode = if (latchOnFire) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE

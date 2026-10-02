@@ -7,6 +7,44 @@ import org.junit.Test
 
 class ButtonAimPayloadExecutorTest {
     @Test
+    fun repeatedDirectionalXboxPayload_createsAnEdgeAtEachStageAndKeepsBaseHeld() {
+        val fixture = Fixture()
+        val base = fixture.activate(ButtonAimPayloadOwner.DIRECTION_BASE, "X360Y").lease
+        val first = fixture.activate(ButtonAimPayloadOwner.DIRECTION_ADDITION, "X360Y").lease
+        val second = fixture.activate(ButtonAimPayloadOwner.DIRECTION_ADDITION, "X360Y").lease
+
+        assertEquals(listOf("CMD:X360Y_HOLD", "CMD:X360Y_RELEASE"), fixture.transport.events)
+        fixture.scheduler.runNext()
+        fixture.scheduler.runNext()
+        fixture.scheduler.runNext()
+        assertEquals(
+            listOf(
+                "CMD:X360Y_HOLD", "CMD:X360Y_RELEASE", "CMD:X360Y_HOLD",
+                "CMD:X360Y_RELEASE", "CMD:X360Y_HOLD"
+            ),
+            fixture.transport.events
+        )
+
+        fixture.executor.release(second)
+        fixture.executor.release(first)
+        assertEquals(5, fixture.transport.events.size)
+        fixture.executor.release(base)
+        assertEquals("CMD:X360Y_RELEASE", fixture.transport.events.last())
+    }
+
+    @Test
+    fun releasingDuringDirectionalReplay_cancelsPendingRepress() {
+        val fixture = Fixture()
+        val base = fixture.activate(ButtonAimPayloadOwner.DIRECTION_BASE, "X360Y").lease
+        val addition = fixture.activate(ButtonAimPayloadOwner.DIRECTION_ADDITION, "X360Y").lease
+
+        fixture.executor.releaseTogether(addition, base)
+        fixture.scheduler.runAllIncludingCanceled()
+
+        assertEquals(listOf("CMD:X360Y_HOLD", "CMD:X360Y_RELEASE"), fixture.transport.events)
+    }
+
+    @Test
     fun directionalAddition_releaseKeepsSharedBaseAndRestoresTrigger() {
         val fixture = Fixture()
         val base = fixture.activate(ButtonAimPayloadOwner.BASE, "X360A,LT:0.4").lease
@@ -15,12 +53,16 @@ class ButtonAimPayloadExecutorTest {
         ).lease
 
         fixture.executor.release(addition)
+        fixture.scheduler.runNext()
         assertEquals(
-            listOf("CMD:X360A_HOLD", "CMD:LT:0.4", "CMD:LT:1.0", "CMD:LT:0.4"),
+            listOf(
+                "CMD:X360A_HOLD", "CMD:LT:0.4", "CMD:X360A_RELEASE",
+                "CMD:LT:1.0", "CMD:LT:0.4", "CMD:X360A_HOLD"
+            ),
             fixture.transport.events
         )
         fixture.executor.release(base)
-        assertEquals("CMD:X360A_RELEASE", fixture.transport.events[4])
+        assertEquals("CMD:X360A_RELEASE", fixture.transport.events[6])
     }
 
     @Test
@@ -264,6 +306,16 @@ class ButtonAimPayloadExecutorTest {
             val entry = Entry(task)
             entries += entry
             return ButtonAimScheduledTask { entry.canceled = true }
+        }
+
+        fun runNext() {
+            while (entries.isNotEmpty()) {
+                val entry = entries.removeAt(0)
+                if (!entry.canceled) {
+                    entry.action()
+                    return
+                }
+            }
         }
 
         fun runAllIncludingCanceled() {

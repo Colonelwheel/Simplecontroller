@@ -566,7 +566,6 @@ private fun buttonDirectionalError(control: Control): String? {
     if (control.type != ControlType.BUTTON) return "only buttons can use directional inputs"
     if (control.autoTapEnabled) return "toggle auto-tap is enabled"
     if (control.holdToggle && !control.buttonAimEnabled) return "Hold Toggle requires Button Aim"
-    if (control.payload.isBlank()) return "base payload is blank"
     ButtonAimPayloadPolicy.stateValidationError(control.payload)?.let { return it }
     val settings: ButtonDirectionalSettings = control.buttonDirectional
     val directions = listOf(settings.up, settings.left, settings.right, settings.down)

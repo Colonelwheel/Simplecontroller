@@ -12,6 +12,24 @@ import org.junit.Test
 
 class ControllerProfileTest {
     @Test
+    fun directionalButton_allowsBlankBaseAndRepeatedStagePayloadsInSavedProfile() {
+        val control = button("directional", "").copy(
+            buttonDirectional = ButtonDirectionalSettings(
+                enabled = true,
+                up = ButtonDirectionStages(40f, "X360Y", 80f, "X360Y"),
+                right = ButtonDirectionStages(40f, "X360Y", 80f, "X360Y")
+            )
+        )
+        val page = ControllerPage("base", "Base", listOf(control))
+        val profile = ControllerProfile(homePageId = page.id, pages = listOf(page))
+
+        assertEquals(null, validateControllerProfileForSave(profile))
+        val decoded = decodeControllerProfile(encodeControllerProfile(profile), "directional").profile
+        assertEquals("", decoded.pages.single().controls.single().payload)
+        assertEquals(control.buttonDirectional, decoded.pages.single().controls.single().buttonDirectional)
+    }
+
+    @Test
     fun formatFourButton_defaultsDirectionalOffAndCurrentRoundTripRetainsStages() {
         val old = """{"formatVersion":4,"homePageId":"base","pages":[{"id":"base","name":"Base","controls":[{"id":"a","type":"BUTTON","x":0.0,"y":0.0,"w":100.0,"h":100.0,"payload":"X360A"}]}]}"""
         val loaded = decodeControllerProfile(old, "old button").profile

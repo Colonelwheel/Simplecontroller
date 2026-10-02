@@ -486,8 +486,9 @@ Tap it once to make all Touchpads scroll vertically. Tap it again to return to p
 
 ## Directional button inputs
 
-Edit a Button and check **Add inputs as finger moves**. The ordinary **Payload** is the base input.
-Touching the Button activates it immediately. Set separate Stage 1 and Stage 2 distances and
+Edit a Button and check **Add inputs as finger moves**. The ordinary **Payload** is the optional
+base input; leave it blank if touching should only start the directional gesture. Set separate
+Stage 1 and Stage 2 distances and
 added payloads for Up, Left, Right, and Down. The distances are screen pixels from the first
 finger contact, so they can extend beyond the Button. A blank added payload makes that stage
 do nothing.
@@ -498,6 +499,11 @@ direction's stages. Only the strongest direction is selected, so a diagonal move
 activate two directions. Lifting or canceling releases all directional additions and the
 standalone base payload. The Button retains the same finger outside its visible bounds; global
 Swipe cannot transfer this gesture to another control.
+
+The same payload can be assigned to the base and any number of directional stages. Crossing a
+stage with an output that is already held briefly releases and presses it again, so repeated
+`X360Y` assignments produce new button presses. The output stays held by whichever stages remain
+active and releases when its final owner ends. Each repeated press has a short 35 ms release gap.
 
 This option can run with Button Aim. In that combination, Button Aim keeps its configured
 immediate/delayed, latch, and retained-stick behavior for the base payload and aim output;

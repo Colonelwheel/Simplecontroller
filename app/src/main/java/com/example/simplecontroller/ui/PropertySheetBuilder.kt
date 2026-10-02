@@ -2883,14 +2883,13 @@ class PropertySheetBuilder(
             down = read(ButtonDirection.DOWN)
         )
         if (settings.enabled) {
-            val error = if (model.payload.isBlank()) "Base payload is blank" else
-                ButtonAimPayloadPolicy.stateValidationError(model.payload)
-                    ?: ButtonDirection.entries.firstNotNullOfOrNull { direction ->
-                        val stages = settings.stages(direction)
-                        listOf(stages.firstPayload, stages.secondPayload)
-                            .firstNotNullOfOrNull(ButtonAimPayloadPolicy::stateValidationError)
-                            ?.let { "${direction.name.lowercase()} addition: $it" }
-                    }
+            val error = ButtonAimPayloadPolicy.stateValidationError(model.payload)
+                ?: ButtonDirection.entries.firstNotNullOfOrNull { direction ->
+                    val stages = settings.stages(direction)
+                    listOf(stages.firstPayload, stages.secondPayload)
+                        .firstNotNullOfOrNull(ButtonAimPayloadPolicy::stateValidationError)
+                        ?.let { "${direction.name.lowercase()} addition: $it" }
+                }
             if (error != null) {
                 settings.enabled = false
                 Toast.makeText(context, "Directional inputs disabled: $error", Toast.LENGTH_LONG).show()

@@ -120,9 +120,16 @@ class ButtonAimPayloadExecutor(
         val pulses: MutableMap<LogicalKey, PulseRuntime> = mutableMapOf()
     )
 
+    private data class ReplayState(
+        var queued: Int = 0,
+        var outputIsReleased: Boolean = false,
+        var task: ButtonAimScheduledTask? = null
+    )
+
     private var nextLeaseId = 1L
     private val leases = linkedMapOf<Long, LeaseState>()
     private val effectiveOutputs = linkedMapOf<LogicalKey, DesiredOutput>()
+    private val replays = mutableMapOf<LogicalKey, ReplayState>()
 
     /** Returns null when activation is safe, otherwise a user-facing validation reason. */
     fun validationError(payload: String): String? = ButtonAimPayloadPolicy.validationError(payload)
@@ -235,9 +242,13 @@ class ButtonAimPayloadExecutor(
         desired: DesiredOutput,
         pulseMode: ButtonAimPulseMode
     ) {
+        val repeatedDirectionOutput = state.lease.owner == ButtonAimPayloadOwner.DIRECTION_ADDITION &&
+            desired.key !in state.outputs && effectiveOutputs[desired.key] != null &&
+            sameEffectiveOutput(effectiveOutputs[desired.key], desired)
         cancelPulse(state, desired.key)
         state.outputs[desired.key] = desired
         reconcile(desired.key)
+        if (repeatedDirectionOutput) replayHeldOutput(desired.key)
 
         val pulse = desired as? DesiredOutput.Trigger ?: return
         if (pulse.pulseDurationMs == null) return
@@ -310,8 +321,9 @@ class ButtonAimPayloadExecutor(
             cancelPulse(state, desired.key)
             state.outputs.remove(desired.key)
         }
+        val alreadyReleased = cancelReplay(desired.key)
         val previous = effectiveOutputs.remove(desired.key)
-        emitInactive(previous ?: desired)
+        if (!alreadyReleased) emitInactive(previous ?: desired)
     }
 
     private fun cancelPulse(state: LeaseState, key: LogicalKey) {
@@ -321,13 +333,59 @@ class ButtonAimPayloadExecutor(
     private fun reconcile(key: LogicalKey) {
         val previous = effectiveOutputs[key]
         val next = effectiveOutput(key)
+        if (replays[key]?.outputIsReleased == true) {
+            if (next == null) cancelReplay(key)
+            if (next == null) effectiveOutputs.remove(key) else effectiveOutputs[key] = next
+            return
+        }
         if (sameEffectiveOutput(previous, next)) return
+
+        if (next == null) cancelReplay(key)
 
         when {
             next == null && previous != null -> emitInactive(previous)
             next != null -> emitActive(next)
         }
         if (next == null) effectiveOutputs.remove(key) else effectiveOutputs[key] = next
+    }
+
+    /** A new directional stage using an already held output needs a fresh physical edge. */
+    private fun replayHeldOutput(key: LogicalKey) {
+        val replay = replays.getOrPut(key) { ReplayState() }
+        replay.queued++
+        if (replay.task == null && !replay.outputIsReleased) startNextReplay(key, replay)
+    }
+
+    private fun startNextReplay(key: LogicalKey, replay: ReplayState) {
+        val output = effectiveOutputs[key] ?: run {
+            replays.remove(key)
+            return
+        }
+        replay.queued--
+        emitInactive(output)
+        replay.outputIsReleased = true
+        replay.task = scheduler.schedule(DIRECTION_REPLAY_GAP_MS) {
+            replay.task = null
+            val current = effectiveOutputs[key]
+            if (current == null || replays[key] !== replay) return@schedule
+            emitActive(current)
+            replay.outputIsReleased = false
+            if (replay.queued > 0) {
+                replay.task = scheduler.schedule(DIRECTION_REPLAY_GAP_MS) {
+                    replay.task = null
+                    if (replays[key] === replay) startNextReplay(key, replay)
+                }
+            } else {
+                replays.remove(key)
+            }
+        }
+    }
+
+    /** Returns whether the wire output was already released during a queued replay. */
+    private fun cancelReplay(key: LogicalKey): Boolean {
+        val replay = replays.remove(key) ?: return false
+        replay.task?.cancel()
+        return replay.outputIsReleased
     }
 
     private fun effectiveOutput(key: LogicalKey): DesiredOutput? {
@@ -388,6 +446,8 @@ class ButtonAimPayloadExecutor(
         }
         leases.clear()
         effectiveOutputs.clear()
+        replays.values.forEach { it.task?.cancel() }
+        replays.clear()
     }
 
     private fun parseToken(raw: String): ParsedToken {
@@ -499,6 +559,7 @@ class ButtonAimPayloadExecutor(
     }
 
     companion object {
+        private const val DIRECTION_REPLAY_GAP_MS = 35L
         private val TOKEN_SEPARATOR = Regex("[,\\s]+")
         private val XBOX_REGEX = Regex("^X360([A-Z0-9]+?)(?:_(HOLD|RELEASE))?$")
         private val MOUSE_REGEX = Regex("^MOUSE_(LEFT|RIGHT|MIDDLE)(?:_(DOWN|UP))?$")

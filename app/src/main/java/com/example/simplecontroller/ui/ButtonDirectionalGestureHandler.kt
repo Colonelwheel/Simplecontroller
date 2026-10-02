@@ -83,21 +83,23 @@ internal class ButtonDirectionalGestureHandler(
                 originY = event.getY(index)
                 if (!baseOwnedByAim) {
                     val reason = executor.statePayloadValidationError(model.payload)
-                    if (reason != null || model.payload.isBlank()) {
-                        onPayloadError(reason ?: "Base payload is blank")
+                    if (reason != null) {
+                        onPayloadError(reason)
                         releaseAll()
                         return
                     }
-                    when (val result = executor.activate(ButtonAimPayloadOwner.DIRECTION_BASE, model.payload)) {
-                        is ButtonAimPayloadActivationResult.Activated -> baseLease = result.lease
-                        is ButtonAimPayloadActivationResult.Invalid -> {
-                            onPayloadError(result.reason)
-                            releaseAll()
-                            return
-                        }
-                        ButtonAimPayloadActivationResult.ReleaseAll -> {
-                            releaseAll()
-                            return
+                    if (model.payload.isNotBlank()) {
+                        when (val result = executor.activate(ButtonAimPayloadOwner.DIRECTION_BASE, model.payload)) {
+                            is ButtonAimPayloadActivationResult.Activated -> baseLease = result.lease
+                            is ButtonAimPayloadActivationResult.Invalid -> {
+                                onPayloadError(result.reason)
+                                releaseAll()
+                                return
+                            }
+                            ButtonAimPayloadActivationResult.ReleaseAll -> {
+                                releaseAll()
+                                return
+                            }
                         }
                     }
                     onPressedChanged(true)
