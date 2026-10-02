@@ -399,7 +399,7 @@ fun validateControllerProfile(
             var control = original
             if (control.id.isBlank() || !usedControlIds.add(control.id)) {
                 require(
-                    decoded.formatVersion < CONTROLLER_PROFILE_FORMAT_VERSION &&
+                    decoded.formatVersion < 3 &&
                         source.portraitGeometry == null && source.landscapeGeometry == null
                 ) {
                     "Page '$name' contains blank or duplicate control IDs; its orientation geometry is ambiguous."
@@ -447,7 +447,7 @@ fun validateControllerProfile(
             control
         }
         val migratedPortraitGeometry = if (
-            decoded.formatVersion < CONTROLLER_PROFILE_FORMAT_VERSION &&
+            decoded.formatVersion < 3 &&
             source.portraitGeometry == null && source.landscapeGeometry == null
         ) {
             capturePageGeometry(controls, 0f, 0f)

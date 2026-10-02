@@ -153,6 +153,7 @@ data class Control(
     var downSuperBoostCommand: String = "S,CTRL,SPACE",
     var leftSuperBoostCommand: String = "A,SHIFT,SPACE",
     var rightSuperBoostCommand: String = "D,SHIFT,SPACE",
+    var extendedBoost: ExtendedBoostSettings = ExtendedBoostSettings(),
 
     /* Stick+ mode - hybrid analog + directional */
     var stickPlusMode: Boolean = false,

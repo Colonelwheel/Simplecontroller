@@ -77,7 +77,7 @@ already exempt from Android 16's `sw600dp` override. OEM policy can still overri
 orientation, and Android 17 removes this large-screen opt-out, so those device classes remain a
 device-test risk rather than an automated guarantee.
 
-Controller-profile format 3 keeps one canonical `Control` list for behavior and separate Portrait
+Controller-profile format 3 introduced one canonical `Control` list for behavior and separate Portrait
 and Landscape geometry overlays on every `ControllerPage`. Each overlay is keyed by stable control
 ID and records its source canvas dimensions. Keeping Hold, Turbo, TouchAim, Button Aim, page action,
 and other behavior in one canonical control prevents the two orientations from drifting. Format 2
@@ -90,8 +90,9 @@ Before an explicit editor orientation change, the activity snapshots the current
 central output-release path, and cancels TouchAim calibration. `onConfigurationChanged` waits for
 the new canvas measurement before rendering the same edited page with its target geometry. Page
 duplicate/import remaps the same regenerated control IDs through both overlays. Transfer version 1
-and all-profile backup version 1 remain unchanged; both carry nested format-3 profiles, while their
-readers continue accepting format 2 and the golden debug export.
+and all-profile backup version 1 remain unchanged; both carry nested format-4 profiles, while their
+readers continue accepting formats 2 and 3 and the golden debug export. Format 4 adds the optional
+extended Boost settings to the canonical controls.
 
 Primary files:
 
@@ -260,7 +261,7 @@ Both paths preserve identity, geometry, and the button's separate swipe setting.
 
 Stick directional profiles use the same per-profile store for the shared Directional/WASD and
 Stick+ command matrix. Each snapshot stores 12 directional/boost commands, Regular and Super Boost
-thresholds, and the source mode. Commands-only application preserves the target mode; apply-and-
+thresholds, optional center-based extended per-direction thresholds and Outer Boost commands, and the source mode. Commands-only application preserves the target mode; apply-and-
 switch selects the saved WASD or Stick+ mode. Both paths preserve geometry, STICK_L/STICK_R payload,
 sensitivity, auto-center, analog threshold settings, and normal versus Response Curve stick type.
 

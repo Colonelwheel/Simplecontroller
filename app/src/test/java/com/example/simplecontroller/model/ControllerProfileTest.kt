@@ -95,10 +95,28 @@ class ControllerProfileTest {
         val migrated = decodeControllerProfile(formatTwo, "old portrait").profile
         val page = migrated.pages.single()
 
-        assertEquals(3, migrated.formatVersion)
+        assertEquals(4, migrated.formatVersion)
         assertEquals(ControlType.TOUCH_AIM, page.controls.single().type)
         assertEquals(25f, page.portraitGeometry!!.controls.getValue("aim").x, 0.001f)
         assertEquals(null, page.landscapeGeometry)
+    }
+
+    @Test
+    fun formatThreeProfile_keepsItsGeometryStateAndDefaultsExtendedBoostOff() {
+        val formatThree = """
+            {"formatVersion":3,"homePageId":"base","pages":[
+              {"id":"base","name":"Base","controls":[
+                {"id":"stick","type":"STICK","x":25.0,"y":50.0,"w":200.0,"h":200.0,
+                 "payload":"STICK_L","stickPlusMode":true}
+              ]}
+            ]}
+        """.trimIndent()
+
+        val migrated = decodeControllerProfile(formatThree, "prior release").profile
+
+        assertEquals(4, migrated.formatVersion)
+        assertEquals(null, migrated.pages.single().portraitGeometry)
+        assertFalse(migrated.pages.single().controls.single().extendedBoost.enabled)
     }
 
     @Test
@@ -114,7 +132,7 @@ class ControllerProfileTest {
 
         val migrated = decodeControllerProfile(legacyObject, "missing version").profile
 
-        assertEquals(3, migrated.formatVersion)
+        assertEquals(4, migrated.formatVersion)
         assertEquals(11f, migrated.pages.single().portraitGeometry!!
             .controls.getValue("a").x, 0.001f)
         assertEquals(null, migrated.pages.single().landscapeGeometry)

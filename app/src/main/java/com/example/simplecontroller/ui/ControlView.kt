@@ -973,8 +973,10 @@ class ControlView(
 
         val cx = width/2f
         val cy = height/2f
-        val rawX = ((e.x - cx) / (width/2f)).coerceIn(-1f, 1f)
-        val rawY = ((e.y - cy) / (height/2f)).coerceIn(-1f, 1f)
+        val physicalX = (e.x - cx) / (width/2f)
+        val physicalY = (e.y - cy) / (height/2f)
+        val rawX = physicalX.coerceIn(-1f, 1f)
+        val rawY = physicalY.coerceIn(-1f, 1f)
         val (nx, ny) = when (model.type) {
             ControlType.CURVED_STICK ->
                 StickResponseCurve.apply(rawX, model.sensitivity) to
@@ -998,8 +1000,10 @@ class ControlView(
         // independent of curve sensitivity. Existing Stick threshold behavior is untouched.
         val curvedStick = model.type == ControlType.CURVED_STICK ||
             model.type == ControlType.RADIAL_CURVED_STICK
-        val directionalX = if (curvedStick && !shouldSnap) rawX else sx
-        val directionalY = if (curvedStick && !shouldSnap) rawY else sy
+        val legacyDirectionalX = if (curvedStick && !shouldSnap) rawX else sx
+        val legacyDirectionalY = if (curvedStick && !shouldSnap) rawY else sy
+        val directionalX = if (model.extendedBoost.enabled && !shouldSnap) physicalX else legacyDirectionalX
+        val directionalY = if (model.extendedBoost.enabled && !shouldSnap) physicalY else legacyDirectionalY
 
         val canSendAnalog = ownsManualStick &&
             ManualStickArbiter.owns(model.payload, manualStickOwnerToken)

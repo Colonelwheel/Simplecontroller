@@ -20,7 +20,8 @@ data class StickDirectionalSettings(
     val upSuperBoostCommand: String,
     val downSuperBoostCommand: String,
     val leftSuperBoostCommand: String,
-    val rightSuperBoostCommand: String
+    val rightSuperBoostCommand: String,
+    val extendedBoost: ExtendedBoostSettings = ExtendedBoostSettings()
 ) {
     fun validationError(): String? {
         if (!boostThreshold.isFinite() || boostThreshold !in 0.1f..1f ||
@@ -30,6 +31,7 @@ data class StickDirectionalSettings(
         if (commands().any { it.length > MAX_COMMAND_LENGTH }) {
             return "A saved directional command is too long."
         }
+        extendedBoost.validationError(superBoostThreshold)?.let { return it }
         return null
     }
 
@@ -65,7 +67,7 @@ data class StickDirectionalProfile(
     val settings: StickDirectionalSettings
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
         const val MAX_NAME_LENGTH = 80
     }
 
@@ -110,6 +112,7 @@ data class StickDirectionalProfile(
         control.downSuperBoostCommand = downSuperBoostCommand
         control.leftSuperBoostCommand = leftSuperBoostCommand
         control.rightSuperBoostCommand = rightSuperBoostCommand
+        control.extendedBoost = extendedBoost
     }
 }
 
@@ -143,7 +146,8 @@ fun Control.captureStickDirectionalProfile(
             upSuperBoostCommand = upSuperBoostCommand,
             downSuperBoostCommand = downSuperBoostCommand,
             leftSuperBoostCommand = leftSuperBoostCommand,
-            rightSuperBoostCommand = rightSuperBoostCommand
+            rightSuperBoostCommand = rightSuperBoostCommand,
+            extendedBoost = extendedBoost
         )
     )
     return profile.takeIf { it.validationError() == null }

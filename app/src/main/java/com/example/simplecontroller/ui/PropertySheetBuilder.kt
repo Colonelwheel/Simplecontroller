@@ -26,6 +26,10 @@ import com.example.simplecontroller.model.applyTo
 import com.example.simplecontroller.model.ButtonAimProfile
 import com.example.simplecontroller.model.StickDirectionalProfile
 import com.example.simplecontroller.model.StickDirectionalProfileMode
+import com.example.simplecontroller.model.DirectionalCommands
+import com.example.simplecontroller.model.DirectionalThresholds
+import com.example.simplecontroller.model.ExtendedBoostMode
+import com.example.simplecontroller.model.ExtendedBoostSettings
 import com.example.simplecontroller.model.TouchAimManualProfile
 import com.example.simplecontroller.model.captureButtonAimProfile
 import com.example.simplecontroller.model.captureStickDirectionalProfile
@@ -2318,6 +2322,8 @@ class PropertySheetBuilder(
             "super_boost_threshold", 
             "boost_threshold"
         )
+
+        addExtendedBoostUI(container)
         
         // Regular boost commands
         addSectionTitle(container, "Regular Boost Commands")
@@ -2333,6 +2339,71 @@ class PropertySheetBuilder(
         addLabeledTextField(container, "Down super boost command:", model.downSuperBoostCommand, "S,CTRL,SPACE", "down_super_boost")
         addLabeledTextField(container, "Left super boost command:", model.leftSuperBoostCommand, "A,SHIFT,SPACE", "left_super_boost")
         addLabeledTextField(container, "Right super boost command:", model.rightSuperBoostCommand, "D,SHIFT,SPACE", "right_super_boost")
+    }
+
+    private fun addExtendedBoostUI(container: LinearLayout) {
+        val settings = model.extendedBoost
+        val enabled = addCheckBox(
+            container, "Use extended Boost thresholds", settings.enabled,
+            tag = "extended_boost_enabled"
+        )
+        val details = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (settings.enabled) View.VISIBLE else View.GONE
+        }
+        container.addView(details)
+        enabled.setOnCheckedChangeListener { _, checked ->
+            details.visibility = if (checked) View.VISIBLE else View.GONE
+        }
+        details.addView(TextView(context).apply {
+            text = "Distance from stick center: 1.00 is the edge; values above 1.00 require moving outside the stick. Turn Swipe off for this setup."
+        })
+        val mode = addChoice(
+            details, "Extended Boost behavior",
+            listOf("Replace Regular and Super thresholds", "Add an Outer Boost stage"),
+            if (settings.mode == ExtendedBoostMode.REPLACE_THRESHOLDS) 0 else 1
+        ).apply { tag = "extended_boost_mode" }
+
+        val replacement = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        details.addView(replacement)
+        addSectionTitle(replacement, "Regular Boost distance by direction")
+        addDirectionalThresholdControls(replacement, "extended_regular", settings.regular)
+        addSectionTitle(replacement, "Super Boost distance by direction")
+        addDirectionalThresholdControls(replacement, "extended_super", settings.superBoost)
+
+        val outer = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+        details.addView(outer)
+        addSectionTitle(outer, "Outer Boost distance by direction")
+        addDirectionalThresholdControls(outer, "extended_outer", settings.outer)
+        outer.addView(TextView(context).apply {
+            text = "Outer commands: leave one blank to keep that direction's Super Boost command."
+        })
+        addLabeledTextField(outer, "Up outer command:", settings.outerCommands.up, "", "extended_outer_up_command")
+        addLabeledTextField(outer, "Down outer command:", settings.outerCommands.down, "", "extended_outer_down_command")
+        addLabeledTextField(outer, "Left outer command:", settings.outerCommands.left, "", "extended_outer_left_command")
+        addLabeledTextField(outer, "Right outer command:", settings.outerCommands.right, "", "extended_outer_right_command")
+        val updateMode = {
+            replacement.visibility = if (mode.selectedItemPosition == 0) View.VISIBLE else View.GONE
+            outer.visibility = if (mode.selectedItemPosition == 1) View.VISIBLE else View.GONE
+        }
+        mode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                updateMode()
+            }
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+        updateMode()
+    }
+
+    private fun addDirectionalThresholdControls(
+        container: LinearLayout, prefix: String, thresholds: DirectionalThresholds
+    ) {
+        listOf(
+            Triple("Up", thresholds.up, "up"), Triple("Down", thresholds.down, "down"),
+            Triple("Left", thresholds.left, "left"), Triple("Right", thresholds.right, "right")
+        ).forEach { (label, value, direction) ->
+            addThresholdControl(container, "$label distance:", value, "${prefix}_$direction", maxValue = 5f)
+        }
     }
     
     /**
@@ -2369,7 +2440,8 @@ class PropertySheetBuilder(
         labelText: String,
         currentValue: Float,
         tagPrefix: String,
-        referenceThresholdTag: String? = null
+        referenceThresholdTag: String? = null,
+        maxValue: Float = 1f
     ) {
         container.addView(TextView(context).apply { text = labelText })
         
@@ -2416,8 +2488,8 @@ class PropertySheetBuilder(
                 LinearLayout.LayoutParams.WRAP_CONTENT
             ).apply { weight = 1f }
             
-            max = 90  // 0.1 to 1.0 in steps of 0.01
-            progress = ((currentValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+            max = ((maxValue - 0.1f) * 100).roundToInt()
+            progress = ((currentValue - 0.1f) * 100).roundToInt().coerceIn(0, max)
             tag = tagPrefix
             
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -2438,7 +2510,7 @@ class PropertySheetBuilder(
         thresholdText.text = "%.2f".format(0.1f + (thresholdSeek.progress / 100f))
         
         // Add update handler for direct editing
-        setupThresholdDirectEdit(thresholdEdit, thresholdSeek, container, tagPrefix, referenceThresholdTag)
+        setupThresholdDirectEdit(thresholdEdit, thresholdSeek, container, tagPrefix, referenceThresholdTag, maxValue)
         
         // Add all components to the row
         thresholdRow.addView(thresholdText)
@@ -2475,14 +2547,15 @@ class PropertySheetBuilder(
         seekBar: SeekBar,
         container: LinearLayout,
         tagPrefix: String,
-        referenceThresholdTag: String?
+        referenceThresholdTag: String?,
+        maxValue: Float
     ) {
         edit.setOnFocusChangeListener { _, hasFocus ->
             if (!hasFocus) {
                 try {
                     val value = edit.text.toString().toFloat()
-                    val validValue = value.coerceIn(0.1f, 1.0f)
-                    val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, 90)
+                    val validValue = value.coerceIn(0.1f, maxValue)
+                    val progress = ((validValue - 0.1f) * 100).roundToInt().coerceIn(0, seekBar.max)
                     seekBar.progress = progress
                     
                     // Handle relationships between thresholds if needed
@@ -2878,6 +2951,29 @@ class PropertySheetBuilder(
         // Thresholds
         readThresholdValue(directionalContainer, "boost_threshold", "boost_threshold_edit") { model.boostThreshold = it }
         readThresholdValue(directionalContainer, "super_boost_threshold", "super_boost_threshold_edit") { model.superBoostThreshold = it }
+        val previous = model.extendedBoost
+        val regular = readDirectionalThresholds(directionalContainer, "extended_regular", previous.regular)
+            .map { it.coerceAtMost(ExtendedBoostSettings.MAX_DISTANCE - ExtendedBoostSettings.MIN_GAP) }
+        val superBoost = readDirectionalThresholds(directionalContainer, "extended_super", previous.superBoost)
+            .zipMax(regular, ExtendedBoostSettings.MIN_GAP)
+        val outer = readDirectionalThresholds(directionalContainer, "extended_outer", previous.outer)
+            .map { it.coerceAtLeast(maxOf(1f, model.superBoostThreshold) + ExtendedBoostSettings.MIN_GAP) }
+        val outerCommands = DirectionalCommands(
+            up = directionalContainer.findViewWithTag<EditText>("extended_outer_up_command")?.text?.toString().orEmpty(),
+            down = directionalContainer.findViewWithTag<EditText>("extended_outer_down_command")?.text?.toString().orEmpty(),
+            left = directionalContainer.findViewWithTag<EditText>("extended_outer_left_command")?.text?.toString().orEmpty(),
+            right = directionalContainer.findViewWithTag<EditText>("extended_outer_right_command")?.text?.toString().orEmpty()
+        )
+        model.extendedBoost = ExtendedBoostSettings(
+            enabled = directionalContainer.findViewWithTag<CheckBox>("extended_boost_enabled")?.isChecked == true,
+            mode = if (directionalContainer.findViewWithTag<Spinner>("extended_boost_mode")?.selectedItemPosition == 1) {
+                ExtendedBoostMode.ADD_OUTER_STAGE
+            } else ExtendedBoostMode.REPLACE_THRESHOLDS,
+            regular = regular,
+            superBoost = superBoost,
+            outer = outer,
+            outerCommands = outerCommands
+        )
         
         // Boost commands - allow empty strings
         readTextFieldIntoModel(directionalContainer, "up_boost") { model.upBoostCommand = it }
@@ -2891,6 +2987,31 @@ class PropertySheetBuilder(
         readTextFieldIntoModel(directionalContainer, "left_super_boost") { model.leftSuperBoostCommand = it }
         readTextFieldIntoModel(directionalContainer, "right_super_boost") { model.rightSuperBoostCommand = it }
     }
+
+    private fun readDirectionalThresholds(
+        container: LinearLayout, prefix: String, fallback: DirectionalThresholds
+    ): DirectionalThresholds {
+        fun value(direction: String, default: Float): Float =
+            container.findViewWithTag<EditText>("${prefix}_${direction}_edit")
+                ?.text?.toString()?.toFloatOrNull()?.takeIf(Float::isFinite)
+                ?.coerceIn(.1f, ExtendedBoostSettings.MAX_DISTANCE)
+                ?: container.findViewWithTag<SeekBar>("${prefix}_$direction")
+                    ?.let { .1f + it.progress / 100f } ?: default
+        return DirectionalThresholds(
+            value("up", fallback.up), value("down", fallback.down),
+            value("left", fallback.left), value("right", fallback.right)
+        )
+    }
+
+    private fun DirectionalThresholds.map(transform: (Float) -> Float) = DirectionalThresholds(
+        transform(up), transform(down), transform(left), transform(right)
+    )
+
+    private fun DirectionalThresholds.zipMax(other: DirectionalThresholds, gap: Float) =
+        DirectionalThresholds(
+            maxOf(up, other.up + gap), maxOf(down, other.down + gap),
+            maxOf(left, other.left + gap), maxOf(right, other.right + gap)
+        )
     
     /**
      * Helper to read text field value into model

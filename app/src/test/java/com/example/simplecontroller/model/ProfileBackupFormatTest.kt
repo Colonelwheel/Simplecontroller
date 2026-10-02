@@ -96,7 +96,7 @@ class ProfileBackupFormatTest {
         val profile = decodeControllerProfilesBackup(legacy).backup
             .controllerProfiles.single().profile
 
-        assertEquals(3, profile.formatVersion)
+        assertEquals(4, profile.formatVersion)
         assertEquals(3f, profile.pages.single().portraitGeometry!!
             .controls.getValue("a").x, 0.001f)
     }

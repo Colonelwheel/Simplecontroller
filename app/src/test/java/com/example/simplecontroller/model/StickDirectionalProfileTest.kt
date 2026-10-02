@@ -39,6 +39,12 @@ class StickDirectionalProfileTest {
             leftBoostCommand = "X360LB,X360X",
             rightBoostCommand = "X360RB,X360B",
             superBoostThreshold = .9f,
+            extendedBoost = ExtendedBoostSettings(
+                enabled = true,
+                mode = ExtendedBoostMode.ADD_OUTER_STAGE,
+                outer = DirectionalThresholds(1.3f, 1.4f, 1.5f, 1.6f),
+                outerCommands = DirectionalCommands(up = "X360A", right = "X360B")
+            ),
             upSuperBoostCommand = "X360Y,X360A",
             downSuperBoostCommand = "X360A,X360B",
             leftSuperBoostCommand = "X360LB,X360A",
@@ -70,6 +76,7 @@ class StickDirectionalProfileTest {
         assertEquals("X360Y", target.upCommand)
         assertEquals(.55f, target.boostThreshold)
         assertEquals("X360RB,X360A", target.rightSuperBoostCommand)
+        assertEquals(source.extendedBoost, target.extendedBoost)
         assertTrue(target.directionalMode)
         assertFalse(target.stickPlusMode)
         assertEquals("target", target.id)
@@ -132,6 +139,22 @@ class StickDirectionalProfileTest {
             stick().copy(directionalMode = true, stickPlusMode = true)
                 .captureStickDirectionalProfile(ID, "Both", 10L)
         )
+    }
+
+    @Test
+    fun versionOneProfile_withoutExtendedFieldsRemainsUsable() {
+        val source = requireNotNull(
+            stick().copy(stickPlusMode = true)
+                .captureStickDirectionalProfile(ID, "Old", 10L)
+        ).copy(schemaVersion = 1)
+        val encoded = Json { encodeDefaults = false }
+            .encodeToString(StickDirectionalProfile.serializer(), source)
+        assertFalse(encoded.contains("extendedBoost"))
+
+        val decoded = json.decodeFromString<StickDirectionalProfile>(encoded)
+        val target = stick(ControlType.CURVED_STICK)
+        assertTrue(decoded.applyCommandsTo(target))
+        assertFalse(target.extendedBoost.enabled)
     }
 
     private fun stick(type: ControlType = ControlType.STICK) = Control(

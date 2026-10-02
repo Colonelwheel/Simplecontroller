@@ -253,7 +253,7 @@ class ControllerProfileTransferTest {
             "golden-alternate",
             imported.result.profile.pages.first().controls.single().pageTargetId
         )
-        assertEquals(3, imported.result.profile.formatVersion)
+        assertEquals(4, imported.result.profile.formatVersion)
         assertTrue(imported.result.profile.pages.all { it.portraitGeometry != null })
         assertTrue(imported.result.profile.pages.all { it.landscapeGeometry == null })
     }

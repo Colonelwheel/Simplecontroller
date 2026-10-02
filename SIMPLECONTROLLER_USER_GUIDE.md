@@ -393,12 +393,21 @@ One practical forward-direction setup is:
 
 The exact thresholds and payloads are yours to choose. You could use the same idea for crouching, dodging, attacks, modifiers, camera actions, or keyboard commands in different directions.
 
+**Use extended Boost thresholds** appears beside the existing Regular and Super Boost thresholds.
+With it off, existing sticks behave as before. With it on, choose either:
+
+- **Replace Regular and Super thresholds:** set independent Up, Down, Left, and Right distances for both stages.
+- **Add an Outer Boost stage:** keep the shared Regular and Super thresholds, then set four independent Outer distances and commands. A blank Outer command keeps that direction's Super Boost command.
+
+Distances are measured from the stick's center. `1.00` is its edge on that axis; a value above `1.00` requires moving the finger outside the stick. Analog output remains capped at full tilt. The enabled modes compare physical distance on all three stick types, independently of analog sensitivity and response curves. Turn Swipe off when using distances beyond the stick edge, and leave room on screen for the intended travel. A threshold set beyond the reachable screen area cannot activate.
+
 After first enabling Directional mode or Stick+, you may need to press **OK/Save**, then long-press the Stick again in Edit mode before every nested setting becomes visible.
 
 ### Stick directional profiles
 
 Directional/WASD and Stick+ use the same Up, Down, Left, Right, Regular Boost, and Super Boost
 command fields. Use **Save changes as new stick profile** to save all 12 commands, both thresholds,
+the optional extended Boost settings and Outer commands,
 and whether the profile was created in Directional/WASD or Stick+ mode.
 
 When loading a profile, choose **Apply commands only** to copy the commands and thresholds while

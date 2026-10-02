@@ -4,7 +4,7 @@ import kotlinx.serialization.Serializable
 import java.util.UUID
 import java.util.Locale
 
-const val CONTROLLER_PROFILE_FORMAT_VERSION = 3
+const val CONTROLLER_PROFILE_FORMAT_VERSION = 4
 
 @Serializable
 data class ControllerPage(

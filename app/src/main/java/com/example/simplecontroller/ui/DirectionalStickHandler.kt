@@ -6,6 +6,8 @@ import android.util.Log
 import android.view.MotionEvent
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.StickDirection
+import com.example.simplecontroller.model.directionalPayload
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 
@@ -104,49 +106,26 @@ class DirectionalStickHandler(
         val absY = abs(y)
 
         if (y < -DIRECTION_DEAD_ZONE) {
-            desired[DirectionalCommandSlot.UP] = selectPayload(
-                absY,
-                model.upCommand,
-                model.upBoostCommand,
-                model.upSuperBoostCommand
+            desired[DirectionalCommandSlot.UP] = model.directionalPayload(
+                StickDirection.UP, absY
             )
         } else if (y > DIRECTION_DEAD_ZONE) {
-            desired[DirectionalCommandSlot.DOWN] = selectPayload(
-                absY,
-                model.downCommand,
-                model.downBoostCommand,
-                model.downSuperBoostCommand
+            desired[DirectionalCommandSlot.DOWN] = model.directionalPayload(
+                StickDirection.DOWN, absY
             )
         }
 
         if (x < -DIRECTION_DEAD_ZONE) {
-            desired[DirectionalCommandSlot.LEFT] = selectPayload(
-                absX,
-                model.leftCommand,
-                model.leftBoostCommand,
-                model.leftSuperBoostCommand
+            desired[DirectionalCommandSlot.LEFT] = model.directionalPayload(
+                StickDirection.LEFT, absX
             )
         } else if (x > DIRECTION_DEAD_ZONE) {
-            desired[DirectionalCommandSlot.RIGHT] = selectPayload(
-                absX,
-                model.rightCommand,
-                model.rightBoostCommand,
-                model.rightSuperBoostCommand
+            desired[DirectionalCommandSlot.RIGHT] = model.directionalPayload(
+                StickDirection.RIGHT, absX
             )
         }
 
         return desired
-    }
-
-    private fun selectPayload(
-        intensity: Float,
-        normal: String,
-        boost: String,
-        superBoost: String
-    ): String = when {
-        intensity > model.superBoostThreshold -> superBoost
-        intensity > model.boostThreshold -> boost
-        else -> normal
     }
 
     /**
