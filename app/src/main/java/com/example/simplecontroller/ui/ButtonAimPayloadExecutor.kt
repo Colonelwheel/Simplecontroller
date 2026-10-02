@@ -2,10 +2,12 @@ package com.example.simplecontroller.ui
 
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
 
-/** The two independently releasable payload roles owned by one Button Aim surface. */
+/** Independently releasable roles on one button surface. */
 enum class ButtonAimPayloadOwner {
     BASE,
-    ALTERNATE
+    ALTERNATE,
+    DIRECTION_BASE,
+    DIRECTION_ADDITION
 }
 
 /** Pulse tokens run once for a momentary gesture or repeat while a latched lease is retained. */
@@ -51,7 +53,7 @@ fun interface ButtonAimPayloadScheduler {
 }
 
 /**
- * Executes base and alternate Button Aim payloads without reading or mutating Control.payload.
+ * Executes leased button payloads without reading or mutating Control.payload.
  *
  * Each activation gets a unique lease. Boolean outputs remain active while any lease owns them.
  * Alternate trigger and stick-macro values take priority over base values; releasing the alternate

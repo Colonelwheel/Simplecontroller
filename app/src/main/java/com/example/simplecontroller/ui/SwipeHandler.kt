@@ -42,10 +42,10 @@ class SwipeHandler {
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 swipeOwnsGesture = false
-                // Button Aim must receive the original pointer directly and retain it outside
+                // Button Aim and directional buttons receive the original pointer and retain it outside
                 // the view. Returning false lets normal Android child dispatch own the gesture.
                 val topmostStart = topmostHit(e)
-                if (topmostStart?.isButtonAimSurface() == true) {
+                if (topmostStart?.isDirectButtonSurface() == true) {
                     activeTouch?.recycle()
                     activeTouch = null
                     lastTouchedView = null
@@ -83,8 +83,8 @@ class SwipeHandler {
                 }
 
                 // 2) Else: finger moved off the old control; see if it entered a new one
-                // Button Aim is direct-touch-only in this initial implementation.
-                val entered = topmostHit(e)?.takeUnless { it.isButtonAimSurface() }
+                // These surfaces require a direct initial touch.
+                val entered = topmostHit(e)?.takeUnless { it.isDirectButtonSurface() }
                 if (entered != null) {
                     val now = System.currentTimeMillis()
                     val last = lastFiredMap[entered.model.id] ?: 0L
@@ -195,8 +195,9 @@ class SwipeHandler {
             (view.parent as? android.view.ViewGroup)?.indexOfChild(view) ?: -1
         }
 
-    private fun ControlView.isButtonAimSurface(): Boolean =
-        model.type == ControlType.BUTTON && model.buttonAimEnabled
+    private fun ControlView.isDirectButtonSurface(): Boolean =
+        model.type == ControlType.BUTTON &&
+            (model.buttonAimEnabled || model.buttonDirectional.enabled)
 
     /**
      * Forward a cloned MotionEvent with action translated to *newAction*.

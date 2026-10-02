@@ -137,6 +137,7 @@ class ControlView(
     private val autoTapPayloadExecutor: ButtonAimPayloadExecutor?
     private val autoTapController: ButtonAutoTapController?
     private var autoTapLease: ButtonAimPayloadLease? = null
+    private val buttonDirectionalHandler: ButtonDirectionalGestureHandler?
     private var retainedButtonAimStickName: String? = null
     private val buttonAimOutput = AimOutputSession(
         ownerToken = Any(),
@@ -267,11 +268,14 @@ class ControlView(
         } else {
             null
         }
+        val buttonPayloadExecutor = if (model.type == ControlType.BUTTON) {
+            uiHelper.createButtonAimPayloadExecutor()
+        } else null
         buttonAimHandler = if (model.type == ControlType.BUTTON) {
             ButtonAimHandler(
                 model = model,
                 aimOutput = buttonAimOutput,
-                payloadExecutor = uiHelper.createButtonAimPayloadExecutor(),
+                payloadExecutor = buttonPayloadExecutor!!,
                 controlSize = { width.toFloat() to height.toFloat() },
                 isLatched = { isLatched },
                 setLatched = {
@@ -287,7 +291,7 @@ class ControlView(
                 startTurbo = uiHelper::startRepeat,
                 stopTurbo = uiHelper::stopRepeat,
                 isGlobalHold = { GlobalSettings.globalHold },
-                isGlobalTurbo = { GlobalSettings.globalTurbo },
+                isGlobalTurbo = { GlobalSettings.globalTurbo && !model.buttonDirectional.enabled },
                 shouldSkipImmediateRelease = {
                     model.payload.contains("RT:1.0P", ignoreCase = true) ||
                         model.payload.contains("LT:1.0P", ignoreCase = true)
@@ -301,6 +305,19 @@ class ControlView(
             )
         } else {
             null
+        }
+        buttonDirectionalHandler = buttonPayloadExecutor?.let { executor ->
+            ButtonDirectionalGestureHandler(
+                model = model,
+                executor = executor,
+                onPayloadError = { reason ->
+                    Toast.makeText(context, "Directional button: $reason", Toast.LENGTH_SHORT).show()
+                },
+                onPressedChanged = { pressed ->
+                    isPressed = pressed
+                    invalidate()
+                }
+            )
         }
 
         SwipeManager.registerControl(this)
@@ -482,7 +499,8 @@ class ControlView(
 
         // Normal game mode
         val directPointerSurface = model.type == ControlType.TOUCH_AIM ||
-            (model.type == ControlType.BUTTON && model.buttonAimEnabled)
+            (model.type == ControlType.BUTTON &&
+                (model.buttonAimEnabled || model.buttonDirectional.enabled))
         if (GlobalSettings.globalSwipe && !directPointerSurface) {
             if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                 // Avoid rapid repeat unless turbo is on — handled inside playTouch now
@@ -532,6 +550,21 @@ class ControlView(
                         }
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
                             pageActionGestureConsumed = false
+                    }
+                    return
+                }
+                if (model.buttonDirectional.enabled && !uiHelper.isReleaseAllAction()) {
+                    val aimEnabled = model.buttonAimEnabled
+                    if (aimEnabled && e.actionMasked == MotionEvent.ACTION_DOWN) {
+                        buttonAimHandler?.onTouch(e)
+                        if (buttonAimHandler?.hasActiveGesture() != true) return
+                    }
+                    buttonDirectionalHandler?.onTouch(e, baseOwnedByAim = aimEnabled)
+                    if (!aimEnabled && e.actionMasked == MotionEvent.ACTION_DOWN &&
+                        buttonDirectionalHandler?.hasRuntimeState() == true
+                    ) triggerStrongVibration(30)
+                    if (aimEnabled && e.actionMasked != MotionEvent.ACTION_DOWN) {
+                        buttonAimHandler?.onTouch(e)
                     }
                     return
                 }
@@ -1149,6 +1182,10 @@ class ControlView(
         }
     }
 
+    fun releaseButtonDirections() {
+        buttonDirectionalHandler?.takeIf { it.hasRuntimeState() }?.releaseAll()
+    }
+
     fun recenterButtonAimStick(): Boolean = buttonAimHandler?.recenterStickOutput() == true
 
     /**
@@ -1158,7 +1195,9 @@ class ControlView(
     fun releaseEverythingLocally() {
         pageActionGestureConsumed = false
         val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
+        val buttonDirectionsOwnedRuntime = buttonDirectionalHandler?.hasRuntimeState() == true
         if (buttonAimOwnedRuntime) buttonAimHandler?.hardReset()
+        releaseButtonDirections()
         holdHandler.removeCallbacksAndMessages(null)
         mouseClickHandler.removeCallbacksAndMessages(null)
         secondTapHoldCheck = null
@@ -1188,8 +1227,8 @@ class ControlView(
         val wasPressed = isPressed
         isPressed = false
         if (model.type == ControlType.BUTTON) {
-            if (buttonAimOwnedRuntime) {
-                // The Button Aim state machine already reconciled its payload exactly once.
+            if (buttonAimOwnedRuntime || buttonDirectionsOwnedRuntime) {
+                // The gesture handlers already reconciled their leased payloads.
             } else if (wasLatched) {
                 isLatched = false
             } else if (wasPressed) {
@@ -1212,11 +1251,13 @@ class ControlView(
         // Reconcile the old runtime payload/config before the dialog mutates the model.
         releaseAutoTap()
         releaseButtonAim()
+        releaseButtonDirections()
         releaseTouchAim()
         PropertySheetBuilder(context, model) {
             // After properties are updated:
             releaseAutoTap()
             releaseButtonAim()
+            releaseButtonDirections()
             releaseTouchAim()
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.width = model.w.toInt()

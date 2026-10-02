@@ -5,6 +5,8 @@ import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.ButtonAimPayloadPolicy
+import com.example.simplecontroller.model.ButtonDirectionalSettings
 import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.ControlType
@@ -431,18 +433,29 @@ fun validateControllerProfile(
             }
             if (control.pageAction != PageAction.NONE) {
                 if (control.holdToggle || control.autoTapEnabled || control.buttonAimEnabled ||
+                    control.buttonDirectional.enabled ||
                     control.buttonAimOneShotAlternateEnabled ||
                     control.buttonAimPayloadTiming != com.example.simplecontroller.model.ButtonAimPayloadTiming.IMMEDIATE
                 ) {
-                    warnings += "Incompatible Hold, Auto Tap, or Button Aim settings on '${control.name.ifBlank { control.id }}' were disabled for its local page action."
+                    warnings += "Incompatible Hold, Auto Tap, Button Aim, or directional button settings on '${control.name.ifBlank { control.id }}' were disabled for its local page action."
                 }
                 control = control.copy(
                     holdToggle = false,
                     autoTapEnabled = false,
                     buttonAimEnabled = false,
+                    buttonDirectional = control.buttonDirectional.copy(enabled = false),
                     buttonAimOneShotAlternateEnabled = false,
                     buttonAimPayloadTiming = com.example.simplecontroller.model.ButtonAimPayloadTiming.IMMEDIATE
                 )
+            }
+            if (control.buttonDirectional.enabled) {
+                val error = buttonDirectionalError(control)
+                if (error != null) {
+                    warnings += "Directional inputs on '${control.name.ifBlank { control.id }}' were disabled: $error"
+                    control = control.copy(
+                        buttonDirectional = control.buttonDirectional.copy(enabled = false)
+                    )
+                }
             }
             control
         }
@@ -518,10 +531,14 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
             }
             if (control.pageAction != PageAction.NONE &&
                 (control.holdToggle || control.autoTapEnabled || control.buttonAimEnabled ||
+                    control.buttonDirectional.enabled ||
                     control.buttonAimOneShotAlternateEnabled ||
                     control.buttonAimPayloadTiming != com.example.simplecontroller.model.ButtonAimPayloadTiming.IMMEDIATE)
             ) {
-                return "Local page actions cannot keep Hold, Auto Tap, Button Aim, or delayed timing."
+                return "Local page actions cannot keep Hold, Auto Tap, Button Aim, directional inputs, or delayed timing."
+            }
+            if (control.buttonDirectional.enabled) {
+                buttonDirectionalError(control)?.let { return "Directional button inputs: $it" }
             }
         }
     }
@@ -543,6 +560,25 @@ private fun stableRecoveredPageId(
         if (value !in usedIds) return value
         attempt++
     }
+}
+
+private fun buttonDirectionalError(control: Control): String? {
+    if (control.type != ControlType.BUTTON) return "only buttons can use directional inputs"
+    if (control.autoTapEnabled) return "toggle auto-tap is enabled"
+    if (control.holdToggle && !control.buttonAimEnabled) return "Hold Toggle requires Button Aim"
+    if (control.payload.isBlank()) return "base payload is blank"
+    ButtonAimPayloadPolicy.stateValidationError(control.payload)?.let { return it }
+    val settings: ButtonDirectionalSettings = control.buttonDirectional
+    val directions = listOf(settings.up, settings.left, settings.right, settings.down)
+    directions.forEach { stages ->
+        if (!stages.firstDistancePx.isFinite() || stages.firstDistancePx < 1f ||
+            !stages.secondDistancePx.isFinite() ||
+            stages.secondDistancePx <= stages.firstDistancePx
+        ) return "stage distances must increase from at least 1 pixel"
+        ButtonAimPayloadPolicy.stateValidationError(stages.firstPayload)?.let { return it }
+        ButtonAimPayloadPolicy.stateValidationError(stages.secondPayload)?.let { return it }
+    }
+    return null
 }
 
 private fun stableRecoveredControlId(

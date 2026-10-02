@@ -11,6 +11,9 @@ import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.ButtonAimMouseProfile
+import com.example.simplecontroller.model.ButtonAimPayloadPolicy
+import com.example.simplecontroller.model.ButtonDirectionStages
+import com.example.simplecontroller.model.ButtonDirectionalSettings
 import com.example.simplecontroller.model.ButtonAimDpadMode
 import com.example.simplecontroller.model.ButtonAimDpadOrigin
 import com.example.simplecontroller.model.ButtonAimOutput
@@ -82,6 +85,7 @@ class PropertySheetBuilder(
         val payloadField: AutoCompleteTextView,
         val touchAim: TouchAimComponents?,
         val buttonAim: ButtonAimComponents?,
+        val buttonDirectional: ButtonDirectionalComponents?,
         val pageAction: PageActionComponents?,
         val stickProfiles: StickDirectionalProfileComponents?
     )
@@ -474,6 +478,14 @@ class PropertySheetBuilder(
         } else {
             null
         }
+        val buttonDirectionalComponents = if (model.type == ControlType.BUTTON) {
+            addButtonDirectionalUI(container) { checked ->
+                if (checked) {
+                    autoTapEnabled.isChecked = false
+                    if (buttonAimComponents?.enabled?.isChecked != true) holdToggle.isChecked = false
+                }
+            }
+        } else null
 
         if (model.type == ControlType.BUTTON) {
             autoTapEnabled.setOnCheckedChangeListener { _, checked ->
@@ -481,10 +493,16 @@ class PropertySheetBuilder(
                 if (checked) {
                     holdToggle.isChecked = false
                     buttonAimComponents?.enabled?.isChecked = false
+                    buttonDirectionalComponents?.enabled?.isChecked = false
                 }
             }
             holdToggle.setOnCheckedChangeListener { _, checked ->
-                if (checked) autoTapEnabled.isChecked = false
+                if (checked) {
+                    autoTapEnabled.isChecked = false
+                    if (buttonAimComponents?.enabled?.isChecked != true) {
+                        buttonDirectionalComponents?.enabled?.isChecked = false
+                    }
+                }
             }
             when {
                 buttonAimComponents?.enabled?.isChecked == true ->
@@ -500,6 +518,7 @@ class PropertySheetBuilder(
                 holdToggle.isEnabled = !localAction
                 autoTapEnabled.isEnabled = !localAction
                 buttonAimComponents?.enabled?.isEnabled = !localAction
+                buttonDirectionalComponents?.enabled?.isEnabled = !localAction
                 holdDurationField.visibility = if (localAction) View.GONE else View.VISIBLE
                 earlyButtonPayload?.visibility = if (localAction) View.GONE else View.VISIBLE
                 autoTapIntervalMs.visibility = if (!localAction && autoTapEnabled.isChecked) {
@@ -509,6 +528,7 @@ class PropertySheetBuilder(
                     holdToggle.isChecked = false
                     autoTapEnabled.isChecked = false
                     buttonAimComponents?.enabled?.isChecked = false
+                    buttonDirectionalComponents?.enabled?.isChecked = false
                 }
             }
             pageActionComponents?.action?.onItemSelectedListener =
@@ -629,6 +649,7 @@ class PropertySheetBuilder(
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField, touchAimComponents, buttonAimComponents,
+            buttonDirectionalComponents,
             pageActionComponents,
             stickProfileComponents
         )
@@ -688,6 +709,44 @@ class PropertySheetBuilder(
                 "Save changes, then manage stick profiles"
             )
         )
+    }
+
+    private fun addButtonDirectionalUI(
+        container: LinearLayout,
+        onEnabledChanged: (Boolean) -> Unit
+    ): ButtonDirectionalComponents {
+        addSectionTitle(container, "Directional button inputs")
+        val enabled = addCheckBox(
+            container,
+            "Add inputs as finger moves",
+            model.buttonDirectional.enabled
+        )
+        val details = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (enabled.isChecked) View.VISIBLE else View.GONE
+            container.addView(this)
+        }
+        details.addView(TextView(context).apply {
+            text = "Distances are physical pixels from the initial touch. Base follows normal Button or Button Aim timing; " +
+                "each direction adds stage 1, then stage 2. Moving back releases stages in reverse order. " +
+                "Only one direction is active at a time."
+        })
+        val directions = ButtonDirection.entries.associateWith { direction ->
+            val label = direction.name.lowercase().replaceFirstChar { it.uppercase() }
+            val values = model.buttonDirectional.stages(direction)
+            addSectionTitle(details, label)
+            ButtonDirectionalStageFields(
+                firstDistance = addDecimalField(details, "$label stage 1 distance (px)", values.firstDistancePx),
+                firstPayload = addCommandField(details, "$label stage 1 added payload", values.firstPayload),
+                secondDistance = addDecimalField(details, "$label stage 2 distance (px)", values.secondDistancePx),
+                secondPayload = addCommandField(details, "$label stage 2 added payload", values.secondPayload)
+            )
+        }
+        enabled.setOnCheckedChangeListener { _, checked ->
+            details.visibility = if (checked) View.VISIBLE else View.GONE
+            onEnabledChanged(checked)
+        }
+        return ButtonDirectionalComponents(enabled, directions)
     }
 
     private fun addButtonAimUI(
@@ -2595,7 +2654,8 @@ class PropertySheetBuilder(
             model.holdToggle = components.holdToggle.isChecked
             model.holdDurationMs = components.holdDurationField.text.toString().toLongOrNull() ?: 400L
             val autoTapRequested = components.autoTapEnabled.isChecked
-            val autoTapBlockedByAim = components.buttonAim?.enabled?.isChecked == true
+            val autoTapBlockedByAim = components.buttonAim?.enabled?.isChecked == true ||
+                components.buttonDirectional?.enabled?.isChecked == true
             val autoTapPayloadError = autoTapUnsupportedPayloadReason(model.payload)
             model.autoTapEnabled = autoTapRequested && !autoTapBlockedByAim &&
                 autoTapPayloadError == null
@@ -2607,12 +2667,14 @@ class PropertySheetBuilder(
                 Toast.makeText(
                     context,
                     autoTapPayloadError
-                        ?: "Toggle auto-tap is available only when Aim while pressed is off.",
+                        ?: "Toggle auto-tap is unavailable with Button Aim or directional button inputs.",
                     Toast.LENGTH_LONG
                 ).show()
             }
             model.swipeActivate = components.swipeActivate.isChecked
             components.buttonAim?.let(::saveButtonAimProperties)
+            components.buttonDirectional?.let(::saveButtonDirectionalProperties)
+            if (model.buttonDirectional.enabled && !model.buttonAimEnabled) model.holdToggle = false
             components.pageAction?.let { fields ->
                 val action = PageAction.entries[
                     fields.action.selectedItemPosition.coerceIn(0, PageAction.entries.lastIndex)
@@ -2625,6 +2687,7 @@ class PropertySheetBuilder(
                     model.holdToggle = false
                     model.autoTapEnabled = false
                     model.buttonAimEnabled = false
+                    model.buttonDirectional.enabled = false
                     model.buttonAimOneShotAlternateEnabled = false
                     model.buttonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE
                 }
@@ -2797,6 +2860,44 @@ class PropertySheetBuilder(
         touchAimShootOffThreshold == profile.shootOffThreshold &&
         touchAimEnterShootConfirmationMs == profile.enterShootConfirmationMs &&
         touchAimReturnToAimConfirmationMs == profile.returnToAimConfirmationMs
+
+    private fun saveButtonDirectionalProperties(fields: ButtonDirectionalComponents) {
+        fun read(direction: ButtonDirection): ButtonDirectionStages {
+            val inputs = fields.directions.getValue(direction)
+            val previous = model.buttonDirectional.stages(direction)
+            val first = inputs.firstDistance.floatValue(previous.firstDistancePx).coerceAtLeast(1f)
+            val second = inputs.secondDistance.floatValue(previous.secondDistancePx)
+                .coerceAtLeast(first + 1f)
+            return ButtonDirectionStages(
+                firstDistancePx = first,
+                firstPayload = inputs.firstPayload.text.toString().trim(),
+                secondDistancePx = second,
+                secondPayload = inputs.secondPayload.text.toString().trim()
+            )
+        }
+        val settings = ButtonDirectionalSettings(
+            enabled = fields.enabled.isChecked,
+            up = read(ButtonDirection.UP),
+            left = read(ButtonDirection.LEFT),
+            right = read(ButtonDirection.RIGHT),
+            down = read(ButtonDirection.DOWN)
+        )
+        if (settings.enabled) {
+            val error = if (model.payload.isBlank()) "Base payload is blank" else
+                ButtonAimPayloadPolicy.stateValidationError(model.payload)
+                    ?: ButtonDirection.entries.firstNotNullOfOrNull { direction ->
+                        val stages = settings.stages(direction)
+                        listOf(stages.firstPayload, stages.secondPayload)
+                            .firstNotNullOfOrNull(ButtonAimPayloadPolicy::stateValidationError)
+                            ?.let { "${direction.name.lowercase()} addition: $it" }
+                    }
+            if (error != null) {
+                settings.enabled = false
+                Toast.makeText(context, "Directional inputs disabled: $error", Toast.LENGTH_LONG).show()
+            }
+        }
+        model.buttonDirectional = settings
+    }
 
     private fun saveButtonAimProperties(fields: ButtonAimComponents) {
         model.buttonAimEnabled = fields.enabled.isChecked
@@ -3005,6 +3106,18 @@ class PropertySheetBuilder(
 
     private fun DirectionalThresholds.map(transform: (Float) -> Float) = DirectionalThresholds(
         transform(up), transform(down), transform(left), transform(right)
+    )
+
+    private data class ButtonDirectionalStageFields(
+        val firstDistance: EditText,
+        val firstPayload: EditText,
+        val secondDistance: EditText,
+        val secondPayload: EditText
+    )
+
+    private data class ButtonDirectionalComponents(
+        val enabled: CheckBox,
+        val directions: Map<ButtonDirection, ButtonDirectionalStageFields>
     )
 
     private fun DirectionalThresholds.zipMax(other: DirectionalThresholds, gap: Float) =

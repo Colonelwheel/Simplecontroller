@@ -7,6 +7,23 @@ import org.junit.Test
 
 class ButtonAimPayloadExecutorTest {
     @Test
+    fun directionalAddition_releaseKeepsSharedBaseAndRestoresTrigger() {
+        val fixture = Fixture()
+        val base = fixture.activate(ButtonAimPayloadOwner.BASE, "X360A,LT:0.4").lease
+        val addition = fixture.activate(
+            ButtonAimPayloadOwner.DIRECTION_ADDITION, "X360A,LT:1.0"
+        ).lease
+
+        fixture.executor.release(addition)
+        assertEquals(
+            listOf("CMD:X360A_HOLD", "CMD:LT:0.4", "CMD:LT:1.0", "CMD:LT:0.4"),
+            fixture.transport.events
+        )
+        fixture.executor.release(base)
+        assertEquals("CMD:X360A_RELEASE", fixture.transport.events[4])
+    }
+
+    @Test
     fun touchAimStatePayloadPolicy_rejectsIrreversibleActions() {
         val fixture = Fixture()
         assertNull(fixture.executor.statePayloadValidationError("X360A,RT:1.0,LS:R50"))

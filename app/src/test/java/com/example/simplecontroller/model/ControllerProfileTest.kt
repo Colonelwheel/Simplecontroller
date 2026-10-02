@@ -12,6 +12,24 @@ import org.junit.Test
 
 class ControllerProfileTest {
     @Test
+    fun formatFourButton_defaultsDirectionalOffAndCurrentRoundTripRetainsStages() {
+        val old = """{"formatVersion":4,"homePageId":"base","pages":[{"id":"base","name":"Base","controls":[{"id":"a","type":"BUTTON","x":0.0,"y":0.0,"w":100.0,"h":100.0,"payload":"X360A"}]}]}"""
+        val loaded = decodeControllerProfile(old, "old button").profile
+        assertEquals(5, loaded.formatVersion)
+        assertFalse(loaded.pages.single().controls.single().buttonDirectional.enabled)
+
+        val control = loaded.pages.single().controls.single().copy(
+            buttonDirectional = ButtonDirectionalSettings(
+                enabled = true,
+                up = ButtonDirectionStages(70f, "X360Y", 180f, "X360RB")
+            )
+        )
+        val updated = loaded.copy(pages = listOf(loaded.pages.single().copy(controls = listOf(control))))
+        val decoded = decodeControllerProfile(encodeControllerProfile(updated), "new button").profile
+        assertEquals(control.buttonDirectional, decoded.pages.single().controls.single().buttonDirectional)
+    }
+
+    @Test
     fun legacyControlArray_loadsAsStableBasePageWithoutLosingSettings() {
         val legacy = """
             [{
@@ -95,7 +113,7 @@ class ControllerProfileTest {
         val migrated = decodeControllerProfile(formatTwo, "old portrait").profile
         val page = migrated.pages.single()
 
-        assertEquals(4, migrated.formatVersion)
+        assertEquals(5, migrated.formatVersion)
         assertEquals(ControlType.TOUCH_AIM, page.controls.single().type)
         assertEquals(25f, page.portraitGeometry!!.controls.getValue("aim").x, 0.001f)
         assertEquals(null, page.landscapeGeometry)
@@ -114,7 +132,7 @@ class ControllerProfileTest {
 
         val migrated = decodeControllerProfile(formatThree, "prior release").profile
 
-        assertEquals(4, migrated.formatVersion)
+        assertEquals(5, migrated.formatVersion)
         assertEquals(null, migrated.pages.single().portraitGeometry)
         assertFalse(migrated.pages.single().controls.single().extendedBoost.enabled)
     }
@@ -132,7 +150,7 @@ class ControllerProfileTest {
 
         val migrated = decodeControllerProfile(legacyObject, "missing version").profile
 
-        assertEquals(4, migrated.formatVersion)
+        assertEquals(5, migrated.formatVersion)
         assertEquals(11f, migrated.pages.single().portraitGeometry!!
             .controls.getValue("a").x, 0.001f)
         assertEquals(null, migrated.pages.single().landscapeGeometry)

@@ -14,6 +14,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     /* Align Java & Kotlin to the same JVM target */
@@ -65,6 +66,8 @@ androidComponents {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation("androidx.test:runner:1.6.2")
 
     /* JSON save / load */
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")

@@ -39,6 +39,23 @@ enum class ButtonAimStickProfile { LINEAR, RESPONSE_CURVE, RADIAL_RESPONSE_CURVE
 @Serializable
 enum class ButtonAimMouseProfile { LINEAR_RELATIVE, SMOOTHED_NONLINEAR }
 
+@Serializable
+data class ButtonDirectionStages(
+    var firstDistancePx: Float = 48f,
+    var firstPayload: String = "",
+    var secondDistancePx: Float = 96f,
+    var secondPayload: String = ""
+)
+
+@Serializable
+data class ButtonDirectionalSettings(
+    var enabled: Boolean = false,
+    var up: ButtonDirectionStages = ButtonDirectionStages(),
+    var left: ButtonDirectionStages = ButtonDirectionStages(),
+    var right: ButtonDirectionStages = ButtonDirectionStages(),
+    var down: ButtonDirectionStages = ButtonDirectionStages()
+)
+
 /** Android-local page navigation. These actions are never sent to a receiver. */
 @Serializable
 enum class PageAction { NONE, GO_TO, TOGGLE, RETURN, HOME }
@@ -63,6 +80,7 @@ data class Control(
     var holdDurationMs: Long = 500,        // long-press threshold
     var autoTapEnabled: Boolean = false,
     var autoTapIntervalMs: Long = 100L,
+    var buttonDirectional: ButtonDirectionalSettings = ButtonDirectionalSettings(),
 
     /* Controller Pages (Android-local action; target is a stable page ID) */
     var pageAction: PageAction = PageAction.NONE,

@@ -10,7 +10,8 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
-- the current nested `ControllerProfile` format version `4`;
+- the current nested `ControllerProfile` format version `5`;
+- the older nested `ControllerProfile` format version `4`;
 - the older nested `ControllerProfile` format version `3`;
 - the older nested `ControllerProfile` format version `2`;
 - bare format-version-2 multipage `ControllerProfile` JSON objects created before the wrapper;
@@ -81,7 +82,7 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - All-profile backup version: `1`
-- Nested controller-profile format: `4` (formats `2` and `3` remain importable)
+- Nested controller-profile format: `5` (formats `2`, `3`, and `4` remain importable)
 - Single-profile suffix: `.simplecontroller-profile.json`
 - All-profile suffix: `.simplecontroller-profiles-backup.json`
 - Maximum file size: 25 MB

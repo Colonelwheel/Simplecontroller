@@ -151,7 +151,7 @@ and safely does nothing. Deleting a page reports how many controls reference it.
 the only page or delete Home until another page becomes Home.
 
 Page actions run only inside Android; they are never sent to the Windows receiver or Pico. They
-activate once per intentional press and cannot use Hold Toggle, Turbo, Auto-Tap, Button Aim, or
+activate once per intentional press and cannot use Hold Toggle, Turbo, Auto-Tap, Button Aim, directional button inputs, or
 delayed/on-release behavior.
 
 ### Safety and startup behavior
@@ -358,7 +358,7 @@ Each repeated press lasts for half the interval, up to 50 ms:
 - 40 ms interval: about 20 ms down and 20 ms up;
 - 16 ms interval: about 8 ms down and 8 ms up.
 
-Auto-Tap supports Xbox buttons, keyboard keys, mouse buttons, triggers, fixed-direction stick macros, and combinations. It cannot be combined with Hold Toggle or Button Aim. It deliberately refuses `RELEASE_ALL`, `CAMERA_FOLLOW`, and `SCROLL_MODE_TOGGLE`.
+Auto-Tap supports Xbox buttons, keyboard keys, mouse buttons, triggers, fixed-direction stick macros, and combinations. It cannot be combined with Hold Toggle, Button Aim, or directional button inputs. It deliberately refuses `RELEASE_ALL`, `CAMERA_FOLLOW`, and `SCROLL_MODE_TOGGLE`.
 
 Auto-Tap also stops automatically when you use Release All, enter Edit mode, remove or reconfigure the control, switch layouts, disconnect, or leave the app.
 
@@ -483,6 +483,28 @@ SCROLL_MODE_TOGGLE
 ```
 
 Tap it once to make all Touchpads scroll vertically. Tap it again to return to pointer movement. Do not combine this toggle with other payloads, Hold, Turbo, or Auto-Tap.
+
+## Directional button inputs
+
+Edit a Button and check **Add inputs as finger moves**. The ordinary **Payload** is the base input.
+Touching the Button activates it immediately. Set separate Stage 1 and Stage 2 distances and
+added payloads for Up, Left, Right, and Down. The distances are screen pixels from the first
+finger contact, so they can extend beyond the Button. A blank added payload makes that stage
+do nothing.
+
+Moving outward holds Stage 1, then adds Stage 2. Moving back releases Stage 2 first, then
+Stage 1. Changing direction releases the previous direction's additions and activates the new
+direction's stages. Only the strongest direction is selected, so a diagonal move does not
+activate two directions. Lifting or canceling releases all directional additions and the
+standalone base payload. The Button retains the same finger outside its visible bounds; global
+Swipe cannot transfer this gesture to another control.
+
+This option can run with Button Aim. In that combination, Button Aim keeps its configured
+immediate/delayed, latch, and retained-stick behavior for the base payload and aim output;
+lifting still releases the directional additions. Toggle Auto-Tap and local page actions cannot
+be combined with it. Standalone directional buttons use an immediate base payload and do not use
+Hold Toggle. Directional mode does not use global Turbo. Payloads must have matched releases; state toggles and Release All
+are excluded from this mode.
 
 ## Button Aim
 

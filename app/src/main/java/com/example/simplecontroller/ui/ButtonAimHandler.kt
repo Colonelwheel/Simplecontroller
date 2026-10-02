@@ -87,7 +87,9 @@ class ButtonAimHandler(
         phaseState.phase != OneShotAlternatePhase.BASE ||
             gestureState != GestureState.IDLE || legacyPayloadHeld || legacyTurboActive ||
             baseLease != null || alternateLease != null ||
-            payloadExecutor.activeLeaseCount() != 0 || delayedFireRunnable != null ||
+            payloadExecutor.activeLeaseCount(ButtonAimPayloadOwner.BASE) != 0 ||
+            payloadExecutor.activeLeaseCount(ButtonAimPayloadOwner.ALTERNATE) != 0 ||
+            delayedFireRunnable != null ||
             finiteReleaseRunnable != null || baseUnlatchRunnable != null ||
             recoveryResetRunnable != null || aimOutput.isActive() || dpadOutput.isActive()
 
@@ -124,6 +126,8 @@ class ButtonAimHandler(
         }
     }
 
+    fun hasActiveGesture(): Boolean = activePointerId != MotionEvent.INVALID_POINTER_ID
+
     /** Lifecycle/profile/property cleanup. Unlike an alternate touch cancel, this always resets. */
     fun hardReset() {
         cancelTimers()
@@ -133,7 +137,8 @@ class ButtonAimHandler(
         }
         legacyPayloadHeld = false
         legacyTurboActive = false
-        payloadExecutor.releaseAllLeases()
+        payloadExecutor.releaseOwner(ButtonAimPayloadOwner.ALTERNATE)
+        payloadExecutor.releaseOwner(ButtonAimPayloadOwner.BASE)
         baseLease = null
         alternateLease = null
         setPressed(false)
@@ -168,7 +173,7 @@ class ButtonAimHandler(
         if (!alternate && isLatched()) {
             setPressed(false)
             setLatched(false)
-            if (usesOneShotExecutor()) releaseBaseOwnership() else {
+            if (usesPayloadExecutor()) releaseBaseOwnership() else {
                 releaseLegacyPayload()
                 legacyPayloadHeld = false
             }
@@ -281,7 +286,7 @@ class ButtonAimHandler(
                 startTurbo()
                 legacyTurboActive = true
                 legacyPayloadHeld = true
-            } else if (usesOneShotExecutor()) {
+            } else if (usesPayloadExecutor()) {
                 if (isGlobalHold() && !model.holdToggle) setLatched(true)
                 val pulseMode = if (isLatched()) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE
                 when (val result = payloadExecutor.activate(
@@ -418,13 +423,13 @@ class ButtonAimHandler(
     private fun completeImmediateBase() {
         stopTurbo()
         if (legacyTurboActive) {
-            if (!isLatched() && (!shouldSkipImmediateRelease() || usesOneShotExecutor())) {
+            if (!isLatched() && (!shouldSkipImmediateRelease() || usesPayloadExecutor())) {
                 // One-shot cannot leave a legacy pulse timer outside its ownership model.
                 releaseLegacyPayload()
             }
             legacyTurboActive = false
             legacyPayloadHeld = false
-        } else if (usesOneShotExecutor()) {
+        } else if (usesPayloadExecutor()) {
             if (!isLatched() && !shouldSkipImmediateRelease()) {
                 payloadExecutor.release(baseLease)
                 baseLease = null
@@ -470,7 +475,7 @@ class ButtonAimHandler(
 
     private fun fireDelayedBase(latchOnFire: Boolean) {
         if (latchOnFire) setLatched(true)
-        if (usesOneShotExecutor()) {
+        if (usesPayloadExecutor()) {
             val pulseMode = if (latchOnFire) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE
             when (val result = payloadExecutor.activate(
                 ButtonAimPayloadOwner.BASE,
@@ -868,6 +873,9 @@ class ButtonAimHandler(
         usesOneShotExecutor() && phaseState.phase != OneShotAlternatePhase.BASE
 
     private fun usesOneShotExecutor(): Boolean = model.buttonAimOneShotAlternateEnabled
+
+    private fun usesPayloadExecutor(): Boolean =
+        model.buttonAimOneShotAlternateEnabled || model.buttonDirectional.enabled
 
     companion object {
         private const val FINITE_PRESS_DURATION_MS = 90L

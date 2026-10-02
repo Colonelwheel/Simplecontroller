@@ -633,6 +633,7 @@ object SwipeManager {
                 it.stopDirectionalCommands()
                 it.releaseTouchAim()
                 it.releaseButtonAim()
+                it.releaseButtonDirections()
             }
         }
     }
@@ -659,7 +660,10 @@ object SwipeManager {
     }
 
     fun releaseAllButtonAimSurfaces() {
-        allViews.forEach { it.releaseButtonAim() }
+        allViews.forEach {
+            it.releaseButtonAim()
+            it.releaseButtonDirections()
+        }
     }
 
     fun releaseAllAutoTapButtons() {
