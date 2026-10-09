@@ -24,6 +24,7 @@ import pyautogui
 from datetime import datetime
 from collections import deque
 from camera_follow import CameraFollowSettings, CameraFollowState
+from face_input_server import FaceInputState, FaceInputServer, MergedGamepad, synchronized
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
@@ -180,10 +181,30 @@ def show_connection_info():
         logger.info(f"Other possible local IPs: {', '.join(ip_candidates[1:])}")
 
 # Create virtual Xbox 360 controllers - one for each player
-gamepads = {
-    'player1': vgamepad.VX360Gamepad(),
-    'player2': vgamepad.VX360Gamepad()
+# One RLock protects every native virtual-pad report, including Camera Follow.
+release_state_lock = threading.RLock()
+face_button_map = {
+    'A': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_A,
+    'B': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_B,
+    'X': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_X,
+    'Y': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_Y,
+    'LB': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_SHOULDER,
+    'RB': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_SHOULDER,
+    'START': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_START,
+    'BACK': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_BACK,
+    'UP': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_UP,
+    'DOWN': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_DOWN,
+    'LEFT': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_LEFT,
+    'RIGHT': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_DPAD_RIGHT,
+    'LS': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB,
+    'RS': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
 }
+gamepads = {
+    'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock),
+    'player2': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock)
+}
+face_input_state = FaceInputState(gamepads, release_state_lock)
+face_input_server = FaceInputServer(face_input_state, logger=logger)
 
 camera_follow_states = {
     player_id: CameraFollowState(CAMERA_FOLLOW_SETTINGS)
@@ -194,7 +215,7 @@ camera_follow_last_right_output = {
     for player_id in gamepads
 }
 camera_follow_output_locks = {
-    player_id: threading.RLock()
+    player_id: release_state_lock
     for player_id in gamepads
 }
 camera_follow_stop_event = threading.Event()
@@ -236,9 +257,9 @@ latest_stick_packets = {}
 # RELEASE_ALL uses the Android process session/sequence as a barrier. Any older
 # packet that arrives afterward is ignored instead of reactivating an output.
 release_barriers = {}
-release_state_lock = threading.RLock()
 release_generations = {player_id: 0 for player_id in gamepads}
 pending_button_release_timers = {player_id: set() for player_id in gamepads}
+phone_button_tokens = {player_id: {} for player_id in gamepads}
 
 class StabilitySmoother:
     """Mouse movement smoother focused on stability over responsiveness"""
@@ -379,6 +400,7 @@ class StabilitySmoother:
 smoother = StabilitySmoother()
 
 # Helper function for releasing Xbox buttons
+@synchronized(release_state_lock)
 def release_xbox_button(button, player_id='player1'):
     """Helper function to release an Xbox button"""
     try:
@@ -398,11 +420,14 @@ def current_release_generation(player_id):
     with release_state_lock:
         return release_generations.get(player_id, 0)
 
+@synchronized(release_state_lock)
 def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     """Neutralize receiver-owned outputs after an explicit RELEASE_ALL payload."""
     selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
     if not selected:
         return
+
+    face_input_state.reset(selected)
 
     with release_state_lock:
         timers = []
@@ -414,6 +439,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             keys_to_release.update(key_states.setdefault(player_id, {}).keys())
             key_states[player_id].clear()
             button_states.setdefault(player_id, {}).clear()
+            phone_button_tokens.setdefault(player_id, {}).clear()
             mouse_states.setdefault(
                 player_id,
                 {'left_down': False, 'is_touchpad_active': False}
@@ -454,6 +480,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
 
     logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
 
+@synchronized(release_state_lock)
 def release_all_outputs(session_id, sequence):
     """Apply each global release identity once; duplicates still receive an ACK."""
     with release_state_lock:
@@ -567,6 +594,7 @@ def apply_camera_follow_output(player_id, now=None, force=False):
     except Exception as e:
         logger.error(f"Failed to apply right-stick output for {player_id}: {e}")
 
+@synchronized(release_state_lock)
 def set_camera_follow_enabled(player_id, enabled):
     """Set an explicit Camera Follow state; duplicate commands are idempotent."""
     if player_id not in camera_follow_states:
@@ -617,6 +645,7 @@ def stop_camera_follow_worker():
     for player_id in tuple(camera_follow_states):
         clear_camera_follow_player(player_id)
 
+@synchronized(release_state_lock)
 def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="manual"):
     """Handle analog stick input with improved handling"""
     x = normalize_value(x)
@@ -649,6 +678,7 @@ def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="man
     except Exception as e:
         logger.error(f"Error handling stick input for {player_id}: {str(e)}")
 
+@synchronized(release_state_lock)
 def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
     """Handle analog trigger input (0.0 to 1.0)"""
     try:
@@ -865,10 +895,12 @@ def handle_button_press(command, player_id='player1'):
     if command in xbox_release_commands:
         btn = xbox_release_commands[command]
         try:
-            gamepad.release_button(button=btn)
-            gamepad.update()
-            # clear state
-            button_states.setdefault(player_id, {})[btn] = False
+            with release_state_lock:
+                phone_button_tokens[player_id][btn] = object()
+                gamepad.release_button(button=btn)
+                gamepad.update()
+                # clear only phone ownership; the proxy preserves facial holds.
+                button_states.setdefault(player_id, {})[btn] = False
             logger.info(f"{player_id} Xbox button explicitly released: {command}")
         except Exception as e:
             logger.error(f"Failed to release Xbox button for {player_id}: {str(e)}")
@@ -878,53 +910,46 @@ def handle_button_press(command, player_id='player1'):
     if command in xbox_buttons:
         btn = xbox_buttons[command]
         try:
-            # --- SAFETY: pre‑release if we think this button is still down ---
-            if button_states.get(player_id, {}).get(btn, False):
-                gamepad.release_button(button=btn)
+            with release_state_lock:
+                # Keep existing phone press edges when face is idle. A facial
+                # owner intentionally masks this release rather than losing hold.
+                if button_states.get(player_id, {}).get(btn, False):
+                    gamepad.release_button(button=btn)
+                    gamepad.update()
+                    time.sleep(0.005)
+                    button_states[player_id][btn] = False
+                token = object()
+                phone_button_tokens[player_id][btn] = token
+                gamepad.press_button(button=btn)
                 gamepad.update()
-                time.sleep(0.005)  # tiny settle
-                button_states[player_id][btn] = False
+                button_states.setdefault(player_id, {})[btn] = True
+                logger.info(f"{player_id} Xbox button pressed: {command}")
 
-            # Press
-            gamepad.press_button(button=btn)
-            gamepad.update()
-            # mark down
-            button_states.setdefault(player_id, {})[btn] = True
-            logger.info(f"{player_id} Xbox button pressed: {command}")
+                if not command.endswith("_HOLD"):
+                    release_generation = current_release_generation(player_id)
+                    release_timer = None
 
-            # Only auto‑release if not a HOLD command
-            if not command.endswith("_HOLD"):
-                release_generation = current_release_generation(player_id)
-                release_timer = None
-
-                def do_release():
-                    try:
-                        if current_release_generation(player_id) != release_generation:
-                            return
-                        gamepad.release_button(button=btn)
-                        gamepad.update()
-                    except Exception as e:
-                        logger.error(f"Auto‑release failed for {player_id}: {e}")
-                    finally:
-                        # make sure our local state is cleared
-                        try:
-                            button_states[player_id][btn] = False
-                        except Exception:
-                            pass
-
+                    def do_release():
                         with release_state_lock:
-                            pending_button_release_timers.setdefault(player_id, set()).discard(
-                                release_timer
-                            )
+                            try:
+                                if (release_generations[player_id] != release_generation
+                                        or phone_button_tokens[player_id].get(btn) is not token):
+                                    return
+                                gamepad.release_button(button=btn)
+                                gamepad.update()
+                                button_states[player_id][btn] = False
+                            except Exception as e:
+                                logger.error(f"Auto-release failed for {player_id}: {e}")
+                            finally:
+                                pending_button_release_timers[player_id].discard(release_timer)
 
-                release_timer = threading.Timer(0.1, do_release)
-                release_timer.daemon = True
-                with release_state_lock:
-                    pending_button_release_timers.setdefault(player_id, set()).add(release_timer)
-                release_timer.start()
-                logger.info(f"Scheduled auto-release for {player_id} {command}")
-            else:
-                logger.info(f"Hold mode - no auto-release for {player_id} {command}")
+                    release_timer = threading.Timer(0.1, do_release)
+                    release_timer.daemon = True
+                    pending_button_release_timers[player_id].add(release_timer)
+                    release_timer.start()
+                    logger.info(f"Scheduled auto-release for {player_id} {command}")
+                else:
+                    logger.info(f"Hold mode - no auto-release for {player_id} {command}")
         except Exception as e:
             logger.error(f"Failed to press Xbox button for {player_id}: {str(e)}")
         return True
@@ -969,8 +994,12 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
                         time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
                     continue
 
-                # Process command and wait for completion
-                handle_button_press(cmd, player_id)
+                # Check and dispatch atomically with global release. WAIT remains
+                # outside this lock so face heartbeats can run during sequences.
+                with release_state_lock:
+                    if release_generations[player_id] != release_generation:
+                        return
+                    handle_button_press(cmd, player_id)
     except Exception as e:
         logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
 
@@ -1395,6 +1424,13 @@ if __name__ == "__main__":
 
         # Camera Follow is isolated from command handling and updates only RS output.
         start_camera_follow_worker()
+
+        # Failure to bind the optional local endpoint must not stop phone output.
+        try:
+            face_input_server.start()
+            logger.info("Facial input listening on 127.0.0.1:42735")
+        except OSError as e:
+            logger.warning(f"Facial input endpoint unavailable: {e}")
         
         # Start the UDP server
         udp_server()
@@ -1405,6 +1441,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
+        face_input_server.stop()
         stop_camera_follow_worker()
         print("Server stopped")
         logger.info("Server stopped")

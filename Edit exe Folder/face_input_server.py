@@ -1,0 +1,373 @@
+"""Local facial input protocol and source-aware virtual-pad ownership.
+
+Standard library only. This module creates no virtual controller and imports no
+native input libraries, so its protocol/ownership can be tested without hardware.
+"""
+
+from collections import deque
+import functools
+import json
+import math
+import select
+import socket
+import threading
+import time
+import uuid
+
+BUTTONS = frozenset(("A", "B", "X", "Y", "LB", "RB", "START", "BACK",
+                     "UP", "DOWN", "LEFT", "RIGHT", "LS", "RS", "LT", "RT"))
+
+
+def synchronized(lock):
+    def decorate(fn):
+        @functools.wraps(fn)
+        def wrapped(*args, **kwargs):
+            with lock:
+                return fn(*args, **kwargs)
+        return wrapped
+    return decorate
+
+
+class MergedGamepad:
+    """Proxy phone writes; facial writes own independent buttons/triggers.
+
+    Every native mutation and report update shares the receiver's output RLock.
+    The receiver additionally wraps multi-call phone transitions in that lock.
+    """
+
+    _OWNED_ATTRIBUTES = frozenset(("raw", "button_map", "lock", "phone_buttons",
+                                   "face_buttons", "phone_triggers", "face_triggers"))
+
+    def __setattr__(self, name, value):
+        # Preserve existing pad attribute writes (also used by the legacy mock
+        # harness) while keeping ownership bookkeeping on this proxy.
+        raw = self.__dict__.get("raw")
+        if name not in self._OWNED_ATTRIBUTES and raw is not None and hasattr(raw, name):
+            with self.lock:
+                setattr(raw, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+    def __init__(self, raw, button_map, lock):
+        self.raw = raw
+        self.button_map = button_map
+        self.lock = lock
+        self.phone_buttons = set()
+        self.face_buttons = set()
+        self.phone_triggers = {"LT": 0.0, "RT": 0.0}
+        self.face_triggers = {"LT": 0.0, "RT": 0.0}
+
+    def __getattr__(self, name):
+        return getattr(self.raw, name)
+
+    def _button(self, button, pressed, source):
+        owners = self.phone_buttons if source == "phone" else self.face_buttons
+        before = button in self.phone_buttons or button in self.face_buttons
+        if pressed:
+            owners.add(button)
+        else:
+            owners.discard(button)
+        after = button in self.phone_buttons or button in self.face_buttons
+        if before != after:
+            method = self.raw.press_button if after else self.raw.release_button
+            method(button=button)
+
+    def press_button(self, button):
+        with self.lock:
+            self._button(button, True, "phone")
+
+    def release_button(self, button):
+        with self.lock:
+            self._button(button, False, "phone")
+
+    def _trigger(self, button, value, source):
+        if not math.isfinite(value):
+            value = 0.0
+        owners = self.phone_triggers if source == "phone" else self.face_triggers
+        owners[button] = max(0.0, min(1.0, value))
+        merged = max(self.phone_triggers[button], self.face_triggers[button])
+        method = self.raw.left_trigger_float if button == "LT" else self.raw.right_trigger_float
+        method(value_float=merged)
+
+    def left_trigger_float(self, value_float):
+        with self.lock:
+            self._trigger("LT", value_float, "phone")
+
+    def right_trigger_float(self, value_float):
+        with self.lock:
+            self._trigger("RT", value_float, "phone")
+
+    def left_joystick_float(self, x_value_float, y_value_float):
+        with self.lock:
+            self.raw.left_joystick_float(x_value_float=x_value_float, y_value_float=y_value_float)
+
+    def right_joystick_float(self, x_value_float, y_value_float):
+        with self.lock:
+            self.raw.right_joystick_float(x_value_float=x_value_float, y_value_float=y_value_float)
+
+    def update(self):
+        with self.lock:
+            self.raw.update()
+
+    def reset(self):
+        with self.lock:
+            self.phone_buttons.clear()
+            self.face_buttons.clear()
+            self.phone_triggers = {"LT": 0.0, "RT": 0.0}
+            self.face_triggers = {"LT": 0.0, "RT": 0.0}
+            self.raw.reset()
+
+    def face_set(self, button, pressed):
+        with self.lock:
+            if button in ("LT", "RT"):
+                self._trigger(button, 1.0 if pressed else 0.0, "face")
+            else:
+                self._button(self.button_map[button], pressed, "face")
+            self.raw.update()
+
+    def face_clear(self):
+        with self.lock:
+            for button in tuple(self.face_buttons):
+                self._button(button, False, "face")
+            for button in ("LT", "RT"):
+                if self.face_triggers[button]:
+                    self._trigger(button, 0.0, "face")
+            self.raw.update()
+
+
+class ProtocolError(ValueError):
+    pass
+
+
+class FaceInputState:
+    """One session, epoch barriers, bounded presses, and heartbeat fail-safe."""
+
+    def __init__(self, pads, lock, clock=time.monotonic):
+        self.pads = pads
+        self.lock = lock
+        self.clock = clock
+        self.epoch = 0
+        self.session = None
+        self.player = None
+        self.armed = False
+        self.seq = -1
+        self.last_heartbeat = 0.0
+        self.deadlines = {}
+        self.binding = None
+        self.notifications = deque(maxlen=4)
+
+    def _clear(self):
+        if self.player is not None:
+            self.pads[self.player].face_clear()
+        self.deadlines.clear()
+        self.binding = None
+
+    def disconnect(self):
+        with self.lock:
+            self._clear()
+            self.armed = False
+            self.session = self.player = None
+            self.notifications.clear()
+
+    def reset(self, player_ids):
+        """Called inside the receiver's atomic global release transition."""
+        with self.lock:
+            if self.player not in player_ids:
+                return
+            self._clear()
+            self.armed = False
+            self.epoch += 1
+            self.notifications.clear()
+            self.notifications.append({"v": 1, "op": "reset", "epoch": self.epoch})
+
+    def handle(self, message):
+        with self.lock:
+            if not isinstance(message, dict) or type(message.get("v")) is not int or message["v"] != 1:
+                raise ProtocolError("unsupported protocol")
+            op = message.get("op")
+            if op == "hello":
+                if self.session is not None:
+                    raise ProtocolError("session already established")
+                try:
+                    session = str(uuid.UUID(message.get("session", "")))
+                except (ValueError, TypeError, AttributeError):
+                    raise ProtocolError("invalid session") from None
+                player = message.get("player", "player1")
+                if player not in self.pads:
+                    raise ProtocolError("invalid player")
+                self.epoch += 1
+                self.session, self.player = session, player
+                self.seq = -1
+                self.armed = False
+                self.last_heartbeat = self.clock()
+                return {"v": 1, "op": "ready", "epoch": self.epoch}
+            if self.session is None:
+                raise ProtocolError("hello required")
+            if self.clock() - self.last_heartbeat >= 0.5:
+                self.disconnect()
+                raise ProtocolError("heartbeat timeout")
+            epoch, seq = message.get("epoch"), message.get("seq")
+            if type(epoch) is not int or epoch != self.epoch:
+                # Never execute a delayed action from the preceding reset epoch.
+                return {"v": 1, "op": "reset", "epoch": self.epoch}
+            if type(seq) is not int or seq < 0 or seq <= self.seq:
+                raise ProtocolError("stale sequence")
+            if op not in ("arm", "heartbeat", "tap", "hold", "release", "clear"):
+                raise ProtocolError("unsupported operation")
+            button = message.get("button")
+            if op in ("tap", "hold", "release") and button not in BUTTONS:
+                raise ProtocolError("unsupported button")
+            if op == "tap" and (type(message.get("duration_ms")) is not int or message["duration_ms"] != 100):
+                raise ProtocolError("tap duration must be 100 ms")
+            self.seq = seq
+            if op == "heartbeat":
+                self.last_heartbeat = self.clock()
+            elif op == "arm":
+                self.armed = True
+            elif op == "clear":
+                self._clear()
+                self.armed = False
+            elif op == "release":
+                self.deadlines.pop(button, None)
+                self.pads[self.player].face_set(button, False)
+                if self.binding == button:
+                    self.binding = None
+            elif self.armed:
+                # One active binding: changing bindings cannot leave old ownership.
+                if self.binding != button:
+                    self._clear()
+                self.deadlines.pop(button, None)
+                self.binding = button
+                self.pads[self.player].face_set(button, True)
+                if op == "tap":
+                    self.deadlines[button] = self.clock() + 0.1
+            return None
+
+    def tick(self):
+        """Return True when the socket must close for heartbeat timeout."""
+        with self.lock:
+            now = self.clock()
+            if self.session is None:
+                return False
+            if now - self.last_heartbeat >= 0.5:
+                self.disconnect()
+                return True
+            for button, deadline in tuple(self.deadlines.items()):
+                if now >= deadline:
+                    self.deadlines.pop(button, None)
+                    self.pads[self.player].face_set(button, False)
+            return False
+
+    def drain_notifications(self):
+        with self.lock:
+            result = list(self.notifications)
+            self.notifications.clear()
+            return result
+
+
+class FaceInputServer:
+    """Bounded, nonblocking loopback TCP server; no phone parser involvement."""
+
+    def __init__(self, state, port=42735, logger=None):
+        self.state = state
+        self.port = port
+        self.logger = logger
+        self.stop_event = threading.Event()
+        self.listener = None
+        self.thread = None
+
+    def start(self):
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Windows exclusive bind prevents an unrelated listener sharing the port.
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        try:
+            listener.bind(("127.0.0.1", self.port))
+            listener.listen(2)
+            listener.setblocking(False)
+        except Exception:
+            listener.close()
+            raise
+        self.listener = listener
+        self.port = listener.getsockname()[1]
+        self.thread = threading.Thread(target=self._run, name="FacialInputTCP", daemon=True)
+        self.thread.start()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join(timeout=1.0)
+
+    def _run(self):
+        client = None
+        incoming = bytearray()
+        outgoing = bytearray()
+        hello_deadline = 0.0
+
+        def close_client():
+            nonlocal client
+            if client is not None:
+                client.close()
+                client = None
+            incoming.clear()
+            outgoing.clear()
+            self.state.disconnect()
+
+        def enqueue(message):
+            outgoing.extend((json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8"))
+            if len(outgoing) > 4096:
+                raise ProtocolError("slow consumer")
+
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    if self.state.tick() or (client is not None and self.state.session is None and time.monotonic() >= hello_deadline):
+                        close_client()
+                    if client is not None:
+                        for notice in self.state.drain_notifications():
+                            enqueue(notice)
+                    readable, writable, _ = select.select(
+                        [self.listener] + ([client] if client else []),
+                        [client] if client is not None and outgoing else [], [], 0.01)
+                    if self.listener in readable:
+                        candidate, address = self.listener.accept()
+                        if client is not None or address[0] != "127.0.0.1":
+                            candidate.close()
+                        else:
+                            candidate.setblocking(False)
+                            candidate.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                            client = candidate
+                            hello_deadline = time.monotonic() + 0.5
+                    if client is not None and client in readable:
+                        chunk = client.recv(4096)
+                        if not chunk:
+                            close_client()
+                            continue
+                        incoming.extend(chunk)
+                        if len(incoming) > 8192:
+                            raise ProtocolError("input buffer too large")
+                    if client is not None:
+                        # Per-iteration cap keeps a noisy local client from starving timeout checks.
+                        for _ in range(8):
+                            newline = incoming.find(b"\n")
+                            if newline < 0:
+                                if len(incoming) > 4096:
+                                    raise ProtocolError("line too large")
+                                break
+                            if newline > 4096:
+                                raise ProtocolError("line too large")
+                            line = bytes(incoming[:newline])
+                            del incoming[:newline + 1]
+                            result = self.state.handle(json.loads(line.decode("utf-8")))
+                            if result is not None:
+                                enqueue(result)
+                    if client is not None and client in writable and outgoing:
+                        count = client.send(outgoing)
+                        del outgoing[:count]
+                except (OSError, ValueError, UnicodeError, TypeError, KeyError) as exc:
+                    if self.logger:
+                        self.logger.warning("Facial input disconnected: %s", exc)
+                    close_client()
+        finally:
+            close_client()
+            self.listener.close()
