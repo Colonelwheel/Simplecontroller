@@ -14,8 +14,9 @@ import threading
 import time
 import uuid
 
+DESKTOP_INPUTS = frozenset(("MOUSE_LEFT", "MOUSE_RIGHT", "SPACE"))
 BUTTONS = frozenset(("A", "B", "X", "Y", "LB", "RB", "START", "BACK",
-                     "UP", "DOWN", "LEFT", "RIGHT", "LS", "RS", "LT", "RT"))
+                     "UP", "DOWN", "LEFT", "RIGHT", "LS", "RS", "LT", "RT")) | DESKTOP_INPUTS
 
 
 def synchronized(lock):
@@ -28,6 +29,103 @@ def synchronized(lock):
     return decorate
 
 
+class MergedDesktopInput:
+    """Global Windows outputs: preserve phone events while face is inactive.
+
+    The receiver supplies a write(target, pressed) callback and its existing
+    shared lock. No native input dependency is imported here. Phone retains
+    its existing single global mouse stream and Player 1 keyboard rule.
+    """
+
+    def __init__(self, write, lock):
+        self.write = write
+        self.lock = lock
+        self.phone = set()
+        self.face = {target: set() for target in DESKTOP_INPUTS}
+        # Last callback result, not a poll of unrelated physical Windows input.
+        # None means a callback failed and the injected state is uncertain.
+        self.emitted = {target: False for target in DESKTOP_INPUTS}
+
+    def _write(self, target, pressed):
+        self.emitted[target] = None
+        self.write(target, pressed)
+        self.emitted[target] = pressed
+
+    def phone_set(self, target, pressed):
+        with self.lock:
+            if target not in DESKTOP_INPUTS:
+                raise ValueError("unsupported desktop input")
+            if pressed:
+                self.phone.add(target)
+            else:
+                self.phone.discard(target)
+            # Repeated phone DOWN/UP retains legacy behavior without face;
+            # while face holds, neither source may insert an output release.
+            if not self.face[target]:
+                self._write(target, pressed)
+
+    def face_set(self, player, target, pressed):
+        with self.lock:
+            if target not in DESKTOP_INPUTS:
+                raise ValueError("unsupported desktop input")
+            owners = self.face[target]
+            before = target in self.phone or bool(owners)
+            if pressed:
+                owners.add(player)
+            else:
+                owners.discard(player)
+            after = target in self.phone or bool(owners)
+            if (before != after or pressed and self.emitted[target] is not True
+                    or not after and self.emitted[target] is None):
+                # A legacy bare phone tap may have emitted UP while its
+                # persistent KEY_DOWN tracker still owns Space. A new facial
+                # hold must restore DOWN immediately, without waiting for resync.
+                self._write(target, after)
+
+    def face_clear(self, player):
+        with self.lock:
+            failure = None
+            for target in DESKTOP_INPUTS:
+                try:
+                    self.face_set(player, target, False)
+                except Exception as exc:
+                    if failure is None:
+                        failure = exc
+            if failure is not None:
+                raise failure
+
+    def phone_tap(self, target):
+        with self.lock:
+            if target not in DESKTOP_INPUTS:
+                raise ValueError("unsupported desktop input")
+            # A bare phone tap is transient and must not consume an existing
+            # KEY_DOWN hold. Preserve its ordinary DOWN/UP events without face.
+            if self.face[target]:
+                return
+            try:
+                self._write(target, True)
+                self._write(target, False)
+            except Exception:
+                # Retain ownership for explicit cleanup after a partial write.
+                self.phone.add(target)
+                raise
+
+    def resync_phone(self, target):
+        with self.lock:
+            if target not in DESKTOP_INPUTS:
+                raise ValueError("unsupported desktop input")
+            # Caller checked the OS state and the phone's KEY_DOWN tracker.
+            self.phone.add(target)
+            self._write(target, True)
+
+    def clear_unowned(self, target):
+        with self.lock:
+            if target not in self.phone and not self.face[target] and self.emitted[target] is not False:
+                # Explicit cleanup retries an uncertain/known injected DOWN,
+                # including after the facial session/player has gone away.
+                self._write(target, False)
+
+
 class MergedGamepad:
     """Proxy phone writes; face and voice independently own buttons/triggers.
 
@@ -37,7 +135,7 @@ class MergedGamepad:
 
     _OWNED_ATTRIBUTES = frozenset(("raw", "button_map", "lock", "phone_buttons",
                                    "face_buttons", "voice_buttons", "phone_triggers",
-                                   "face_triggers", "voice_triggers"))
+                                   "face_triggers", "voice_triggers", "desktop", "desktop_player"))
 
     def __setattr__(self, name, value):
         # Preserve existing pad attribute writes (also used by the legacy mock
@@ -49,7 +147,7 @@ class MergedGamepad:
         else:
             object.__setattr__(self, name, value)
 
-    def __init__(self, raw, button_map, lock):
+    def __init__(self, raw, button_map, lock, desktop=None, player=None):
         self.raw = raw
         self.button_map = button_map
         self.lock = lock
@@ -59,6 +157,8 @@ class MergedGamepad:
         self.phone_triggers = {"LT": 0.0, "RT": 0.0}
         self.face_triggers = {"LT": 0.0, "RT": 0.0}
         self.voice_triggers = {"LT": 0.0, "RT": 0.0}
+        self.desktop = desktop
+        self.desktop_player = player
 
     def __getattr__(self, name):
         return getattr(self.raw, name)
@@ -127,6 +227,11 @@ class MergedGamepad:
 
     def face_set(self, button, pressed):
         with self.lock:
+            if button in DESKTOP_INPUTS:
+                if self.desktop is None:
+                    raise ProtocolError("desktop input unavailable")
+                self.desktop.face_set(self.desktop_player, button, pressed)
+                return
             if button in ("LT", "RT"):
                 self._trigger(button, 1.0 if pressed else 0.0, "face")
             else:
@@ -135,12 +240,28 @@ class MergedGamepad:
 
     def face_clear(self):
         with self.lock:
+            failure = None
+            if self.desktop is not None:
+                try:
+                    self.desktop.face_clear(self.desktop_player)
+                except Exception as exc:
+                    failure = exc
             for button in tuple(self.face_buttons):
-                self._button(button, False, "face")
+                try:
+                    self._button(button, False, "face")
+                except Exception as exc:
+                    if failure is None:
+                        failure = exc
             for button in ("LT", "RT"):
                 if self.face_triggers[button]:
-                    self._trigger(button, 0.0, "face")
+                    try:
+                        self._trigger(button, 0.0, "face")
+                    except Exception as exc:
+                        if failure is None:
+                            failure = exc
             self.raw.update()
+            if failure is not None:
+                raise failure
 
     def voice_set(self, button, value):
         with self.lock:
@@ -187,12 +308,12 @@ class FaceInputState:
         self.notifications = deque(maxlen=4)
 
     def _clear(self):
-        if self.player is not None:
-            self.pads[self.player].face_clear()
         self.deadlines.clear()
         self.binding = None
         for channel in self.channels.values():
             channel["button"] = channel["deadline"] = None
+        if self.player is not None:
+            self.pads[self.player].face_clear()
 
     def _disarm(self):
         self.armed = False
@@ -200,7 +321,10 @@ class FaceInputState:
             channel["armed"] = False
 
     def _notice(self, op):
-        return {"v": self.version, "op": op, "epoch": self.epoch}
+        notice = {"v": self.version, "op": op, "epoch": self.epoch}
+        if self.player is not None and getattr(self.pads[self.player], "desktop", None) is not None:
+            notice["desktop_input"] = True
+        return notice
 
     def _outputs(self):
         return {channel["button"] for channel in self.channels.values()
@@ -216,8 +340,8 @@ class FaceInputState:
 
     def _handle_dual(self, op, binding, button):
         if op == "clear" and binding is None:
-            self._clear()
             self._disarm()
+            self._clear()
             return
         channel = self.channels[binding]
         previous = self._outputs()
@@ -235,21 +359,23 @@ class FaceInputState:
 
     def disconnect(self):
         with self.lock:
-            self._clear()
             self._disarm()
-            self.session = self.player = None
-            self.notifications.clear()
+            try:
+                self._clear()
+            finally:
+                self.session = self.player = None
+                self.notifications.clear()
 
     def reset(self, player_ids):
         """Called inside the receiver's atomic global release transition."""
         with self.lock:
             if self.player not in player_ids:
                 return
-            self._clear()
             self._disarm()
             self.epoch += 1
             self.notifications.clear()
             self.notifications.append(self._notice("reset"))
+            self._clear()
 
     def handle(self, message):
         with self.lock:
@@ -291,6 +417,8 @@ class FaceInputState:
             button = message.get("button")
             if op in ("tap", "hold", "release") and button not in BUTTONS:
                 raise ProtocolError("unsupported button")
+            if button in DESKTOP_INPUTS and getattr(self.pads[self.player], "desktop", None) is None:
+                raise ProtocolError("desktop input unavailable")
             if op == "tap" and (type(message.get("duration_ms")) is not int or message["duration_ms"] != 100):
                 raise ProtocolError("tap duration must be 100 ms")
             binding = message.get("binding")
@@ -308,8 +436,8 @@ class FaceInputState:
             elif op == "arm":
                 self.armed = True
             elif op == "clear":
-                self._clear()
                 self.armed = False
+                self._clear()
             elif op == "release":
                 self.deadlines.pop(button, None)
                 self.pads[self.player].face_set(button, False)
@@ -401,7 +529,11 @@ class FaceInputServer:
                 client = None
             incoming.clear()
             outgoing.clear()
-            self.state.disconnect()
+            try:
+                self.state.disconnect()
+            except Exception as exc:
+                if self.logger:
+                    self.logger.warning("Facial input cleanup failed: %s", exc)
 
         def enqueue(message):
             outgoing.extend((json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8"))

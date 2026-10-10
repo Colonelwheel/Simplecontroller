@@ -24,7 +24,7 @@ import pyautogui
 from datetime import datetime
 from collections import deque
 from camera_follow import CameraFollowSettings, CameraFollowState
-from face_input_server import FaceInputState, FaceInputServer, MergedGamepad, synchronized
+from face_input_server import FaceInputState, FaceInputServer, MergedGamepad, MergedDesktopInput, synchronized
 from voice_input_server import VoiceInputState, VoiceInputServer
 
 # Configure pyautogui for mouse handling
@@ -200,9 +200,25 @@ face_button_map = {
     'LS': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_LEFT_THUMB,
     'RS': vgamepad.XUSB_BUTTON.XUSB_GAMEPAD_RIGHT_THUMB,
 }
+def is_space_key(key):
+    # Match the installed keyboard library's supported canonical aliases.
+    return key.lower() in ('space', 'spacebar', 'space bar', ' ')
+
+
+def write_desktop_input(target, pressed):
+    if target == 'SPACE':
+        (keyboard.press if pressed else keyboard.release)('space')
+    else:
+        button = 'left' if target == 'MOUSE_LEFT' else 'right'
+        (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
+
+
+desktop_input = MergedDesktopInput(write_desktop_input, release_state_lock)
 gamepads = {
-    'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock),
-    'player2': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock)
+    'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
+                           desktop=desktop_input, player='player1'),
+    'player2': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
+                           desktop=desktop_input, player='player2')
 }
 face_input_state = FaceInputState(gamepads, release_state_lock)
 face_input_server = FaceInputServer(face_input_state, logger=logger)
@@ -433,7 +449,12 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     if not selected:
         return
 
-    face_input_state.reset(selected)
+    try:
+        face_input_state.reset(selected)
+    except Exception as e:
+        # Scheduling/epoch barriers are cleared before native cleanup; still
+        # attempt phone/voice cleanup if a Windows mouse/key release fails.
+        logger.warning(f"Facial input cleanup failed during global release: {e}")
     try:
         voice_input_state.reset(selected)
     except Exception as e:
@@ -462,14 +483,32 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
 
     for key in keys_to_release:
         try:
-            keyboard.release(key.lower())
+            if is_space_key(key):
+                desktop_input.phone_set('SPACE', False)
+            else:
+                keyboard.release(key.lower())
         except Exception as e:
             logger.warning(f"Failed to release key {key}: {e}")
+
+    # A failed bare Space tap can stop between DOWN and UP without a KEY_DOWN
+    # tracker entry. Clear its phone ownership during Player 1/global cleanup.
+    if 'player1' in selected and 'SPACE' in desktop_input.phone:
+        try:
+            desktop_input.phone_set('SPACE', False)
+        except Exception as e:
+            logger.warning(f"Failed to release Space: {e}")
+    try:
+        desktop_input.clear_unowned('SPACE')
+    except Exception as e:
+        logger.warning(f"Failed to retry pending Space release: {e}")
 
     # Mouse output is shared by Windows, so idempotently release every supported button.
     for mouse_button in ("left", "right", "middle"):
         try:
-            pyautogui.mouseUp(button=mouse_button)
+            if mouse_button in ('left', 'right'):
+                desktop_input.phone_set('MOUSE_' + mouse_button.upper(), False)
+            else:
+                pyautogui.mouseUp(button=mouse_button)
         except Exception as e:
             logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
 
@@ -550,17 +589,18 @@ def handle_touchpad(command):
     except Exception as e:
         logger.error(f"Error handling touchpad input: {e}")
 
+@synchronized(release_state_lock)
 def handle_mouse_buttons(command):
     try:
         if command == "MOUSE_LEFT_DOWN":
-            pyautogui.mouseDown(button="left")
+            desktop_input.phone_set('MOUSE_LEFT', True)
         elif command == "MOUSE_LEFT_UP":
-            pyautogui.mouseUp(button="left")
+            desktop_input.phone_set('MOUSE_LEFT', False)
 
         elif command == "MOUSE_RIGHT_DOWN":          # NEW
-            pyautogui.mouseDown(button="right")
+            desktop_input.phone_set('MOUSE_RIGHT', True)
         elif command == "MOUSE_RIGHT_UP":            # NEW
-            pyautogui.mouseUp(button="right")
+            desktop_input.phone_set('MOUSE_RIGHT', False)
             
         elif command == "MOUSE_MIDDLE_DOWN":
             pyautogui.mouseDown(button="middle")
@@ -741,17 +781,21 @@ def handle_key_press(key, player_id='player1'):
         handle_wait_command(key, player_id)
         return
 
-    if player_id not in key_states:
-        key_states[player_id] = {}
+    with release_state_lock:
+        if player_id not in key_states:
+            key_states[player_id] = {}
 
-    key_states[player_id][key] = True
-    logger.info(f"{player_id} Key press: {key}")
+        key_states[player_id][key] = True
+        logger.info(f"{player_id} Key press: {key}")
 
-    if player_id == 'player1':
-        try:
-            keyboard.press(key.lower())
-        except Exception as e:
-            logger.error(f"Failed to press key {key}: {str(e)}")
+        if player_id == 'player1':
+            try:
+                if is_space_key(key):
+                    desktop_input.phone_set('SPACE', True)
+                else:
+                    keyboard.press(key.lower())
+            except Exception as e:
+                logger.error(f"Failed to press key {key}: {str(e)}")
 
 def handle_key_release(key, player_id='player1'):
     """Handle a directional key release with state tracking"""
@@ -762,21 +806,25 @@ def handle_key_release(key, player_id='player1'):
         logger.info(f"{player_id} ignored wait key release: {key}")
         return
 
-    if player_id not in key_states:
-        key_states[player_id] = {}
+    with release_state_lock:
+        if player_id not in key_states:
+            key_states[player_id] = {}
 
-    # Mark this key as released in our state tracker
-    if key in key_states[player_id]:
-        del key_states[player_id][key]
+        # Mark this key as released in our state tracker
+        if key in key_states[player_id]:
+            del key_states[player_id][key]
 
-    logger.info(f"{player_id} Key release: {key}")
+        logger.info(f"{player_id} Key release: {key}")
 
-    # Release key (only player1 controls keyboard)
-    if player_id == 'player1':
-        try:
-            keyboard.release(key.lower())
-        except Exception as e:
-            logger.error(f"Failed to release key {key}: {str(e)}")
+        # Release key (only player1 controls keyboard)
+        if player_id == 'player1':
+            try:
+                if is_space_key(key):
+                    desktop_input.phone_set('SPACE', False)
+                else:
+                    keyboard.release(key.lower())
+            except Exception as e:
+                logger.error(f"Failed to release key {key}: {str(e)}")
 
 def handle_button_press(command, player_id='player1'):
     """Handle various button commands with proper release handling"""
@@ -971,7 +1019,10 @@ def handle_button_press(command, player_id='player1'):
         # Only player1 controls the keyboard to avoid conflicts
         if player_id == 'player1':
             # For regular keyboard presses (not through key state system)
-            keyboard.press_and_release(command.lower())
+            if is_space_key(command):
+                desktop_input.phone_tap('SPACE')
+            else:
+                keyboard.press_and_release(command.lower())
             logger.info(f"{player_id} Keyboard key pressed: {command}")
         return True
     except Exception as e:
@@ -1341,6 +1392,7 @@ def clean_inactive_connections():
         logger.info(f"Removing inactive connection: {addr_key} ({player_id})")
         del active_connections[addr_key]
 
+@synchronized(release_state_lock)
 def clean_key_states():
     """Clean up any inconsistent keyboard states"""
     try:
@@ -1352,7 +1404,10 @@ def clean_key_states():
                     # If key is not actually pressed according to the keyboard library
                     if not keyboard.is_pressed(key.lower()):
                         # Re-press it to ensure it's active
-                        keyboard.press(key.lower())
+                        if is_space_key(key):
+                            desktop_input.resync_phone('SPACE')
+                        else:
+                            keyboard.press(key.lower())
                         logger.info(f"Re-pressed key: {key}")
                 except Exception as e:
                     logger.warning(f"Error checking key state: {key} - {str(e)}")
