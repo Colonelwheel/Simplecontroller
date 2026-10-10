@@ -24,7 +24,8 @@ import pyautogui
 from datetime import datetime
 from collections import deque
 from camera_follow import CameraFollowSettings, CameraFollowState
-from face_input_server import FaceInputState, FaceInputServer, MergedGamepad, MergedDesktopInput, synchronized
+from face_input_server import (FaceInputState, FaceInputServer, MergedGamepad, MergedDesktopInput,
+                               synchronized, canonical_phone_key, keyboard_name, FACE_INPUT_TAG)
 from voice_input_server import VoiceInputState, VoiceInputServer
 
 # Configure pyautogui for mouse handling
@@ -206,14 +207,72 @@ def is_space_key(key):
 
 
 def write_desktop_input(target, pressed):
-    if target == 'SPACE':
-        (keyboard.press if pressed else keyboard.release)('space')
+    if target == 'SPACE' or target.startswith('KEY:'):
+        (keyboard.press if pressed else keyboard.release)(keyboard_name(target))
     else:
         button = 'left' if target == 'MOUSE_LEFT' else 'right'
         (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
 
 
-desktop_input = MergedDesktopInput(write_desktop_input, release_state_lock)
+_tagged_keyboard_api = None
+
+
+def send_tagged_key(target, pressed):
+    """V3 facial keyboard output has provenance for the re-center key hook.
+
+    Construct the Win32 ABI lazily; imports/tests never inject native keys.
+    SendInput failure is explicit (including Windows integrity restrictions).
+    """
+    global _tagged_keyboard_api
+    import ctypes
+    from ctypes import wintypes
+    if _tagged_keyboard_api is None:
+        class KeyboardInput(ctypes.Structure):
+            _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
+                        ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
+                        ('dwExtraInfo', ctypes.c_size_t)]
+        class MouseInput(ctypes.Structure):
+            _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG),
+                        ('mouseData', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
+                        ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
+        class InputUnion(ctypes.Union):
+            _fields_ = [('ki', KeyboardInput), ('mi', MouseInput)]
+        class Input(ctypes.Structure):
+            _anonymous_ = ('data',)
+            _fields_ = [('type', wintypes.DWORD), ('data', InputUnion)]
+        send = ctypes.WinDLL('user32', use_last_error=True).SendInput
+        send.argtypes = (wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int)
+        send.restype = wintypes.UINT
+        _tagged_keyboard_api = (KeyboardInput, Input, send)
+    name = target.removeprefix('KEY:')
+    vk_names = {'SPACE': 0x20, 'ENTER': 0x0D, 'TAB': 0x09, 'ESC': 0x1B,
+        'BACKSPACE': 0x08, 'UP': 0x26, 'DOWN': 0x28, 'LEFT': 0x25, 'RIGHT': 0x27,
+        'SHIFT': 0x10, 'CTRL': 0x11, 'ALT': 0x12, 'WIN': 0x5B,
+        'LSHIFT': 0xA0, 'RSHIFT': 0xA1, 'LCTRL': 0xA2, 'RCTRL': 0xA3,
+        'LALT': 0xA4, 'RALT': 0xA5, 'LWIN': 0x5B, 'RWIN': 0x5C,
+        'HOME': 0x24, 'END': 0x23, 'PAGEUP': 0x21, 'PAGEDOWN': 0x22,
+        'INSERT': 0x2D, 'DELETE': 0x2E, 'CAPSLOCK': 0x14}
+    vk = (ord(name) if len(name) == 1 else 0x6F + int(name[1:])
+          if name.startswith('F') and name[1:].isdigit() else vk_names[name])
+    flags = 0 if pressed else 2
+    if name in ('UP', 'DOWN', 'LEFT', 'RIGHT', 'HOME', 'END', 'PAGEUP', 'PAGEDOWN',
+                'INSERT', 'DELETE', 'RCTRL', 'RALT', 'WIN', 'LWIN', 'RWIN'):
+        flags |= 1
+    KeyboardInput, Input, send = _tagged_keyboard_api
+    item = Input(type=1, ki=KeyboardInput(vk, 0, flags, 0, FACE_INPUT_TAG))
+    if send(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
+        error = ctypes.get_last_error()
+        raise OSError(error, 'Facial SendInput failed; check application elevation')
+
+
+def write_facial_desktop_input(target, pressed):
+    if target == 'SPACE' or target.startswith('KEY:'):
+        send_tagged_key(target, pressed)
+    else:
+        write_desktop_input(target, pressed)
+
+
+desktop_input = MergedDesktopInput(write_desktop_input, release_state_lock, write_facial_desktop_input)
 gamepads = {
     'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
                            desktop=desktop_input, player='player1'),
@@ -250,6 +309,15 @@ camera_follow_input_lost = {
     player_id: False
     for player_id in gamepads
 }
+
+
+def effective_left_changed(player_id, x, y):
+    # Camera Follow uses legacy screen Y; native Xbox forward is positive Y.
+    camera_follow_states[player_id].set_left_stick(x, -y)
+
+
+for _player_id, _pad in gamepads.items():
+    _pad.left_changed = lambda x, y, player_id=_player_id: effective_left_changed(player_id, x, y)
 
 # Track button states per player
 button_states = {
@@ -483,24 +551,26 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
 
     for key in keys_to_release:
         try:
-            if is_space_key(key):
-                desktop_input.phone_set('SPACE', False)
+            if canonical_phone_key(key) is not None:
+                desktop_input.phone_set(canonical_phone_key(key), False)
             else:
                 keyboard.release(key.lower())
         except Exception as e:
             logger.warning(f"Failed to release key {key}: {e}")
 
-    # A failed bare Space tap can stop between DOWN and UP without a KEY_DOWN
-    # tracker entry. Clear its phone ownership during Player 1/global cleanup.
-    if 'player1' in selected and 'SPACE' in desktop_input.phone:
+    # Generic face/phone keys retain cleanup ownership after partial native writes.
+    for target in tuple(desktop_input.targets):
+        if target.startswith('MOUSE_'):
+            continue
+        if 'player1' in selected and target in desktop_input.phone:
+            try:
+                desktop_input.phone_set(target, False)
+            except Exception as e:
+                logger.warning(f"Failed to release {target}: {e}")
         try:
-            desktop_input.phone_set('SPACE', False)
+            desktop_input.clear_unowned(target)
         except Exception as e:
-            logger.warning(f"Failed to release Space: {e}")
-    try:
-        desktop_input.clear_unowned('SPACE')
-    except Exception as e:
-        logger.warning(f"Failed to retry pending Space release: {e}")
+            logger.warning(f"Failed to retry pending {target} release: {e}")
 
     # Mouse output is shared by Windows, so idempotently release every supported button.
     for mouse_button in ("left", "right", "middle"):
@@ -664,6 +734,9 @@ def clear_camera_follow_player(player_id):
         return
     with camera_follow_output_locks[player_id]:
         camera_follow_states[player_id].clear_inputs()
+        pad = gamepads[player_id]
+        if pad.phone_left == (0.0, 0.0) and pad.face_left != (0.0, 0.0):
+            effective_left_changed(player_id, *pad.face_left)
         apply_camera_follow_output(player_id, force=True)
 
 def camera_follow_worker():
@@ -679,7 +752,9 @@ def camera_follow_worker():
                 if not camera_follow_input_lost[player_id]:
                     camera_follow_input_lost[player_id] = True
                     clear_camera_follow_player(player_id)
-                continue
+                pad = gamepads[player_id]
+                if pad.phone_left != (0.0, 0.0) or pad.face_left == (0.0, 0.0):
+                    continue
             apply_camera_follow_output(player_id)
 
 def start_camera_follow_worker():
@@ -715,7 +790,6 @@ def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="man
         gamepad = gamepads[player_id]
 
         if stick_type == "LEFT":
-            camera_follow_states[player_id].set_left_stick(x, y)
             with camera_follow_output_locks[player_id]:
                 gamepad.left_joystick_float(x_value_float=x, y_value_float=-y)  # Y is inverted for gamepad
                 gamepad.update()
@@ -790,8 +864,8 @@ def handle_key_press(key, player_id='player1'):
 
         if player_id == 'player1':
             try:
-                if is_space_key(key):
-                    desktop_input.phone_set('SPACE', True)
+                if canonical_phone_key(key) is not None:
+                    desktop_input.phone_set(canonical_phone_key(key), True)
                 else:
                     keyboard.press(key.lower())
             except Exception as e:
@@ -819,8 +893,8 @@ def handle_key_release(key, player_id='player1'):
         # Release key (only player1 controls keyboard)
         if player_id == 'player1':
             try:
-                if is_space_key(key):
-                    desktop_input.phone_set('SPACE', False)
+                if canonical_phone_key(key) is not None:
+                    desktop_input.phone_set(canonical_phone_key(key), False)
                 else:
                     keyboard.release(key.lower())
             except Exception as e:
@@ -1019,8 +1093,8 @@ def handle_button_press(command, player_id='player1'):
         # Only player1 controls the keyboard to avoid conflicts
         if player_id == 'player1':
             # For regular keyboard presses (not through key state system)
-            if is_space_key(command):
-                desktop_input.phone_tap('SPACE')
+            if canonical_phone_key(command) is not None:
+                desktop_input.phone_tap(canonical_phone_key(command))
             else:
                 keyboard.press_and_release(command.lower())
             logger.info(f"{player_id} Keyboard key pressed: {command}")
@@ -1404,8 +1478,8 @@ def clean_key_states():
                     # If key is not actually pressed according to the keyboard library
                     if not keyboard.is_pressed(key.lower()):
                         # Re-press it to ensure it's active
-                        if is_space_key(key):
-                            desktop_input.resync_phone('SPACE')
+                        if canonical_phone_key(key) is not None:
+                            desktop_input.resync_phone(canonical_phone_key(key))
                         else:
                             keyboard.press(key.lower())
                         logger.info(f"Re-pressed key: {key}")
