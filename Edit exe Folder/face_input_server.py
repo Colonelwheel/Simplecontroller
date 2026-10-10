@@ -165,7 +165,9 @@ class ProtocolError(ValueError):
 
 
 class FaceInputState:
-    """One session, epoch barriers, bounded presses, and heartbeat fail-safe."""
+    """One session, v1 single/v2 dual bindings, and heartbeat fail-safe."""
+
+    EXPRESSION_BINDINGS = ("mouth", "brows")
 
     def __init__(self, pads, lock, clock=time.monotonic):
         self.pads = pads
@@ -179,6 +181,9 @@ class FaceInputState:
         self.last_heartbeat = 0.0
         self.deadlines = {}
         self.binding = None
+        self.version = 1
+        self.channels = {name: {"armed": False, "button": None, "deadline": None}
+                         for name in self.EXPRESSION_BINDINGS}
         self.notifications = deque(maxlen=4)
 
     def _clear(self):
@@ -186,11 +191,52 @@ class FaceInputState:
             self.pads[self.player].face_clear()
         self.deadlines.clear()
         self.binding = None
+        for channel in self.channels.values():
+            channel["button"] = channel["deadline"] = None
+
+    def _disarm(self):
+        self.armed = False
+        for channel in self.channels.values():
+            channel["armed"] = False
+
+    def _notice(self, op):
+        return {"v": self.version, "op": op, "epoch": self.epoch}
+
+    def _outputs(self):
+        return {channel["button"] for channel in self.channels.values()
+                if channel["button"] is not None}
+
+    def _reconcile(self, previous):
+        """Change aggregate face ownership without gaps in a shared button."""
+        current = self._outputs()
+        for button in previous - current:
+            self.pads[self.player].face_set(button, False)
+        for button in current - previous:
+            self.pads[self.player].face_set(button, True)
+
+    def _handle_dual(self, op, binding, button):
+        if op == "clear" and binding is None:
+            self._clear()
+            self._disarm()
+            return
+        channel = self.channels[binding]
+        previous = self._outputs()
+        if op == "arm":
+            channel["armed"] = True
+        elif op == "clear":
+            channel.update(armed=False, button=None, deadline=None)
+        elif op == "release":
+            if channel["button"] == button:
+                channel["button"] = channel["deadline"] = None
+        elif channel["armed"]:
+            channel["button"] = button
+            channel["deadline"] = self.clock() + 0.1 if op == "tap" else None
+        self._reconcile(previous)
 
     def disconnect(self):
         with self.lock:
             self._clear()
-            self.armed = False
+            self._disarm()
             self.session = self.player = None
             self.notifications.clear()
 
@@ -200,15 +246,17 @@ class FaceInputState:
             if self.player not in player_ids:
                 return
             self._clear()
-            self.armed = False
+            self._disarm()
             self.epoch += 1
             self.notifications.clear()
-            self.notifications.append({"v": 1, "op": "reset", "epoch": self.epoch})
+            self.notifications.append(self._notice("reset"))
 
     def handle(self, message):
         with self.lock:
-            if not isinstance(message, dict) or type(message.get("v")) is not int or message["v"] != 1:
+            if not isinstance(message, dict) or type(message.get("v")) is not int or message["v"] not in (1, 2):
                 raise ProtocolError("unsupported protocol")
+            if self.session is not None and message["v"] != self.version:
+                raise ProtocolError("session protocol changed")
             op = message.get("op")
             if op == "hello":
                 if self.session is not None:
@@ -222,10 +270,11 @@ class FaceInputState:
                     raise ProtocolError("invalid player")
                 self.epoch += 1
                 self.session, self.player = session, player
+                self.version = message["v"]
                 self.seq = -1
-                self.armed = False
+                self._disarm()
                 self.last_heartbeat = self.clock()
-                return {"v": 1, "op": "ready", "epoch": self.epoch}
+                return self._notice("ready")
             if self.session is None:
                 raise ProtocolError("hello required")
             if self.clock() - self.last_heartbeat >= 0.5:
@@ -234,7 +283,7 @@ class FaceInputState:
             epoch, seq = message.get("epoch"), message.get("seq")
             if type(epoch) is not int or epoch != self.epoch:
                 # Never execute a delayed action from the preceding reset epoch.
-                return {"v": 1, "op": "reset", "epoch": self.epoch}
+                return self._notice("reset")
             if type(seq) is not int or seq < 0 or seq <= self.seq:
                 raise ProtocolError("stale sequence")
             if op not in ("arm", "heartbeat", "tap", "hold", "release", "clear"):
@@ -244,9 +293,18 @@ class FaceInputState:
                 raise ProtocolError("unsupported button")
             if op == "tap" and (type(message.get("duration_ms")) is not int or message["duration_ms"] != 100):
                 raise ProtocolError("tap duration must be 100 ms")
+            binding = message.get("binding")
+            if self.version == 2:
+                if op in ("arm", "tap", "hold", "release") or "binding" in message:
+                    if binding not in self.EXPRESSION_BINDINGS:
+                        raise ProtocolError("unsupported expression binding")
+                if op == "heartbeat" and "binding" in message:
+                    raise ProtocolError("heartbeat must be unscoped")
             self.seq = seq
             if op == "heartbeat":
                 self.last_heartbeat = self.clock()
+            elif self.version == 2:
+                self._handle_dual(op, binding, button)
             elif op == "arm":
                 self.armed = True
             elif op == "clear":
@@ -277,10 +335,17 @@ class FaceInputState:
             if now - self.last_heartbeat >= 0.5:
                 self.disconnect()
                 return True
-            for button, deadline in tuple(self.deadlines.items()):
-                if now >= deadline:
-                    self.deadlines.pop(button, None)
-                    self.pads[self.player].face_set(button, False)
+            if self.version == 2:
+                previous = self._outputs()
+                for channel in self.channels.values():
+                    if channel["deadline"] is not None and now >= channel["deadline"]:
+                        channel["button"] = channel["deadline"] = None
+                self._reconcile(previous)
+            else:
+                for button, deadline in tuple(self.deadlines.items()):
+                    if now >= deadline:
+                        self.deadlines.pop(button, None)
+                        self.pads[self.player].face_set(button, False)
             return False
 
     def drain_notifications(self):
