@@ -29,14 +29,15 @@ def synchronized(lock):
 
 
 class MergedGamepad:
-    """Proxy phone writes; facial writes own independent buttons/triggers.
+    """Proxy phone writes; face and voice independently own buttons/triggers.
 
     Every native mutation and report update shares the receiver's output RLock.
     The receiver additionally wraps multi-call phone transitions in that lock.
     """
 
     _OWNED_ATTRIBUTES = frozenset(("raw", "button_map", "lock", "phone_buttons",
-                                   "face_buttons", "phone_triggers", "face_triggers"))
+                                   "face_buttons", "voice_buttons", "phone_triggers",
+                                   "face_triggers", "voice_triggers"))
 
     def __setattr__(self, name, value):
         # Preserve existing pad attribute writes (also used by the legacy mock
@@ -54,20 +55,24 @@ class MergedGamepad:
         self.lock = lock
         self.phone_buttons = set()
         self.face_buttons = set()
+        self.voice_buttons = set()
         self.phone_triggers = {"LT": 0.0, "RT": 0.0}
         self.face_triggers = {"LT": 0.0, "RT": 0.0}
+        self.voice_triggers = {"LT": 0.0, "RT": 0.0}
 
     def __getattr__(self, name):
         return getattr(self.raw, name)
 
     def _button(self, button, pressed, source):
-        owners = self.phone_buttons if source == "phone" else self.face_buttons
-        before = button in self.phone_buttons or button in self.face_buttons
+        owners = getattr(self, source + "_buttons")
+        before = (button in self.phone_buttons or button in self.face_buttons
+                  or button in self.voice_buttons)
         if pressed:
             owners.add(button)
         else:
             owners.discard(button)
-        after = button in self.phone_buttons or button in self.face_buttons
+        after = (button in self.phone_buttons or button in self.face_buttons
+                 or button in self.voice_buttons)
         if before != after:
             method = self.raw.press_button if after else self.raw.release_button
             method(button=button)
@@ -83,9 +88,10 @@ class MergedGamepad:
     def _trigger(self, button, value, source):
         if not math.isfinite(value):
             value = 0.0
-        owners = self.phone_triggers if source == "phone" else self.face_triggers
+        owners = getattr(self, source + "_triggers")
         owners[button] = max(0.0, min(1.0, value))
-        merged = max(self.phone_triggers[button], self.face_triggers[button])
+        merged = max(self.phone_triggers[button], self.face_triggers[button],
+                     self.voice_triggers[button])
         method = self.raw.left_trigger_float if button == "LT" else self.raw.right_trigger_float
         method(value_float=merged)
 
@@ -113,8 +119,10 @@ class MergedGamepad:
         with self.lock:
             self.phone_buttons.clear()
             self.face_buttons.clear()
+            self.voice_buttons.clear()
             self.phone_triggers = {"LT": 0.0, "RT": 0.0}
             self.face_triggers = {"LT": 0.0, "RT": 0.0}
+            self.voice_triggers = {"LT": 0.0, "RT": 0.0}
             self.raw.reset()
 
     def face_set(self, button, pressed):
@@ -132,6 +140,23 @@ class MergedGamepad:
             for button in ("LT", "RT"):
                 if self.face_triggers[button]:
                     self._trigger(button, 0.0, "face")
+            self.raw.update()
+
+    def voice_set(self, button, value):
+        with self.lock:
+            if button in ("LT", "RT"):
+                self._trigger(button, float(value), "voice")
+            else:
+                self._button(self.button_map[button], bool(value), "voice")
+            self.raw.update()
+
+    def voice_clear(self):
+        with self.lock:
+            for button in tuple(self.voice_buttons):
+                self._button(button, False, "voice")
+            for button in ("LT", "RT"):
+                if self.voice_triggers[button]:
+                    self._trigger(button, 0.0, "voice")
             self.raw.update()
 
 

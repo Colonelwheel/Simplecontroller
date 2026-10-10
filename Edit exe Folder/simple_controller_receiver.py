@@ -25,6 +25,7 @@ from datetime import datetime
 from collections import deque
 from camera_follow import CameraFollowSettings, CameraFollowState
 from face_input_server import FaceInputState, FaceInputServer, MergedGamepad, synchronized
+from voice_input_server import VoiceInputState, VoiceInputServer
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
@@ -205,6 +206,11 @@ gamepads = {
 }
 face_input_state = FaceInputState(gamepads, release_state_lock)
 face_input_server = FaceInputServer(face_input_state, logger=logger)
+voice_input_state = VoiceInputState(
+    gamepads, release_state_lock,
+    global_release=lambda: release_outputs(tuple(gamepads), "voice RELEASE_ALL")
+)
+voice_input_server = VoiceInputServer(voice_input_state, logger=logger)
 
 camera_follow_states = {
     player_id: CameraFollowState(CAMERA_FOLLOW_SETTINGS)
@@ -428,6 +434,12 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
         return
 
     face_input_state.reset(selected)
+    try:
+        voice_input_state.reset(selected)
+    except Exception as e:
+        # Voice scheduling is invalidated before native cleanup. An optional
+        # voice pad failure must not skip phone timers or keyboard/mouse release.
+        logger.warning(f"Voice input cleanup failed during global release: {e}")
 
     with release_state_lock:
         timers = []
@@ -1431,6 +1443,13 @@ if __name__ == "__main__":
             logger.info("Facial input listening on 127.0.0.1:42735")
         except OSError as e:
             logger.warning(f"Facial input endpoint unavailable: {e}")
+
+        # The independent local voice endpoint uses the existing pad pair.
+        try:
+            voice_input_server.start()
+            logger.info("VoiceAttack input listening on 127.0.0.1:42736")
+        except OSError as e:
+            logger.warning(f"VoiceAttack input endpoint unavailable: {e}")
         
         # Start the UDP server
         udp_server()
@@ -1441,6 +1460,7 @@ if __name__ == "__main__":
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
     finally:
+        voice_input_server.stop()
         face_input_server.stop()
         stop_camera_follow_worker()
         print("Server stopped")
