@@ -267,7 +267,12 @@ fun validateControllerProfilesBackup(
     }
 
     return ControllerProfilesBackupLoadResult(
-        decoded.copy(controllerProfiles = controllerProfiles),
+        decoded.copy(
+            controllerProfiles = controllerProfiles,
+            buttonAimProfiles = decoded.buttonAimProfiles.map {
+                it.copy(schemaVersion = it.requiredSchemaVersion())
+            }
+        ),
         warnings.distinct()
     )
 }

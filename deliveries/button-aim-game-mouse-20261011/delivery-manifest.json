@@ -1,0 +1,30 @@
+{
+  "apk": {
+    "file": "Simplecontroller (Button Aim Game Mouse).apk",
+    "sha256": "0539FBFAB7841DC75C65C4685D75A0AA5F86FAD149B36C4D5692EA9C10CFE7B3",
+    "certificate_sha256": "3F23D2C2F85A508D31AA7E3E246B40FF62B2D4619B1D8F695C826485E1C991CC"
+  },
+  "checks": {
+    "android_sideload_jvm": 190,
+    "android_play_jvm": 190,
+    "android_lint_errors": 0,
+    "android_lint_warnings": 174,
+    "new_button_game_validation": "pending real phone/game check"
+  },
+  "baseline_simplecontroller_commit": "83619725ab944fe161b5a8124418eba942c5e398",
+  "receiver": {
+    "reused": true,
+    "file": "deliveries/touchaim-game-mouse-20261011/Simple Controller Receiver (TouchAim Game Mouse and Facial Input).exe",
+    "sha256": "23D8121A1D2044DA470A8861FCF7C2C124F43FEE23F12CCF8CFE8DE2D3E1449C",
+    "new_exe_required": false
+  },
+  "installation": {
+    "method": "adb install -r",
+    "result": "Success",
+    "installed_apk_matches_built": true,
+    "signing_certificate_matches_baseline": true,
+    "saved_files_preserved_byte_for_byte": 113,
+    "uninstall_or_clear_data": false,
+    "app_launched_by_agent": false
+  }
+}

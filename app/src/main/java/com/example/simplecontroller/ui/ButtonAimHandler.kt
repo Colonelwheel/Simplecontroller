@@ -884,7 +884,7 @@ class ButtonAimHandler(
     }
 }
 
-private fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
+internal fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
     output = buttonAimOutput.toTouchAimOutput(),
     sensitivity = buttonAimSensitivity,
     invertY = buttonAimInvertY,
@@ -897,10 +897,11 @@ private fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
     } else {
         AimOriginMode.INITIAL_TOUCH
     },
-    sendNeutralOnBegin = !buttonAimStickUsesTouchPosition
+    sendNeutralOnBegin = !buttonAimStickUsesTouchPosition,
+    gameMouse = buttonAimOutput == ButtonAimOutput.GAME_MOUSE
 )
 
-private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfig(
+internal fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfig(
     output = buttonAimAlternateOutput.toTouchAimOutput(),
     sensitivity = buttonAimAlternateSensitivity,
     invertY = buttonAimAlternateInvertY,
@@ -913,7 +914,8 @@ private fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfi
     } else {
         AimOriginMode.INITIAL_TOUCH
     },
-    sendNeutralOnBegin = !buttonAimAlternateStickUsesTouchPosition
+    sendNeutralOnBegin = !buttonAimAlternateStickUsesTouchPosition,
+    gameMouse = buttonAimAlternateOutput == ButtonAimOutput.GAME_MOUSE
 )
 
 private fun Control.buttonAimDpadConfig(): ButtonAimDpadConfig = ButtonAimDpadConfig(
@@ -931,7 +933,7 @@ private fun Control.buttonAimAlternateDpadConfig(): ButtonAimDpadConfig = Button
 )
 
 private fun ButtonAimOutput.toTouchAimOutput(): TouchAimOutput = when (this) {
-    ButtonAimOutput.MOUSE -> TouchAimOutput.MOUSE
+    ButtonAimOutput.MOUSE, ButtonAimOutput.GAME_MOUSE -> TouchAimOutput.MOUSE
     ButtonAimOutput.RIGHT_STICK -> TouchAimOutput.RIGHT_STICK
     ButtonAimOutput.LEFT_STICK -> TouchAimOutput.LEFT_STICK
     ButtonAimOutput.DPAD -> error("D-pad output uses ButtonAimDpadSession")

@@ -9,7 +9,7 @@ enum class ControlType { BUTTON, STICK, CURVED_STICK, RADIAL_CURVED_STICK, TOUCH
 enum class TouchAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK }
 
 @Serializable
-enum class ButtonAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK, DPAD }
+enum class ButtonAimOutput { MOUSE, RIGHT_STICK, LEFT_STICK, DPAD, GAME_MOUSE }
 
 @Serializable
 enum class ButtonAimDpadMode { FOUR_WAY, EIGHT_WAY }

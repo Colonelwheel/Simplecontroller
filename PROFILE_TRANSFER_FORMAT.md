@@ -10,6 +10,7 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested `ControllerProfile` format version `7` for Button Aim Game Mouse;
 - nested `ControllerProfile` format version `6` for Touch Aim (Game Mouse);
 - nested `ControllerProfile` format version `5` for profiles without Game Mouse;
 - the older nested `ControllerProfile` format version `4`;
@@ -83,10 +84,14 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - All-profile backup version: `1`
-- Maximum nested controller-profile format: `6` (formats `2` through `5` remain importable)
-- Writers use `6` only when a TouchAim control has `touchAimGameMouse: true`; otherwise `5`.
+- Maximum nested controller-profile format: `7` (formats `2` through `6` remain importable)
+- Writers use `7` when a Button has Game Mouse selected for Base or Alternate;
+  otherwise `6` when a TouchAim control has `touchAimGameMouse: true`, otherwise `5`.
   Older apps reject nested format 6 before deserialization, including inside all-profile backups.
   Manual and calibration profile application preserve the target control's mouse backend.
+- Reusable Button Aim profiles with Game Mouse use schema `4`; newly captured profiles
+  with existing outputs remain schema `3`, and historical schemas `1` and `2` remain readable.
+  Both aiming-only and complete application copy the saved Base/Alternate output selections.
 - Single-profile suffix: `.simplecontroller-profile.json`
 - All-profile suffix: `.simplecontroller-profiles-backup.json`
 - Maximum file size: 25 MB

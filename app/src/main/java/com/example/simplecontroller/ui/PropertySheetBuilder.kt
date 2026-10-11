@@ -772,12 +772,13 @@ class PropertySheetBuilder(
         val aimOutput = addChoice(
             details,
             "Aim output",
-            listOf("Mouse", "Right stick", "Left stick", "D-pad"),
+            listOf("Mouse", "Right stick", "Left stick", "D-pad", "Game Mouse"),
             when (model.buttonAimOutput) {
                 ButtonAimOutput.MOUSE -> 0
                 ButtonAimOutput.RIGHT_STICK -> 1
                 ButtonAimOutput.LEFT_STICK -> 2
                 ButtonAimOutput.DPAD -> 3
+                ButtonAimOutput.GAME_MOUSE -> 4
             }
         )
         val payloadTiming = addChoice(
@@ -967,12 +968,13 @@ class PropertySheetBuilder(
         val alternateOutput = addChoice(
             alternateDetails,
             "Alternate aim output",
-            listOf("Mouse", "Right stick", "Left stick", "D-pad"),
+            listOf("Mouse", "Right stick", "Left stick", "D-pad", "Game Mouse"),
             when (model.buttonAimAlternateOutput) {
                 ButtonAimOutput.MOUSE -> 0
                 ButtonAimOutput.RIGHT_STICK -> 1
                 ButtonAimOutput.LEFT_STICK -> 2
                 ButtonAimOutput.DPAD -> 3
+                ButtonAimOutput.GAME_MOUSE -> 4
             }
         )
         val alternateContinuousAimOptions = LinearLayout(context).apply {
@@ -1075,7 +1077,8 @@ class PropertySheetBuilder(
         )
 
         fun updateOutputVisibility() {
-            val mouseSelected = aimOutput.selectedItemPosition == 0
+            val mouseSelected = aimOutput.selectedItemPosition == 0 ||
+                aimOutput.selectedItemPosition == 4
             val stickSelected = aimOutput.selectedItemPosition == 1 ||
                 aimOutput.selectedItemPosition == 2
             val dpadSelected = aimOutput.selectedItemPosition == 3
@@ -1091,7 +1094,8 @@ class PropertySheetBuilder(
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
         fun updateAlternateOutputVisibility() {
-            val mouseSelected = alternateOutput.selectedItemPosition == 0
+            val mouseSelected = alternateOutput.selectedItemPosition == 0 ||
+                alternateOutput.selectedItemPosition == 4
             val stickSelected = alternateOutput.selectedItemPosition == 1 ||
                 alternateOutput.selectedItemPosition == 2
             val dpadSelected = alternateOutput.selectedItemPosition == 3
@@ -2910,6 +2914,7 @@ class PropertySheetBuilder(
             1 -> ButtonAimOutput.RIGHT_STICK
             2 -> ButtonAimOutput.LEFT_STICK
             3 -> ButtonAimOutput.DPAD
+            4 -> ButtonAimOutput.GAME_MOUSE
             else -> ButtonAimOutput.MOUSE
         }
         model.buttonAimPayloadTiming = if (fields.payloadTiming.selectedItemPosition == 0) {
@@ -2991,6 +2996,7 @@ class PropertySheetBuilder(
             1 -> ButtonAimOutput.RIGHT_STICK
             2 -> ButtonAimOutput.LEFT_STICK
             3 -> ButtonAimOutput.DPAD
+            4 -> ButtonAimOutput.GAME_MOUSE
             else -> ButtonAimOutput.MOUSE
         }
         model.buttonAimAlternateSensitivity = fields.alternateSensitivity

@@ -518,7 +518,7 @@ Button Aim lets the same finger both touch a Button and move outside it to aim o
 
 1. Add or edit a normal Button.
 2. Enable **Aim while pressed**.
-3. Choose Mouse, right stick, left stick, or D-pad output.
+3. Choose Mouse, right stick, left stick, D-pad, or Game Mouse output. Game Mouse uses the same relative mouse-event backend as Touch Aim (Game Mouse) and requires its matching receiver.
 4. Choose **Immediate** to activate the Button payload as soon as the touch starts, or **Send on release** to decide based on the completed gesture.
 5. Adjust sensitivity, dead zone, stick movement profile, and optional send-on-release delay.
 6. For right-stick or left-stick output, leave **Auto-center stick on release** on for the existing behavior, or turn it off to retain the final aimed direction.
@@ -526,6 +526,11 @@ Button Aim lets the same finger both touch a Button and move outside it to aim o
 Once the gesture begins, you can slide beyond the Button's visible edge without losing it. Button Aim suppresses Swipe behavior so that a moving aim finger does not accidentally activate neighboring controls.
 
 Button Aim is mutually exclusive with Hold Toggle and Toggle Auto-Tap.
+
+**Game Mouse** and original **Mouse** use the same sensitivity, Y inversion,
+Linear Relative/Smoothed movement profiles, and payload timing. Base and One-Shot
+Alternate select their outputs independently. Existing controls retain their
+chosen output. See `BUTTON_AIM_GAME_MOUSE.md` for receiver and profile compatibility.
 
 For left- or right-stick output, **Stick movement profile** offers Linear, the existing
 **Response Curve** (which shapes horizontal and vertical input separately), and **Radial Response

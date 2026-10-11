@@ -146,7 +146,11 @@ object ButtonAimProfileStore {
         nameOf = ButtonAimProfile::name,
         updatedAtOf = ButtonAimProfile::updatedAtEpochMs,
         withName = { profile, name, updated ->
-            profile.copy(name = name, updatedAtEpochMs = updated)
+            profile.copy(
+                name = name,
+                updatedAtEpochMs = updated,
+                schemaVersion = profile.requiredSchemaVersion()
+            )
         },
         validationError = ButtonAimProfile::validationError
     )
