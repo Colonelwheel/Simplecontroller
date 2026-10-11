@@ -147,6 +147,8 @@ class PropertySheetBuilder(
         val manageProfilesButton: Button,
         val aimOutput: Spinner,
         val payloadTiming: Spinner,
+        val cancelOnBoundaryExit: CheckBox,
+        val rearmOnBoundaryReturn: CheckBox,
         val releaseDelayMs: EditText,
         val sensitivity: EditText,
         val invertY: CheckBox,
@@ -662,11 +664,8 @@ class PropertySheetBuilder(
                 directionalContainer.visibility = if (shouldShow) View.VISIBLE else View.GONE
             }
             
-            directionalMode.setOnCheckedChangeListener { _, _ -> updateDirectionalVisibility() }
-            stickPlusMode.setOnCheckedChangeListener { _, _ -> updateDirectionalVisibility() }
-            
-            // Make directional mode and stick+ mode mutually exclusive
-            setupMutuallyExclusiveOptions(directionalMode, stickPlusMode)
+            // Keep mutual exclusion and live visibility in the same listeners.
+            setupMutuallyExclusiveOptions(directionalMode, stickPlusMode, updateDirectionalVisibility)
             
             // Add directional command fields
             addDirectionalCommandsUI(directionalContainer)
@@ -824,6 +823,22 @@ class PropertySheetBuilder(
             listOf("Immediate", "Send on release"),
             if (model.buttonAimPayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) 0 else 1
         )
+        val cancelOnBoundaryExit = addCheckBox(
+            details,
+            "Cancel Send on release if finger leaves button",
+            model.buttonAimCancelOnBoundaryExit
+        )
+        val rearmOnBoundaryReturn = addCheckBox(
+            details,
+            "Re-arm when finger returns inside",
+            model.buttonAimRearmOnBoundaryReturn
+        ).apply { isEnabled = cancelOnBoundaryExit.isChecked }
+        cancelOnBoundaryExit.setOnCheckedChangeListener { _, checked ->
+            rearmOnBoundaryReturn.isEnabled = checked
+        }
+        details.addView(TextView(context).apply {
+            text = "Optional: leaving the button cancels its release payload. Re-arm off: returning inside stays canceled. Re-arm on: returning inside restores it; lifting outside cancels it. Aiming continues until lift. Applies to Base and Alternate Send on release; Immediate payloads are unchanged."
+        })
         details.addView(TextView(context).apply { text = "Delay after release (ms)" })
         val releaseDelayMs = addTextField(
             details,
@@ -1164,6 +1179,8 @@ class PropertySheetBuilder(
             manageProfilesButton = manageProfilesButton,
             aimOutput = aimOutput,
             payloadTiming = payloadTiming,
+            cancelOnBoundaryExit = cancelOnBoundaryExit,
+            rearmOnBoundaryReturn = rearmOnBoundaryReturn,
             releaseDelayMs = releaseDelayMs,
             sensitivity = sensitivity,
             invertY = invertY,
@@ -1362,6 +1379,9 @@ class PropertySheetBuilder(
             "Shoot aim sensitivity",
             model.touchAimShootSensitivity
         )
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Replaces normal Aim sensitivity after Shoot is confirmed, using the same scale. Lower values give finer movement; 0 adds no new aim input. Match normal Aim sensitivity to keep the same feel."
+        })
         val shootBehavior = addChoice(
             twoStateContainer,
             "Shoot activation",
@@ -1392,15 +1412,23 @@ class PropertySheetBuilder(
         )
         val twoStateSmoothing = addDecimalField(
             twoStateContainer,
-            "Two-state smoothing (0.05-1.0)",
+            "Contact-score smoothing (0.05-1.0)",
             model.touchAimTwoStateSmoothing
         )
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Filters the sensor score used to detect Aim / Shoot. Lower values smooth more but respond slower; 1 follows the raw score. Does not change mouse movement smoothing."
+        })
+        twoStateContainer.addView(TextView(context).apply { text = "Enter Shoot confirmation (ms)" })
         val enterConfirmationMs = addTextField(
             twoStateContainer,
             model.touchAimEnterShootConfirmationMs.toString(),
             "Enter Shoot confirmation (ms)",
             InputType.TYPE_CLASS_NUMBER
         )
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Time the score must stay at or above Shoot ON before entering Shoot (32-2000 ms). Lower values respond sooner; higher values resist brief spikes."
+        })
+        twoStateContainer.addView(TextView(context).apply { text = "Return to Aim confirmation (ms)" })
         val returnConfirmationMs = addTextField(
             twoStateContainer,
             model.touchAimReturnToAimConfirmationMs.toString(),
@@ -1408,7 +1436,10 @@ class PropertySheetBuilder(
             InputType.TYPE_CLASS_NUMBER
         )
         twoStateContainer.addView(TextView(context).apply {
-            text = "Hysteresis is the gap between Shoot ON and OFF: it prevents flickering between states. Enter/return confirmation is how long, in milliseconds, the score must remain past each threshold before the state changes."
+            text = "Time the score must stay at or below Shoot OFF before returning to Aim (32-2000 ms). Lower values respond sooner; higher values resist brief dips. For Press when returning to Aim, this also delays the press. Lifting cancels that press."
+        })
+        twoStateContainer.addView(TextView(context).apply {
+            text = "Hysteresis is the gap between Shoot ON and OFF: it prevents flickering between states."
             setTextColor(ThemeManager.getTextColor(context))
         })
 
@@ -2282,17 +2313,23 @@ class PropertySheetBuilder(
     /**
      * Setup mutually exclusive checkboxes
      */
-    private fun setupMutuallyExclusiveOptions(option1: CheckBox, option2: CheckBox) {
+    private fun setupMutuallyExclusiveOptions(
+        option1: CheckBox,
+        option2: CheckBox,
+        onChanged: () -> Unit = {}
+    ) {
         option1.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked && option2.isChecked) {
                 option2.isChecked = false
             }
+            onChanged()
         }
         
         option2.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked && option1.isChecked) {
                 option1.isChecked = false
             }
+            onChanged()
         }
     }
     
@@ -2413,7 +2450,19 @@ class PropertySheetBuilder(
         addLabeledTextField(container, "Right command:", model.rightCommand, "D", "right_command")
         container.addView(createGap(16))
         
-        // Thresholds
+        // Thresholds and a single-action clear for boost commands only.
+        addSectionTitle(container, "Boost thresholds")
+        largeActionButton(container, "Clear all boost commands").setOnClickListener {
+            listOf(
+                "up_boost", "down_boost", "left_boost", "right_boost",
+                "up_super_boost", "down_super_boost", "left_super_boost", "right_super_boost",
+                "extended_outer_up_command", "extended_outer_down_command",
+                "extended_outer_left_command", "extended_outer_right_command"
+            ).forEach { tag -> container.findViewWithTag<EditText>(tag)?.setText("") }
+        }
+        container.addView(TextView(context).apply {
+            text = "Clears Regular, Super and Outer boost commands. Movement commands and all threshold distances stay unchanged. Tap Save to keep the changes."
+        })
         addThresholdControl(
             container, 
             "Regular Boost threshold:", 
@@ -2969,6 +3018,8 @@ class PropertySheetBuilder(
         } else {
             ButtonAimPayloadTiming.SEND_ON_RELEASE
         }
+        model.buttonAimCancelOnBoundaryExit = fields.cancelOnBoundaryExit.isChecked
+        model.buttonAimRearmOnBoundaryReturn = fields.rearmOnBoundaryReturn.isChecked
         model.buttonAimReleaseDelayMs = fields.releaseDelayMs.text.toString()
             .toLongOrNull()
             ?.coerceAtLeast(0L)

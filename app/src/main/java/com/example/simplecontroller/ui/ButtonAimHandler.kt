@@ -27,7 +27,7 @@ class ButtonAimHandler(
     private val model: Control,
     private val aimOutput: AimOutputSession,
     private val payloadExecutor: ButtonAimPayloadExecutor,
-    controlSize: () -> Pair<Float, Float>,
+    private val controlSize: () -> Pair<Float, Float>,
     private val isLatched: () -> Boolean,
     private val setLatched: (Boolean) -> Unit,
     private val setPressed: (Boolean) -> Unit,
@@ -45,6 +45,7 @@ class ButtonAimHandler(
 ) {
     private val dpadOutput = ButtonAimDpadSession(payloadExecutor, controlSize)
     private val deliberateSwipe = DeliberateSwipeTracker(touchSlopPx)
+    private val releaseBoundary = ButtonAimReleaseBoundaryPolicy()
 
     private enum class GestureState {
         IDLE,
@@ -183,6 +184,11 @@ class ButtonAimHandler(
         }
 
         activePointerId = event.getPointerId(event.actionIndex)
+        releaseBoundary.begin(
+            model.buttonAimCancelOnBoundaryExit,
+            if (alternate) model.buttonAimAlternatePayloadTiming else model.buttonAimPayloadTiming,
+            model.buttonAimRearmOnBoundaryReturn
+        )
         holdThresholdReached = false
         setPressed(true)
         if (if (alternate) model.buttonAimAlternateHaptics else model.buttonAimHaptics) vibrate(30L)
@@ -276,6 +282,7 @@ class ButtonAimHandler(
         }
 
         if (alternate) startAlternateGesture() else startBaseGesture()
+        observeReleaseBoundary(event, event.actionIndex)
     }
 
     private fun startBaseGesture() {
@@ -362,6 +369,7 @@ class ButtonAimHandler(
         }
         val x = event.getX(pointerIndex)
         val y = event.getY(pointerIndex)
+        observeReleaseBoundary(event, pointerIndex)
         if (deferStickAimUntilSwipe && !gestureOwnsAimOutput) {
             if (!deliberateSwipe.update(x, y)) return
             val config = gestureAimConfig ?: return
@@ -396,6 +404,7 @@ class ButtonAimHandler(
             return
         }
 
+        observeReleaseBoundary(event, pointerIndex)
         if (usingDpadOutput || gestureOwnsAimOutput) {
             updateActiveAimOutput(
                 activePointerId,
@@ -409,6 +418,10 @@ class ButtonAimHandler(
         cancelRecoveryResetThreshold()
         setPressed(false)
 
+        if (releaseBoundary.canceled) {
+            completeBoundaryCanceledGesture()
+            return
+        }
         when (gestureState) {
             GestureState.BASE_IMMEDIATE_ACTIVE -> completeImmediateBase()
             GestureState.BASE_DELAYED_ARMED -> completeDelayedBase()
@@ -419,6 +432,58 @@ class ButtonAimHandler(
             GestureState.ALTERNATE_FINITE_RELEASE,
             GestureState.WAITING_FOR_BASE_UNLATCH -> cancelUnexpectedGesture()
         }
+    }
+
+    private fun observeReleaseBoundary(event: MotionEvent, pointerIndex: Int) {
+        val (width, height) = controlSize()
+        // A coalesced move can leave and re-enter before its current sample.
+        for (historyIndex in 0 until event.historySize) {
+            observeReleaseBoundarySample(
+                event.getHistoricalX(pointerIndex, historyIndex),
+                event.getHistoricalY(pointerIndex, historyIndex), width, height
+            )
+        }
+        observeReleaseBoundarySample(event.getX(pointerIndex), event.getY(pointerIndex), width, height)
+    }
+
+    private fun observeReleaseBoundarySample(x: Float, y: Float, width: Float, height: Float) {
+        val wasCanceled = releaseBoundary.canceled
+        releaseBoundary.observe(x, y, width, height)
+        if (!wasCanceled && releaseBoundary.canceled) {
+            cancelHoldThreshold()
+            cancelRecoveryResetThreshold()
+            holdThresholdReached = false
+            if (isAlternatePhase()) reducePhase(OneShotAlternateEvent.CANCELED_RESET)
+            setVisualState(if (isAlternatePhase()) {
+                ButtonAimVisualState.ALTERNATE_AIMING
+            } else ButtonAimVisualState.AIMING)
+        } else if (wasCanceled && !releaseBoundary.canceled) {
+            when (gestureState) {
+                GestureState.BASE_DELAYED_ARMED -> {
+                    if (model.holdToggle) scheduleHoldThreshold(latchImmediately = false)
+                    setVisualState(ButtonAimVisualState.ARMED)
+                }
+                GestureState.ALTERNATE_DELAYED_ARMED -> {
+                    scheduleAlternateResetThreshold()
+                    updateAlternateVisual(waitingToFire = true)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun completeBoundaryCanceledGesture() {
+        val alternate = isAlternatePhase()
+        // Keep ordinary centering/retention and pointer ownership independent of payload cancellation.
+        finishOrdinaryAimOutput()
+        resetGestureOnly(preservePresentation = true)
+        reducePhase(if (alternate) {
+            if (phaseState.phase == OneShotAlternatePhase.ALTERNATE_RECOVERY) {
+                OneShotAlternateEvent.CANCELED_RESET
+            } else OneShotAlternateEvent.ALTERNATE_CANCELLATION
+        } else OneShotAlternateEvent.BASE_CANCELLATION)
+        if (alternate && model.buttonAimAlternateHaptics) vibrate(120L)
+        updateIdleVisualForPhase()
     }
 
     private fun completeImmediateBase() {
@@ -643,6 +708,7 @@ class ButtonAimHandler(
             if (gestureState != GestureState.BASE_IMMEDIATE_ACTIVE &&
                 gestureState != GestureState.BASE_DELAYED_ARMED
             ) return@Runnable
+            if (releaseBoundary.canceled) return@Runnable
             holdThresholdReached = true
             if (latchImmediately) setLatched(true)
             if (model.buttonAimHaptics) vibrate(80L)
@@ -657,6 +723,7 @@ class ButtonAimHandler(
                 (gestureState != GestureState.ALTERNATE_IMMEDIATE_ACTIVE &&
                     gestureState != GestureState.ALTERNATE_DELAYED_ARMED)
             ) return@Runnable
+            if (releaseBoundary.canceled) return@Runnable
             reducePhase(OneShotAlternateEvent.RECOVERY_RESET_THRESHOLD_REACHED)
             if (model.buttonAimAlternateHaptics) vibrate(100L)
             setVisualState(ButtonAimVisualState.ALTERNATE_RESET_READY)
@@ -817,6 +884,7 @@ class ButtonAimHandler(
     }
 
     private fun clearGestureAimTracking() {
+        releaseBoundary.reset()
         gestureOwnsAimOutput = false
         deferStickAimUntilSwipe = false
         gestureAimConfig = null
@@ -881,6 +949,33 @@ class ButtonAimHandler(
 
     companion object {
         private const val FINITE_PRESS_DURATION_MS = 90L
+    }
+}
+
+/** Release cancellation is permanent for a gesture unless boundary-return rearming is opted in. */
+internal class ButtonAimReleaseBoundaryPolicy {
+    private var enabled = false
+    private var rearmOnReturn = false
+    var canceled = false
+        private set
+
+    fun begin(cancelOnExit: Boolean, timing: ButtonAimPayloadTiming, rearmOnReturn: Boolean = false) {
+        enabled = cancelOnExit && timing == ButtonAimPayloadTiming.SEND_ON_RELEASE
+        this.rearmOnReturn = rearmOnReturn
+        canceled = false
+    }
+
+    fun observe(x: Float, y: Float, width: Float, height: Float) {
+        if (!enabled) return
+        val inside = x >= 0f && y >= 0f && x < width && y < height &&
+            x.isFinite() && y.isFinite() && width.isFinite() && height.isFinite()
+        if (!inside) canceled = true else if (rearmOnReturn) canceled = false
+    }
+
+    fun reset() {
+        enabled = false
+        rearmOnReturn = false
+        canceled = false
     }
 }
 

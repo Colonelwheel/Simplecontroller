@@ -41,7 +41,9 @@ data class ButtonAimActionSettings(
     val alternatePayloadTiming: ButtonAimPayloadTiming,
     val alternateResetHoldDurationMs: Long,
     val alternateBaseUnlatchDelayMs: Long,
-    val alternateDisplayName: String
+    val alternateDisplayName: String,
+    val cancelOnBoundaryExit: Boolean = false,
+    val rearmOnBoundaryReturn: Boolean = false
 ) {
     fun validationError(): String? {
         if (payload.length > ButtonAimProfile.MAX_PAYLOAD_LENGTH ||
@@ -82,22 +84,30 @@ data class ButtonAimProfile(
 ) {
     companion object {
         const val LEGACY_SCHEMA_VERSION = 3
-        const val CURRENT_SCHEMA_VERSION = 4
+        const val GAME_MOUSE_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = 5
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
         const val MAX_DISPLAY_NAME_LENGTH = 120
     }
 
-    /** Only new mouse selections require a reader that understands GAME_MOUSE. */
-    fun requiredSchemaVersion(): Int = if (
-        base.output == ButtonAimOutput.GAME_MOUSE || alternate.output == ButtonAimOutput.GAME_MOUSE
-    ) CURRENT_SCHEMA_VERSION else minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
+    /** New action behavior and mouse selections each require a compatible reader. */
+    fun requiredSchemaVersion(): Int = when {
+        actions.cancelOnBoundaryExit || actions.rearmOnBoundaryReturn -> CURRENT_SCHEMA_VERSION
+        base.output == ButtonAimOutput.GAME_MOUSE || alternate.output == ButtonAimOutput.GAME_MOUSE ->
+            GAME_MOUSE_SCHEMA_VERSION
+        else -> minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
+    }
 
     fun validationError(): String? {
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) return "This profile version is not supported."
         if (schemaVersion < CURRENT_SCHEMA_VERSION &&
+            (actions.cancelOnBoundaryExit || actions.rearmOnBoundaryReturn)) {
+            return "Boundary cancellation requires Button Aim profile version $CURRENT_SCHEMA_VERSION."
+        }
+        if (schemaVersion < GAME_MOUSE_SCHEMA_VERSION &&
             (base.output == ButtonAimOutput.GAME_MOUSE || alternate.output == ButtonAimOutput.GAME_MOUSE)
-        ) return "Game Mouse requires Button Aim profile version $CURRENT_SCHEMA_VERSION."
+        ) return "Game Mouse requires Button Aim profile version $GAME_MOUSE_SCHEMA_VERSION."
         if (name.trim().isEmpty() || name.trim().length > MAX_NAME_LENGTH) {
             return "Choose a profile name from 1 to $MAX_NAME_LENGTH characters."
         }
@@ -125,6 +135,8 @@ data class ButtonAimProfile(
         control.holdToggle = actions.holdToggle
         control.holdDurationMs = actions.holdDurationMs
         control.buttonAimPayloadTiming = actions.payloadTiming
+        control.buttonAimCancelOnBoundaryExit = actions.cancelOnBoundaryExit
+        control.buttonAimRearmOnBoundaryReturn = actions.rearmOnBoundaryReturn
         control.buttonAimReleaseDelayMs = actions.releaseDelayMs
         control.buttonAimOneShotAlternateEnabled = actions.oneShotAlternateEnabled
         control.buttonAimAlternatePayload = actions.alternatePayload
@@ -172,9 +184,12 @@ data class ButtonAimProfile(
 fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): ButtonAimProfile? {
     if (type != ControlType.BUTTON) return null
     val profile = ButtonAimProfile(
-        schemaVersion = if (buttonAimOutput == ButtonAimOutput.GAME_MOUSE ||
-            buttonAimAlternateOutput == ButtonAimOutput.GAME_MOUSE
-        ) ButtonAimProfile.CURRENT_SCHEMA_VERSION else ButtonAimProfile.LEGACY_SCHEMA_VERSION,
+        schemaVersion = when {
+            buttonAimCancelOnBoundaryExit || buttonAimRearmOnBoundaryReturn -> ButtonAimProfile.CURRENT_SCHEMA_VERSION
+            buttonAimOutput == ButtonAimOutput.GAME_MOUSE ||
+                buttonAimAlternateOutput == ButtonAimOutput.GAME_MOUSE -> ButtonAimProfile.GAME_MOUSE_SCHEMA_VERSION
+            else -> ButtonAimProfile.LEGACY_SCHEMA_VERSION
+        },
         id = id,
         name = name.trim(),
         createdAtEpochMs = nowMs,
@@ -222,7 +237,9 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
             alternatePayloadTiming = buttonAimAlternatePayloadTiming,
             alternateResetHoldDurationMs = buttonAimAlternateResetHoldDurationMs,
             alternateBaseUnlatchDelayMs = buttonAimAlternateBaseUnlatchDelayMs,
-            alternateDisplayName = buttonAimAlternateDisplayName.trim()
+            alternateDisplayName = buttonAimAlternateDisplayName.trim(),
+            cancelOnBoundaryExit = buttonAimCancelOnBoundaryExit,
+            rearmOnBoundaryReturn = buttonAimRearmOnBoundaryReturn
         )
     )
     return profile.takeIf { it.validationError() == null }

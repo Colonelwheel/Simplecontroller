@@ -8,7 +8,8 @@ const val CONTROLLER_PROFILE_FORMAT_VERSION = 5
 const val GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION = 6
 const val BUTTON_AIM_GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION = 7
 const val CAMERA_FOLLOW_CONTROLLER_PROFILE_FORMAT_VERSION = 8
-const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = CAMERA_FOLLOW_CONTROLLER_PROFILE_FORMAT_VERSION
+const val BUTTON_AIM_BOUNDARY_CANCEL_CONTROLLER_PROFILE_FORMAT_VERSION = 9
+const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = BUTTON_AIM_BOUNDARY_CANCEL_CONTROLLER_PROFILE_FORMAT_VERSION
 
 @Serializable
 data class ControllerPage(
@@ -28,6 +29,10 @@ data class ControllerProfile(
 
 /** Keep legacy-only files readable by earlier apps; new mouse controls require an aware reader. */
 fun ControllerProfile.requiredFormatVersion(): Int = when {
+    pages.any { page -> page.controls.any {
+        it.type == ControlType.BUTTON &&
+            (it.buttonAimCancelOnBoundaryExit || it.buttonAimRearmOnBoundaryReturn)
+    } } -> BUTTON_AIM_BOUNDARY_CANCEL_CONTROLLER_PROFILE_FORMAT_VERSION
     pages.any { page -> page.controls.any {
         it.excludeFromCameraFollow || it.cameraFollowStrengthPercent != 100f
     } } -> CAMERA_FOLLOW_CONTROLLER_PROFILE_FORMAT_VERSION

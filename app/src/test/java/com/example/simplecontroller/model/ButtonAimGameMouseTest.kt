@@ -96,13 +96,14 @@ class ButtonAimGameMouseTest {
 
     @Test
     fun futureButtonAimSchema_rejectedBeforeUnknownOutputDeserialization() {
+        val futureVersion = ButtonAimProfile.CURRENT_SCHEMA_VERSION + 1
         val backup = """
             {"fileType":"simplecontroller-profiles-backup","backupVersion":1,
              "activeControllerProfileName":"Future","controllerProfiles":[],
-             "buttonAimProfiles":[{"schemaVersion":5,"base":{"output":"FUTURE_MOUSE"}}]}
+             "buttonAimProfiles":[{"schemaVersion":$futureVersion,"base":{"output":"FUTURE_MOUSE"}}]}
         """.trimIndent()
         val error = runCatching { decodeControllerProfilesBackup(backup) }.exceptionOrNull()
-        assertTrue(error?.message.orEmpty().contains("Button Aim profile 1 version 5 is newer"))
+        assertTrue(error?.message.orEmpty().contains("Button Aim profile 1 version $futureVersion is newer"))
     }
 
     @Test

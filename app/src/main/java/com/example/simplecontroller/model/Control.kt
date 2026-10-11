@@ -93,6 +93,8 @@ data class Control(
     var buttonAimEnabled: Boolean = false,
     var buttonAimOutput: ButtonAimOutput = ButtonAimOutput.MOUSE,
     var buttonAimPayloadTiming: ButtonAimPayloadTiming = ButtonAimPayloadTiming.IMMEDIATE,
+    var buttonAimCancelOnBoundaryExit: Boolean = false,
+    var buttonAimRearmOnBoundaryReturn: Boolean = false,
     var buttonAimReleaseDelayMs: Long = 0,
     var buttonAimSensitivity: Float = 1f,
     var buttonAimInvertY: Boolean = false,

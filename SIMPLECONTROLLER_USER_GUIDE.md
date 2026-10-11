@@ -1020,3 +1020,16 @@ camera output by 25%. Saving applies the new strength live, and pressing the
 button applies its saved strength before its normal toggle/on/off action.
 See [Camera Follow controls](CAMERA_FOLLOW_CONTROLS.md) for persistence, profiles,
 ConsoleBridge limitations, and verified delivery details.
+
+### Optional release cancellation and easier editing
+
+Inside **Aim while pressed**, enable **Cancel Send on release if finger leaves
+button** to cancel a pending release action on exit. Optionally enable **Re-arm
+when finger returns inside** to allow an inside release after returning. Both
+default off and apply to Base and Alternate release timing; aiming continues.
+
+Stick+ settings now appear immediately when enabled. TouchAim's 0.350 sensor
+smoothing, 90 ms Enter Shoot, and 120 ms Return to Aim fields have persistent
+labels and explanations. **Clear all boost commands** clears boost command boxes
+while preserving movement commands and threshold distances; Save applies the
+change. See [Aim control options](AIM_CONTROL_OPTIONS.md) for details.
