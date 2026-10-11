@@ -454,6 +454,7 @@ class FaceInputState:
             notice["desktop_input"] = True
         if self.version == 3:
             notice["movement_input"] = True
+            notice["retained_nose_movement"] = True
         return notice
 
     def _v3_outputs(self):
@@ -541,6 +542,10 @@ class FaceInputState:
                 for target in value} if normalize else set(value)
 
     def _handle_v3(self, op, message):
+        retain = message.get("retain_on_tracking_loss", False)
+        if "retain_on_tracking_loss" in message and (type(retain) is not bool
+                or op != "sample" or message.get("channel") != "movement"):
+            raise ProtocolError("invalid retained nose movement")
         axes = message.get("axes")
         if "axes" in message and (op != "clear" or message.get("channel") != "movement"
                 or not isinstance(axes, list) or not 1 <= len(axes) <= 2
@@ -627,6 +632,10 @@ class FaceInputState:
             raise ProtocolError("invalid stick vector")
         if math.hypot(*vector) > 1.000001:
             raise ProtocolError("stick vector exceeds circular full tilt")
+        # Only the nose movement vector and its WASD route may outlive capture.
+        # Boost/button ownership remains on separate 250 ms capture leases.
+        if retain and (held - {"KEY:W", "KEY:A", "KEY:S", "KEY:D"} or parsed_taps):
+            raise ProtocolError("retained nose movement accepts only WASD holds and no taps")
         if getattr(self.pads[self.player], "desktop", None) is None and any(
                 target in KEY_INPUTS or target in DESKTOP_INPUTS
                 for target in held | {target for _, targets in parsed_taps for target in targets}):
@@ -639,7 +648,7 @@ class FaceInputState:
                                        "channels": [name]})
         elif channel["armed"]:
             channel["held"] = held
-            channel["lease"] = captured_at + .250
+            channel["lease"] = None if retain else captured_at + .250
             channel["vector"] = tuple(vector)
             for action_id, targets in parsed_taps:
                 if action_id not in channel["seen_taps"]:

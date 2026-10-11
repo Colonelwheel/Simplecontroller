@@ -102,6 +102,94 @@ class MovementStateTests(unittest.TestCase):
         self.assertFalse(self.state.movement_channels['movement']['armed'])
         self.assertTrue(any(n['op'] == 'expired' for n in self.state.drain_notifications()))
 
+    def test_retained_nose_vector_and_wasd_survive_seconds_then_fresh_sample_replaces(self):
+        self.assertIs(self.ready['retained_nose_movement'], True)
+        self.send('arm', 'movement')
+        self.sample(vector=[0., .7], held=['KEY:W'], retain_on_tracking_loss=True)
+        capture = self.now
+        for _ in range(40):
+            self.now += .1
+            self.send('heartbeat')
+            self.state.tick()
+        self.assertEqual((0., .7), self.pad.raw.left)
+        self.assertEqual({'KEY:W'}, self.held)
+        self.assertEqual(capture, self.state.movement_channels['movement']['captured_at'])
+        self.sample(vector=[0., .7], held=['KEY:W'], retain_on_tracking_loss=True)
+        self.assertEqual((0., .7), self.pad.raw.left)  # Identical position is valid.
+        self.sample(vector=[0., 0.], held=[], retain_on_tracking_loss=True)
+        self.assertEqual((0., 0.), self.pad.raw.left)
+        self.assertFalse(self.held)
+
+    def test_retained_movement_does_not_retain_expression_or_boost_claims(self):
+        for name in ('movement', 'mouth', 'nose_y'):
+            self.send('arm', name)
+        self.sample(vector=[0., .7], held=['KEY:W'], retain_on_tracking_loss=True)
+        self.sample('mouth', held=['A'])
+        self.sample('nose_y', held=['RT'])
+        self.now += .3
+        self.send('heartbeat')
+        self.state.tick()
+        self.assertEqual((0., .7), self.pad.raw.left)
+        self.assertEqual({'KEY:W'}, self.held)
+        self.assertFalse(self.pad.raw.buttons)
+        self.assertEqual(0., self.pad.raw.triggers['RT'])
+        expired = {name for n in self.state.drain_notifications() if n['op'] == 'expired'
+                   for name in n['channels']}
+        self.assertEqual({'mouth', 'nose_y'}, expired)
+
+    def test_retained_movement_still_obeys_heartbeat_disconnect_clear_reset_and_takeover(self):
+        for action in ('timeout', 'disconnect', 'clear', 'reset', 'takeover'):
+            with self.subTest(action=action):
+                self.setUp()
+                self.desktop.phone_set('KEY:W', True)
+                self.send('arm', 'movement')
+                self.sample(vector=[0., .7], held=['KEY:W'], retain_on_tracking_loss=True)
+                if action == 'timeout':
+                    self.now += .5
+                    self.assertTrue(self.state.tick())
+                elif action == 'disconnect':
+                    self.state.disconnect()
+                elif action == 'clear':
+                    self.send('clear', 'movement')
+                elif action == 'reset':
+                    self.state.reset(('player1',))
+                else:
+                    self.pad.left_joystick_float(.5, 0.)
+                    self.pad.left_joystick_float(0., 0.)
+                self.assertEqual((0., 0.), self.pad.raw.left)
+                self.assertEqual({'KEY:W'}, self.held)  # Facial cleanup preserves phone.
+                self.assertFalse(self.state.movement_channels['movement']['armed'])
+
+    def test_retention_false_restores_legacy_lease_and_stale_retained_sample_clears(self):
+        self.send('arm', 'movement')
+        self.sample(vector=[0., .7], retain_on_tracking_loss=True)
+        self.sample(vector=[0., .8], retain_on_tracking_loss=False)
+        self.now += .25
+        self.send('heartbeat')
+        self.state.tick()
+        self.assertEqual((0., 0.), self.pad.raw.left)
+        self.send('arm', 'movement')
+        self.sample(vector=[0., .7], retain_on_tracking_loss=True)
+        self.now += .3
+        self.send('heartbeat')
+        self.send('sample', 'movement', frame_seq=100, captured_at=self.now-.26,
+                  vector=[0., .9], retain_on_tracking_loss=True)
+        self.assertEqual((0., 0.), self.pad.raw.left)
+        self.assertFalse(self.state.movement_channels['movement']['armed'])
+
+    def test_retained_flag_rejects_buttons_taps_wrong_scope_types_and_operations(self):
+        self.send('arm', 'movement')
+        for fields in (dict(held=['RT']), dict(held=['A']), dict(held=['KEY:SHIFT']),
+                       dict(taps=[{'id':'retained-tap','targets':['A']}]),
+                       dict(retain_on_tracking_loss=1), dict(retain_on_tracking_loss='true')):
+            with self.subTest(fields=fields), self.assertRaises(ProtocolError):
+                self.sample(**({'retain_on_tracking_loss': True} | fields))
+        for name in ('mouth', 'nose_y', 'expression_mouth'):
+            with self.subTest(name=name), self.assertRaises(ProtocolError):
+                self.sample(name, retain_on_tracking_loss=True)
+        with self.assertRaises(ProtocolError):
+            self.send('arm', 'movement', retain_on_tracking_loss=True)
+
     def test_stale_sample_clears_instead_of_renewing_lease(self):
         self.send('arm', 'movement')
         self.sample(vector=[0., 1.])
