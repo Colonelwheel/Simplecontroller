@@ -16,9 +16,10 @@ class TouchAimCalibrationProfileTest {
     fun fullCalibrationApply_preservesBothTargetMouseBackends() {
         val saved = profile("00000000-0000-0000-0000-000000000001", "Reusable", 10)
         listOf(false, true).forEach { backend ->
-            val target = control().copy(touchAimGameMouse = backend)
+            val target = control().copy(touchAimGameMouse = backend, excludeFromCameraFollow = backend)
             assertTrue(saved.applyTo(target))
             assertEquals(backend, target.touchAimGameMouse)
+            assertEquals(backend, target.excludeFromCameraFollow)
             assertEquals(TouchAimMode.CALIBRATED_TWO_STATE, target.touchAimMode)
         }
     }

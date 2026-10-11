@@ -21,7 +21,8 @@ data class AimOutputConfig(
     val stickDeadzonePx: Float,
     val originMode: AimOriginMode,
     val sendNeutralOnBegin: Boolean = false,
-    val gameMouse: Boolean = false
+    val gameMouse: Boolean = false,
+    val excludeFromCameraFollow: Boolean = false
 )
 
 internal class DeliberateSwipeTracker(private val touchSlopPx: Float) {
@@ -166,10 +167,10 @@ object ManualStickArbiter {
         registry.updateState(canonicalStickName(stickName), owner, state)
 
     @Synchronized
-    fun send(stickName: String, owner: Any, x: Float, y: Float): Boolean {
+    fun send(stickName: String, owner: Any, x: Float, y: Float, excludeFromCameraFollow: Boolean = false): Boolean {
         val canonical = canonicalStickName(stickName)
         if (!registry.owns(canonical, owner)) return false
-        UdpClient.sendStickPosition(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f))
+        UdpClient.sendStickPosition(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f), excludeFromCameraFollow)
         return true
     }
 
@@ -274,7 +275,7 @@ class AimOutputSession(
             if (ownsStick) {
                 ownerState = ManualStickOwnerState.ACTIVE
                 if (newConfig.sendNeutralOnBegin) {
-                    ManualStickArbiter.send(stickName, ownerToken, 0f, 0f)
+                    ManualStickArbiter.send(stickName, ownerToken, 0f, 0f, config?.excludeFromCameraFollow == true)
                     startStickResend()
                 }
             }
@@ -340,7 +341,7 @@ class AimOutputSession(
         invalidateStickResend()
         onRetainedStickChanged(null)
         if (ownerState == ManualStickOwnerState.DELAY_LOCKED) {
-            ManualStickArbiter.send(stickName, ownerToken, 0f, 0f)
+            ManualStickArbiter.send(stickName, ownerToken, 0f, 0f, config?.excludeFromCameraFollow == true)
             ownerState = ManualStickOwnerState.CENTERED_PENDING
             ManualStickArbiter.setState(stickName, ownerToken, ownerState)
         } else {
@@ -403,7 +404,7 @@ class AimOutputSession(
         }
         lastStickX = mappedX.coerceIn(-1f, 1f)
         lastStickY = (if (activeConfig.invertY) -mappedY else mappedY).coerceIn(-1f, 1f)
-        ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY)
+        ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY, config?.excludeFromCameraFollow == true)
         startStickResend()
     }
 
@@ -447,7 +448,7 @@ class AimOutputSession(
                 if (!resendGeneration.isCurrent(generation) || !sessionActive || !ownsStick ||
                     stickName == null || ownerState == ManualStickOwnerState.CENTERED_PENDING
                 ) return
-                ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY)
+                ManualStickArbiter.send(stickName, ownerToken, lastStickX, lastStickY, config?.excludeFromCameraFollow == true)
                 handler.postDelayed(this, STICK_SEND_INTERVAL_MS)
             }
         }.also { handler.postDelayed(it, STICK_SEND_INTERVAL_MS) }

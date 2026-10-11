@@ -47,6 +47,10 @@ import kotlin.math.roundToInt
 import kotlin.math.max
 import androidx.core.content.ContextCompat
 import androidx.core.view.children
+import androidx.core.widget.doAfterTextChanged
+import com.example.simplecontroller.net.UdpClient
+import com.example.simplecontroller.net.isCameraFollowPayload
+import com.example.simplecontroller.net.cameraFollowStrengthPercent
 import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.R
 
@@ -83,6 +87,8 @@ class PropertySheetBuilder(
         val stickPlusMode: CheckBox,
         val directionalContainer: LinearLayout,
         val payloadField: AutoCompleteTextView,
+        val excludeFromCameraFollow: CheckBox,
+        val cameraFollowStrength: EditText?,
         val touchAim: TouchAimComponents?,
         val buttonAim: ButtonAimComponents?,
         val buttonDirectional: ButtonDirectionalComponents?,
@@ -400,6 +406,32 @@ class PropertySheetBuilder(
         val earlyButtonPayload = if (model.type == ControlType.BUTTON) {
             addPayloadControl(container)
         } else null
+        val cameraFollowStrength = earlyButtonPayload?.let { payload ->
+            val strengthOptions = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+            container.addView(strengthOptions)
+            strengthOptions.addView(TextView(context).apply {
+                text = "Camera Follow strength (%): 100 is current behavior; 125 is stronger. Range 0–200. Saving applies it immediately."
+            })
+            val field = addTextField(
+                strengthOptions, model.cameraFollowStrengthPercent.toString(), "100",
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            )
+            val updateVisibility = {
+                strengthOptions.visibility = if (isCameraFollowPayload(payload.text.toString()) &&
+                    model.pageAction == PageAction.NONE) View.VISIBLE else View.GONE
+            }
+            payload.doAfterTextChanged { updateVisibility() }
+            updateVisibility()
+            field
+        }
+        val excludeFromCameraFollow = addCheckBox(
+            container, "Exclude from Camera Follow (movement without camera assistance)",
+            model.excludeFromCameraFollow,
+            model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+                model.type == ControlType.RADIAL_CURVED_STICK || model.type == ControlType.TOUCH_AIM ||
+                (model.type == ControlType.BUTTON && (model.buttonAimEnabled ||
+                    model.buttonDirectional.enabled || Regex("(?i)(?:^|[,\\s])LS:").containsMatchIn(model.payload)))
+        )
         
         // Sensitivity (for stick/touchpad)
         val sensitivitySeek = if (
@@ -473,7 +505,10 @@ class PropertySheetBuilder(
 
         val buttonAimComponents = if (model.type == ControlType.BUTTON) {
             addButtonAimUI(container) { checked ->
-                if (checked) autoTapEnabled.isChecked = false
+                if (checked) {
+                    autoTapEnabled.isChecked = false
+                    excludeFromCameraFollow.visibility = View.VISIBLE
+                }
             }
         } else {
             null
@@ -481,6 +516,7 @@ class PropertySheetBuilder(
         val buttonDirectionalComponents = if (model.type == ControlType.BUTTON) {
             addButtonDirectionalUI(container) { checked ->
                 if (checked) {
+                    excludeFromCameraFollow.visibility = View.VISIBLE
                     autoTapEnabled.isChecked = false
                     if (buttonAimComponents?.enabled?.isChecked != true) holdToggle.isChecked = false
                 }
@@ -648,7 +684,8 @@ class PropertySheetBuilder(
             holdToggle, autoTapEnabled, autoTapIntervalMs,
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
-            directionalContainer, payloadField, touchAimComponents, buttonAimComponents,
+            directionalContainer, payloadField, excludeFromCameraFollow, cameraFollowStrength,
+            touchAimComponents, buttonAimComponents,
             buttonDirectionalComponents,
             pageActionComponents,
             stickProfileComponents
@@ -2641,6 +2678,16 @@ class PropertySheetBuilder(
      * Save all properties from UI components to the model
      */
     private fun saveProperties(components: UIComponents) {
+        model.excludeFromCameraFollow = components.excludeFromCameraFollow.isChecked
+        if (model.type == ControlType.BUTTON &&
+            (components.pageAction?.action?.selectedItemPosition ?: 0) == PageAction.NONE.ordinal &&
+            isCameraFollowPayload(components.payloadField.text.toString())) {
+            val value = components.cameraFollowStrength?.text?.toString()?.toFloatOrNull()
+            val strength = value?.takeIf { it.isFinite() }?.let(::cameraFollowStrengthPercent)
+                ?: model.cameraFollowStrengthPercent
+            model.cameraFollowStrengthPercent = strength
+            UdpClient.setCameraFollowStrength(strength)
+        }
         // Save common properties
         model.name = components.nameField.text.toString()
         model.w = components.widthSeek.progress.toFloat().coerceAtLeast(40f)

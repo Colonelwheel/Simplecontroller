@@ -898,7 +898,8 @@ internal fun Control.buttonAimConfig(): AimOutputConfig = AimOutputConfig(
         AimOriginMode.INITIAL_TOUCH
     },
     sendNeutralOnBegin = !buttonAimStickUsesTouchPosition,
-    gameMouse = buttonAimOutput == ButtonAimOutput.GAME_MOUSE
+    gameMouse = buttonAimOutput == ButtonAimOutput.GAME_MOUSE,
+    excludeFromCameraFollow = excludeFromCameraFollow
 )
 
 internal fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConfig(
@@ -915,7 +916,8 @@ internal fun Control.buttonAimAlternateConfig(): AimOutputConfig = AimOutputConf
         AimOriginMode.INITIAL_TOUCH
     },
     sendNeutralOnBegin = !buttonAimAlternateStickUsesTouchPosition,
-    gameMouse = buttonAimAlternateOutput == ButtonAimOutput.GAME_MOUSE
+    gameMouse = buttonAimAlternateOutput == ButtonAimOutput.GAME_MOUSE,
+    excludeFromCameraFollow = excludeFromCameraFollow
 )
 
 private fun Control.buttonAimDpadConfig(): ButtonAimDpadConfig = ButtonAimDpadConfig(

@@ -1,0 +1,12 @@
+{
+  "executable_sha256": "3242F841DFA9490312BFC5D02C2CCF626FAAD59DA980DA47B381066AFE6CDE17",
+  "verified": [
+    "all five bundled modules match build source semantically",
+    "preserved retained-nose facial, voice, and Game Mouse companions",
+    "Camera Follow exclusion and live strength protocol present",
+    "Game Mouse routing and ordering barrier present",
+    "x64 and x86 ViGEm DLL bytes match"
+  ],
+  "receiver_executed": false,
+  "live_game_validation": "pending"
+}

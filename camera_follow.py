@@ -42,6 +42,7 @@ class CameraFollowState:
         self.settings = settings or CameraFollowSettings()
         self._lock = threading.RLock()
         self.enabled = self.settings.enabled_by_default
+        self.strength_percent = 100.0
         self.left_x = 0.0
         self.left_y = 0.0
         self.manual_rs_x = 0.0
@@ -70,9 +71,43 @@ class CameraFollowState:
             self.movement_started_at = now if enabled and self._left_is_moving() else None
             return changed
 
-    def set_left_stick(self, x, y, now=None):
+    def set_strength_percent(self, percent, now=None):
+        """Scale response and output ceiling together, preserving timing/priority."""
+        if isinstance(percent, bool):
+            raise ValueError("Camera Follow strength must be finite and between 0 and 200")
+        percent = float(percent)
+        if not math.isfinite(percent) or not 0.0 <= percent <= 200.0:
+            raise ValueError("Camera Follow strength must be finite and between 0 and 200")
         now = time.monotonic() if now is None else float(now)
         with self._lock:
+            if self.strength_percent == percent:
+                return False
+            old_percent = self.strength_percent
+            self.strength_percent = percent
+            # Do not leave a stronger old ramp behind after a live reduction.
+            scaled_x = (self.generated_x / old_percent) * percent if old_percent else 0.0
+            self.generated_x = _clamp(scaled_x,
+                                      -self._maximum_output(), self._maximum_output())
+            target = self._camera_target(now)
+            if abs(self.generated_x) > abs(target):
+                self.generated_x = target
+            self._last_target = ((self._last_target / old_percent) * percent
+                                 if old_percent else 0.0)
+            self._last_step_at = now
+            return True
+
+    def _maximum_output(self):
+        return min(1.0, self.settings.maximum_output * self.strength_percent / 100.0)
+
+    def set_left_stick(self, x, y, now=None, camera_follow_allowed=True):
+        now = time.monotonic() if now is None else float(now)
+        with self._lock:
+            if not camera_follow_allowed:
+                self.left_x = self.left_y = 0.0
+                self.movement_started_at = None
+                self.generated_x = self._last_target = 0.0
+                self._last_step_at = now
+                return
             was_moving = self._left_is_moving()
             self.left_x = _clamp(x)
             self.left_y = _clamp(y)
@@ -141,15 +176,15 @@ class CameraFollowState:
                 self.generated_x = target
             else:
                 maximum_change = (
-                    self.settings.maximum_output * elapsed * 1000.0 / ramp_ms
+                    self._maximum_output() * elapsed * 1000.0 / ramp_ms
                 )
                 self.generated_x = _move_toward(
                     self.generated_x, target, maximum_change
                 )
             self.generated_x = _clamp(
                 self.generated_x,
-                -self.settings.maximum_output,
-                self.settings.maximum_output,
+                -self._maximum_output(),
+                self._maximum_output(),
             )
             self._last_target = target
 
@@ -185,7 +220,7 @@ class CameraFollowState:
 
         direction = -1.0 if self.settings.invert_direction else 1.0
         return _clamp(
-            self.left_x * self.settings.strength * direction,
-            -self.settings.maximum_output,
-            self.settings.maximum_output,
+            self.left_x * self.settings.strength * (self.strength_percent / 100.0) * direction,
+            -self._maximum_output(),
+            self._maximum_output(),
         )

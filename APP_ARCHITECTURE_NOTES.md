@@ -1571,3 +1571,13 @@ At the time this note was written:
 - Camera Follow and stick-response behavior have focused automated tests; USB discovery was verified by syntax, Android compilation/unit tests, and receiver packaging but still requires an end-to-end phone/PC tether test on the actual devices.
 - The `.ino` firmware files include hard-coded Wi-Fi credentials.
 - Build verification from this shell requires Java/JDK configuration. Without `JAVA_HOME` or `java` on `PATH`, Gradle compile commands cannot run here.
+
+## Camera Follow controls (October 11, 2026)
+
+The existing receiver defaults above remain the 100% baseline. The Android app
+can now send ordered per-player strength updates and tag a phone left-stick
+source as excluded from assistance. Exclusion changes only Camera Follow input,
+not the virtual left-stick output or facial source priority. Camera Follow
+strength is edited in an ordinary Camera Follow button's options, keeping the
+existing payload and toggle behavior. Details and verification are maintained in
+[CAMERA_FOLLOW_CONTROLS.md](CAMERA_FOLLOW_CONTROLS.md).

@@ -400,6 +400,10 @@ fun validateControllerProfile(
         val usedControlIds = mutableSetOf<String>()
         val controls = deepCopyControls(source.controls).mapIndexed { controlIndex, original ->
             var control = original
+            require(control.cameraFollowStrengthPercent.isFinite() &&
+                control.cameraFollowStrengthPercent in 0f..200f) {
+                "Camera Follow strength must be between 0 and 200 percent."
+            }
             if (control.id.isBlank() || !usedControlIds.add(control.id)) {
                 require(
                     decoded.formatVersion < 3 &&
@@ -524,6 +528,10 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
             validateOrientationGeometry(page.landscapeGeometry, "${page.name} Landscape")
         }.exceptionOrNull()?.let { return it.message ?: "Orientation geometry is invalid." }
         page.controls.forEach { control ->
+            if (!control.cameraFollowStrengthPercent.isFinite() ||
+                control.cameraFollowStrengthPercent !in 0f..200f) {
+                return "Camera Follow strength must be between 0 and 200 percent."
+            }
             if (control.pageAction != PageAction.NONE && control.type != ControlType.BUTTON) {
                 return "Only button controls can have local page actions."
             }

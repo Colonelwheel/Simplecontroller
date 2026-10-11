@@ -1061,14 +1061,14 @@ class ControlView(
                     // Stick+ mode - send analog via UDP helper (correct tag + player prefix),
                     // then layer the directional keys on top
                     if (canSendAnalog) {
-                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy)
+                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy, model.excludeFromCameraFollow)
                     }
                     directionalHandler.handleStickPlusMode(directionalX, directionalY, e.actionMasked)
                 }
                 else -> {
                     // Regular analog stick/pad mode (use UDP stick helper so tags/prefixes are correct)
                     if (canSendAnalog) {
-                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy)
+                        ManualStickArbiter.send(model.payload, manualStickOwnerToken, sx, sy, model.excludeFromCameraFollow)
                     }
                 }
             }

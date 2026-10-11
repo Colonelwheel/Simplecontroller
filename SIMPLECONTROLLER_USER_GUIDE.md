@@ -1006,3 +1006,17 @@ A Button can start a persistent timed repeater with one tap and stop it with the
 ---
 
 Screenshots of an earlier version are available in the [SimpleController image album](https://imgur.com/a/simple-controller-app-MbGxUYt). The current interface contains newer options, so some labels and panels may look different.
+
+### Camera Follow participation and strength
+
+Check **Exclude from Camera Follow** in a movement control's options to move your
+character without generating Camera Follow assistance from that control. Other
+participating controls still use Camera Follow. Retained movement keeps this
+selection, and manual aiming keeps its existing priority.
+
+Edit your ordinary `CAMERA_FOLLOW` button to set **Camera Follow strength (%)**.
+**100%** is the existing response; **125%** increases both response and maximum
+camera output by 25%. Saving applies the new strength live, and pressing the
+button applies its saved strength before its normal toggle/on/off action.
+See [Camera Follow controls](CAMERA_FOLLOW_CONTROLS.md) for persistence, profiles,
+ConsoleBridge limitations, and verified delivery details.

@@ -1,6 +1,7 @@
 package com.example.simplecontroller.net
 
 import android.os.Build
+import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -67,6 +68,8 @@ object UdpClient {
 
     private val cameraFollowStateLock = Any()
     @Volatile private var cameraFollowEnabled = false
+    private var cameraFollowStrength = 100f
+    private var cameraFollowPreferences: SharedPreferences? = null
     private val manualRightStickOwners = mutableSetOf<Any>()
 
     // Key state tracking for reliable directional commands
@@ -227,6 +230,45 @@ object UdpClient {
         return ReleaseDelivery.ACK_PENDING
     }
 
+    fun initializeCameraFollowPreferences(preferences: SharedPreferences) {
+        synchronized(cameraFollowStateLock) {
+            cameraFollowPreferences = preferences
+            cameraFollowStrength = cameraFollowStrengthPercent(
+                preferences.getFloat("camera_follow_strength_percent", 100f)
+            )
+        }
+    }
+
+    fun setCameraFollowStrength(percent: Float) {
+        synchronized(cameraFollowStateLock) {
+            cameraFollowStrength = cameraFollowStrengthPercent(percent)
+            cameraFollowPreferences?.edit()
+                ?.putFloat("camera_follow_strength_percent", cameraFollowStrength)?.apply()
+        }
+        resendCameraFollowStrength()
+    }
+
+    private fun resendCameraFollowStrength() {
+        if (useCbv0) return
+        val ticket = outputSafetyEpoch.nextTicket()
+        val strength = synchronized(cameraFollowStateLock) { cameraFollowStrength }
+        val command = cameraFollowStrengthCommand(ticket.sessionId, ticket.sequence, strength)
+        if (!isInitialized || socket == null || serverAddress == null) {
+            if (outputSafetyEpoch.isCurrent(ticket)) NetworkClient.send(command)
+            return
+        }
+        scope.launch {
+            if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+            try {
+                val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
+                val buffer = "$prefix$command".toByteArray()
+                socket?.send(DatagramPacket(buffer, buffer.size, serverAddress, serverPort))
+            } catch (e: Exception) {
+                if (outputSafetyEpoch.isCurrent(ticket)) NetworkClient.send(command)
+            }
+        }
+    }
+
     fun toggleCameraFollow(): Boolean {
         val (enabled, effectiveEnabled) = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled = !cameraFollowEnabled
@@ -245,6 +287,7 @@ object UdpClient {
     }
 
     fun resendCameraFollowState() {
+        resendCameraFollowStrength()
         val enabled = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled && manualRightStickOwners.isEmpty()
         }
@@ -472,36 +515,34 @@ object UdpClient {
     /**
      * Send a stick position update
      */
-    fun sendStickPosition(stickNameRaw: String, x: Float, y: Float) {
-        sendOrderedStickPosition(stickNameRaw, x, y, isMacro = false)
+    fun sendStickPosition(stickNameRaw: String, x: Float, y: Float, excludeFromCameraFollow: Boolean = false) {
+        sendOrderedStickPosition(stickNameRaw, x, y, isMacro = false, excludeFromCameraFollow)
     }
 
     /** Send an explicit LS/RS directional macro without disguising it as manual RS input. */
-    fun sendStickMacroPosition(stickNameRaw: String, x: Float, y: Float) {
+    fun sendStickMacroPosition(stickNameRaw: String, x: Float, y: Float, excludeFromCameraFollow: Boolean = false) {
         // ConsoleBridge has one stick source and no PC-side Camera Follow arbitration.
         // Preserve its existing binary stick behavior exactly.
         if (useCbv0) {
             sendStickPosition(stickNameRaw, x, y)
             return
         }
-        sendOrderedStickPosition(stickNameRaw, x, y, isMacro = true)
+        sendOrderedStickPosition(stickNameRaw, x, y, isMacro = true, excludeFromCameraFollow)
     }
 
     private fun sendOrderedStickPosition(
         stickNameRaw: String,
         x: Float,
         y: Float,
-        isMacro: Boolean
+        isMacro: Boolean,
+        excludeFromCameraFollow: Boolean
     ) {
         val canon = normalizeStickName(stickNameRaw) // e.g., "STICK_L" or "STICK_R"
-        val wireName = if (isMacro) {
-            if (canon.contains("_R")) "STICK_MACRO_R" else "STICK_MACRO_L"
-        } else {
-            canon
-        }
         val ticket = outputSafetyEpoch.nextTicket()
-        val orderedCommand =
-            "$wireName:${ticket.sessionId}:${ticket.sequence}:${"%.2f".format(x)},${"%.2f".format(y)}"
+        val orderedCommand = orderedStickCommand(
+            canon, isMacro, excludeFromCameraFollow && !useCbv0,
+            ticket.sessionId, ticket.sequence, x, y
+        )
         val consoleBridgeFallback =
             "$canon:${"%.2f".format(x)},${"%.2f".format(y)}"
 

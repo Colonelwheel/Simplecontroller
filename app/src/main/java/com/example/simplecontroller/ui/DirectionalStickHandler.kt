@@ -89,7 +89,7 @@ class DirectionalStickHandler(
             // Only send this for actual STICK type controls, not buttons
             if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
                 model.type == ControlType.RADIAL_CURVED_STICK) {
-                UdpClient.sendStickPosition(model.payload, analogX, analogY)
+                UdpClient.sendStickPosition(model.payload, analogX, analogY, model.excludeFromCameraFollow)
             }
         }
 
@@ -306,7 +306,7 @@ class DirectionalStickHandler(
         if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
             model.type == ControlType.RADIAL_CURVED_STICK) {
             // Also send a final zero position via UDP to ensure server knows we've stopped
-            UdpClient.sendStickPosition(model.id, 0f, 0f)
+            UdpClient.sendStickPosition(model.id, 0f, 0f, model.excludeFromCameraFollow)
         }
     }
 

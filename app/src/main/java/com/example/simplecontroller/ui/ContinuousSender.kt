@@ -52,7 +52,7 @@ class ContinuousSender(
                         UdpClient.sendTouchpadPosition(curvedX, curvedY)
                     } else {
                         // For sticks, use the stick position sender with the model's payload
-                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY)
+                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY, model.excludeFromCameraFollow)
                     }
                 } else {
                     // Fallback to TCP - format remains the same for both types
@@ -92,7 +92,7 @@ class ContinuousSender(
                 if (abs(curX) > minMag || abs(curY) > minMag) {
                     val sendX = applyResponseCurve(curX)
                     val sendY = applyResponseCurve(curY)
-                    UdpClient.sendStickPosition(model.payload, sendX, sendY)
+                    UdpClient.sendStickPosition(model.payload, sendX, sendY, model.excludeFromCameraFollow)
 
                     if (model.autoCenter) decay *= 0.95f      // glide only in snap‑back mode
                     uiHandler.postDelayed(this, sendIntervalMs)
@@ -107,7 +107,7 @@ class ContinuousSender(
 
     /* helper: single 0,0 packet + stop */
     private fun sendCenter() {
-        UdpClient.sendStickPosition(model.payload, 0f, 0f)
+        UdpClient.sendStickPosition(model.payload, 0f, 0f, model.excludeFromCameraFollow)
         continuousSender = null
     }
 

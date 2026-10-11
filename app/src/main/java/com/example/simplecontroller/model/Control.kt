@@ -74,6 +74,9 @@ data class Control(
     var name: String        = "",
     var sensitivity: Float  = 1f,          // sticks / touch-pads
     var autoCenter: Boolean = true,        // sticks / touch-pads
+    // Movement eligibility only; manual right-stick priority is always preserved.
+    var excludeFromCameraFollow: Boolean = false,
+    var cameraFollowStrengthPercent: Float = 100f,
 
     /* button-specific */
     var holdToggle: Boolean = false,       // "latch" behaviour

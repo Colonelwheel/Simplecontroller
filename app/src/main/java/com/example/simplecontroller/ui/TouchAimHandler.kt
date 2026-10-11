@@ -592,5 +592,6 @@ internal fun Control.touchAimConfig(): AimOutputConfig = AimOutputConfig(
         AimOriginMode.INITIAL_TOUCH
     },
     sendNeutralOnBegin = !touchAimStickUsesTouchPosition,
-    gameMouse = touchAimGameMouse
+    gameMouse = touchAimGameMouse,
+    excludeFromCameraFollow = excludeFromCameraFollow
 )

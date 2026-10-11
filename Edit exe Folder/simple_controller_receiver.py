@@ -312,9 +312,21 @@ camera_follow_input_lost = {
 }
 
 
+# Metadata belongs to the current phone LS winner, not the merged facial vector.
+# The pad callback and phone writes share release_state_lock with all face writes.
+camera_follow_phone_left_excluded = {player_id: False for player_id in gamepads}
+latest_camera_follow_strength_packets = {}
+
+
 def effective_left_changed(player_id, x, y):
     # Camera Follow uses legacy screen Y; native Xbox forward is positive Y.
-    camera_follow_states[player_id].set_left_stick(x, -y)
+    pad = gamepads[player_id]
+    allowed = (pad.phone_left == (0.0, 0.0)
+               or not camera_follow_phone_left_excluded[player_id])
+    camera_follow_states[player_id].set_left_stick(x, -y, camera_follow_allowed=allowed)
+    if not allowed:
+        # An excluded winner must not coast on assistance from a previous stick.
+        apply_camera_follow_output(player_id, force=True)
 
 
 for _player_id, _pad in gamepads.items():
@@ -593,6 +605,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 # Keep Camera Follow calculation and virtual-pad reset atomic so a
                 # value calculated just before RELEASE_ALL cannot land afterward.
                 camera_follow_states[player_id].clear_inputs()
+                camera_follow_phone_left_excluded[player_id] = False
                 gamepad = gamepads[player_id]
                 gamepad.reset()
                 gamepad.update()
@@ -787,7 +800,8 @@ def stop_camera_follow_worker():
         clear_camera_follow_player(player_id)
 
 @synchronized(release_state_lock)
-def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="manual"):
+def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="manual",
+                      exclude_from_camera_follow=False):
     """Handle analog stick input with improved handling"""
     x = normalize_value(x)
     y = normalize_value(y)
@@ -805,6 +819,7 @@ def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="man
 
         if stick_type == "LEFT":
             with camera_follow_output_locks[player_id]:
+                camera_follow_phone_left_excluded[player_id] = bool(exclude_from_camera_follow)
                 gamepad.left_joystick_float(x_value_float=x, y_value_float=-y)  # Y is inverted for gamepad
                 gamepad.update()
         else:
@@ -1219,6 +1234,32 @@ def process_command(data, addr, player_id='player1'):
         camera_follow_last_input_at[player_id] = time.monotonic()
         camera_follow_input_lost[player_id] = False
 
+    if data.startswith("CAMERA_FOLLOW_STRENGTH:"):
+        parts = data.split(":")
+        try:
+            if len(parts) != 4 or not parts[1] or player_id not in camera_follow_states:
+                raise ValueError("invalid strength identity")
+            _, session_id, seq_text, percent_text = parts
+            sequence = int(seq_text)
+            percent = float(percent_text)
+            if sequence < 0 or not math.isfinite(percent) or not 0.0 <= percent <= 200.0:
+                raise ValueError("invalid strength value")
+        except ValueError:
+            logger.warning(f"Bad Camera Follow strength packet from {player_id}: {data}")
+            return None
+        with release_state_lock:
+            if ordered_output and not output_packet_is_current(*ordered_output):
+                return None
+            if not output_packet_is_current(session_id, sequence):
+                return None
+            previous = latest_camera_follow_strength_packets.get(player_id)
+            if previous and previous["session"] == session_id and sequence <= previous["seq"]:
+                return None
+            camera_follow_states[player_id].set_strength_percent(percent)
+            latest_camera_follow_strength_packets[player_id] = {"session": session_id, "seq": sequence}
+            apply_camera_follow_output(player_id, force=True)
+        return None
+
     if data in ("CAMERA_FOLLOW:0", "CAMERA_FOLLOW:1"):
         set_camera_follow_enabled(player_id, data.endswith(":1"))
         return
@@ -1377,7 +1418,8 @@ def process_command(data, addr, player_id='player1'):
     # Example: STICK_L:a3f219bc:843:0.00,0.00
     if data.startswith((
         "STICK:", "STICK_L:", "STICK_R:", "LS:", "RS:",
-        "STICK_MACRO_L:", "STICK_MACRO_R:"
+        "STICK_MACRO_L:", "STICK_MACRO_R:",
+        "STICK_L_NO_FOLLOW:", "STICK_MACRO_L_NO_FOLLOW:"
     )):
         parts = data.split(":", 3)
 
@@ -1392,41 +1434,37 @@ def process_command(data, addr, player_id='player1'):
                 return None
 
             source = "macro" if command.startswith("STICK_MACRO_") else "manual"
-            if command in ("STICK", "STICK_L", "LS", "STICK_MACRO_L"):
+            excluded = command in ("STICK_L_NO_FOLLOW", "STICK_MACRO_L_NO_FOLLOW")
+            if command in ("STICK", "STICK_L", "LS", "STICK_MACRO_L",
+                           "STICK_L_NO_FOLLOW", "STICK_MACRO_L_NO_FOLLOW"):
                 stick_type = "LEFT"
             elif command in ("STICK_R", "RS", "STICK_MACRO_R"):
                 stick_type = "RIGHT"
             else:
                 return None
 
-            # Manual and macro packets share the Android sender's monotonic sequence.
-            # Keep one freshness gate per physical stick so an older packet from one
-            # source cannot surface after a newer packet from the other source.
-            state_key = (player_id, stick_type)
-            previous = latest_stick_packets.get(state_key)
-
-            # Ignore old or duplicate packets from the same app session
-            if not output_packet_is_current(session_id, seq):
-                logger.debug(
-                    f"Dropped pre-release {player_id} {stick_type} stick packet: seq={seq}"
-                )
-                return None
-
-            if previous is not None and previous["session"] == session_id:
-                if seq <= previous["seq"]:
-                    logger.debug(
-                        f"Dropped stale {player_id} {stick_type} stick packet: "
-                        f"seq={seq}, newest={previous['seq']}"
-                    )
+            if excluded:
+                try:
+                    coordinates = (float(x), float(y))
+                    if seq < 0 or not session_id or not all(math.isfinite(v) for v in coordinates):
+                        raise ValueError("invalid excluded stick value")
+                except ValueError:
+                    logger.warning(f"Bad excluded stick packet from {player_id}: {data}")
                     return None
-
-            # Remember newest accepted packet
-            latest_stick_packets[state_key] = {
-                "session": session_id,
-                "seq": seq
-            }
-
-            handle_stick_input(x, y, stick_type, player_id, source=source)
+            # Tag and vector are accepted atomically at the same physical-stick
+            # freshness gate, so delayed eligible/excluded sources cannot revive.
+            with release_state_lock:
+                if ordered_output and not output_packet_is_current(*ordered_output):
+                    return None
+                if not output_packet_is_current(session_id, seq):
+                    return None
+                state_key = (player_id, stick_type)
+                previous = latest_stick_packets.get(state_key)
+                if previous is not None and previous["session"] == session_id and seq <= previous["seq"]:
+                    return None
+                latest_stick_packets[state_key] = {"session": session_id, "seq": seq}
+                handle_stick_input(x, y, stick_type, player_id, source=source,
+                                  exclude_from_camera_follow=excluded)
             return None
     
     # Handle stick/touchpad input (format: "STICK:x,y" or "TOUCHPAD:x,y")

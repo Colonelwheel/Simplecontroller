@@ -215,6 +215,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         connectionStatusText.setTextColor(ContextCompat.getColor(this, R.color.dark_text_primary))
 
         // 3. Network / player-role state
+        UdpClient.initializeCameraFollowPreferences(networkPrefs)
         val savedPlayerRole = networkPrefs.getString(
             "playerRole",
             NetworkClient.PlayerRole.PLAYER1.name

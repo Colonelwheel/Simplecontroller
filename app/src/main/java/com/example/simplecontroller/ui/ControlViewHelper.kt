@@ -95,9 +95,10 @@ class ControlViewHelper(
                     UdpClient.sendKeyCommand(key, pressed)
 
                 override fun sendStickMacro(stickName: String, x: Float, y: Float) =
-                    UdpClient.sendStickMacroPosition(stickName, x, y)
+                    UdpClient.sendStickMacroPosition(stickName, x, y, model.excludeFromCameraFollow)
 
                 override fun onCameraFollow(command: String) {
+                    UdpClient.setCameraFollowStrength(model.cameraFollowStrengthPercent)
                     val enabled = when (command) {
                         "CAMERA_FOLLOW:1" -> true.also(UdpClient::setCameraFollowEnabled)
                         "CAMERA_FOLLOW:0" -> false.also(UdpClient::setCameraFollowEnabled)
@@ -235,6 +236,7 @@ class ControlViewHelper(
             // intentionally handled only once until this physical press is released.
             if (cameraFollowHandledForPress) return
             cameraFollowHandledForPress = true
+            UdpClient.setCameraFollowStrength(model.cameraFollowStrengthPercent)
             val enabled = when (upperCommand) {
                 "CAMERA_FOLLOW:1" -> true.also { UdpClient.setCameraFollowEnabled(it) }
                 "CAMERA_FOLLOW:0" -> false.also { UdpClient.setCameraFollowEnabled(it) }
@@ -319,7 +321,7 @@ class ControlViewHelper(
 
         parseStickDirectionCommand(command)?.let { stickCommand ->
             Log.d("ControlViewHelper", "Sending stick direction command via UdpClient: $command")
-            UdpClient.sendStickMacroPosition(stickCommand.stickName, stickCommand.x, stickCommand.y)
+            UdpClient.sendStickMacroPosition(stickCommand.stickName, stickCommand.x, stickCommand.y, model.excludeFromCameraFollow)
             return
         }
 
@@ -414,7 +416,7 @@ class ControlViewHelper(
                     // Stick direction button payloads -> center the stick on lift
                     stickCommand != null -> {
                         Log.d("ControlViewHelper", "Sending stick direction release: ${stickCommand.stickName}:0.00,0.00")
-                        UdpClient.sendStickMacroPosition(stickCommand.stickName, 0f, 0f)
+                        UdpClient.sendStickMacroPosition(stickCommand.stickName, 0f, 0f, model.excludeFromCameraFollow)
                     }
 
                     cmd.equals("RELEASE_ALL", ignoreCase = true) -> Unit

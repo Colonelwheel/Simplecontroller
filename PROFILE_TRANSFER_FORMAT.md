@@ -10,6 +10,7 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested `ControllerProfile` format version `8` for Camera Follow exclusion or nondefault strength;
 - nested `ControllerProfile` format version `7` for Button Aim Game Mouse;
 - nested `ControllerProfile` format version `6` for Touch Aim (Game Mouse);
 - nested `ControllerProfile` format version `5` for profiles without Game Mouse;
@@ -84,14 +85,20 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - All-profile backup version: `1`
-- Maximum nested controller-profile format: `7` (formats `2` through `6` remain importable)
-- Writers use `7` when a Button has Game Mouse selected for Base or Alternate;
+- Maximum nested controller-profile format: `8` (formats `2` through `7` remain importable)
+- Writers use `8` when any control excludes its movement from Camera Follow or stores strength
+  other than 100%; otherwise `7` when a Button has Game Mouse selected for Base or Alternate;
   otherwise `6` when a TouchAim control has `touchAimGameMouse: true`, otherwise `5`.
   Older apps reject nested format 6 before deserialization, including inside all-profile backups.
   Manual and calibration profile application preserve the target control's mouse backend.
 - Reusable Button Aim profiles with Game Mouse use schema `4`; newly captured profiles
   with existing outputs remain schema `3`, and historical schemas `1` and `2` remain readable.
   Both aiming-only and complete application copy the saved Base/Alternate output selections.
+- Camera Follow participation belongs to the target control. Applying reusable Button Aim,
+  Directional/Stick+, manual TouchAim, or calibration profiles leaves its exclusion unchanged.
+  Complete controller profiles preserve both `excludeFromCameraFollow` and
+  `cameraFollowStrengthPercent`, including inactive selections. Current live strength is an
+  app preference, excluded from portable transfers like other runtime/network preferences.
 - Single-profile suffix: `.simplecontroller-profile.json`
 - All-profile suffix: `.simplecontroller-profiles-backup.json`
 - Maximum file size: 25 MB
