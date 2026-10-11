@@ -2,7 +2,7 @@ package com.example.simplecontroller.io
 
 import android.content.Context
 import com.example.simplecontroller.model.ButtonAimProfile
-import com.example.simplecontroller.model.CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerProfile
 import com.example.simplecontroller.model.StickDirectionalProfile
@@ -197,7 +197,7 @@ private fun requireNestedVersions(objectValue: JsonObject) {
         requireSupportedVersion(
             "Controller profile ${index + 1}",
             profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2,
-            CONTROLLER_PROFILE_FORMAT_VERSION
+            MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
         )
     }
     listOf(

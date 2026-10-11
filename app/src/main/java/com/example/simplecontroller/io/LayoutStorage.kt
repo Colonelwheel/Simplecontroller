@@ -3,7 +3,8 @@ package com.example.simplecontroller.io
 import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
-import com.example.simplecontroller.model.CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.requiredFormatVersion
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
 import com.example.simplecontroller.model.ButtonDirectionalSettings
@@ -111,9 +112,9 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
         ?.intOrNull
         ?: 2
     require(encodedVersion >= 1) { "Profile format $encodedVersion is invalid." }
-    require(encodedVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
+    require(encodedVersion <= MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION) {
         "Profile format $encodedVersion is newer than supported format " +
-            CONTROLLER_PROFILE_FORMAT_VERSION
+            MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
     val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
         .copy(formatVersion = encodedVersion)
@@ -129,7 +130,7 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
 
 fun encodeControllerProfile(profile: ControllerProfile): String {
     validateControllerProfileForSave(profile)?.let { throw IllegalArgumentException(it) }
-    return json.encodeToString(profile.copy(formatVersion = CONTROLLER_PROFILE_FORMAT_VERSION))
+    return json.encodeToString(profile.copy(formatVersion = profile.requiredFormatVersion()))
 }
 
 /**
@@ -141,7 +142,7 @@ fun encodeControllerProfileTransfer(profileName: String, profile: ControllerProf
     return json.encodeToString(
         ControllerProfileTransferFile(
             profileName = profileName.trim(),
-            profile = profile.copy(formatVersion = CONTROLLER_PROFILE_FORMAT_VERSION)
+            profile = profile.copy(formatVersion = profile.requiredFormatVersion())
         )
     )
 }
@@ -195,9 +196,9 @@ fun decodeControllerProfileTransfer(
     require(profileFormatVersion >= 1) {
         "Profile format $profileFormatVersion is invalid."
     }
-    require(profileFormatVersion <= CONTROLLER_PROFILE_FORMAT_VERSION) {
+    require(profileFormatVersion <= MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION) {
         "Profile format $profileFormatVersion is newer than supported format " +
-            CONTROLLER_PROFILE_FORMAT_VERSION
+            MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
 
     val transfer = json.decodeFromJsonElement<ControllerProfileTransferFile>(element)
@@ -492,7 +493,9 @@ fun validateControllerProfile(
     }
 
     return ControllerProfileLoadResult(
-        ControllerProfile(CONTROLLER_PROFILE_FORMAT_VERSION, homeId, pages),
+        ControllerProfile(homePageId = homeId, pages = pages).let {
+            it.copy(formatVersion = it.requiredFormatVersion())
+        },
         warnings.distinct(),
         migratedFromSinglePage = false
     )

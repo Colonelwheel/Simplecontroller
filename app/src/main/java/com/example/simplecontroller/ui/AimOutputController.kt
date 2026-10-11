@@ -20,7 +20,8 @@ data class AimOutputConfig(
     val stickFullDisplacementPx: Float,
     val stickDeadzonePx: Float,
     val originMode: AimOriginMode,
-    val sendNeutralOnBegin: Boolean = false
+    val sendNeutralOnBegin: Boolean = false,
+    val gameMouse: Boolean = false
 )
 
 internal class DeliberateSwipeTracker(private val touchSlopPx: Float) {
@@ -431,7 +432,8 @@ class AimOutputSession(
             }
         }
         if (abs(outX) >= MOUSE_DEADZONE || abs(outY) >= MOUSE_DEADZONE) {
-            UdpClient.sendTouchpadDelta(outX, outY)
+            if (activeConfig.gameMouse) UdpClient.sendGameMouseDelta(outX, outY)
+            else UdpClient.sendTouchpadDelta(outX, outY)
         }
     }
 

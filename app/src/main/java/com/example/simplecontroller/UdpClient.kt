@@ -393,9 +393,14 @@ object UdpClient {
      * When CBv0 is enabled, we encode to TYPE_MOUSE_DELTA and send to :9010.
      * Otherwise, we send the legacy text "playerX:DELTA:x,y" to :9001.
      */
-    fun sendTouchpadDelta(dx: Float, dy: Float) {
+    fun sendTouchpadDelta(dx: Float, dy: Float) = sendMouseDelta(dx, dy, gameMouse = false)
+
+    /** New PC receiver backend; ConsoleBridge continues sending its existing HID deltas. */
+    fun sendGameMouseDelta(dx: Float, dy: Float) = sendMouseDelta(dx, dy, gameMouse = true)
+
+    private fun sendMouseDelta(dx: Float, dy: Float, gameMouse: Boolean) {
         val ticket = outputSafetyEpoch.nextTicket()
-        val command = "DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}"
+        val command = mouseDeltaCommand(dx, dy, gameMouse, useCbv0)
         // Build the common player prefix for legacy path
         val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
 

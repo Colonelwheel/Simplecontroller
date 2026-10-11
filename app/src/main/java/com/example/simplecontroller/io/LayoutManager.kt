@@ -88,7 +88,7 @@ class LayoutManager(
     /**
      * Create a new control of the specified type
      */
-    fun createControl(type: ControlType) {
+    fun createControl(type: ControlType, touchAimGameMouse: Boolean = false) {
         val w = when (type) {
             ControlType.BUTTON -> 140f
             ControlType.TOUCH_AIM -> 500f
@@ -118,7 +118,11 @@ class LayoutManager(
         val c = Control(
             id = id, type = type,
             x = x0, y = y0, w = w, h = h,
-            payload = payload
+            payload = payload,
+            touchAimGameMouse = type == ControlType.TOUCH_AIM && touchAimGameMouse,
+            name = if (type == ControlType.TOUCH_AIM && touchAimGameMouse) {
+                "Touch Aim (Game Mouse)"
+            } else ""
         )
         controls.add(c)
 

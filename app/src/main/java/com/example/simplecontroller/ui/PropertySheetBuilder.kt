@@ -1159,6 +1159,12 @@ class PropertySheetBuilder(
     }
 
     private fun addTouchAimUI(container: LinearLayout): TouchAimComponents {
+        if (model.touchAimGameMouse) {
+            container.addView(TextView(context).apply {
+                text = "Touch Aim (Game Mouse): experimental relative mouse input with the matching Windows receiver. " +
+                    "Stick output and ConsoleBridge keep their existing paths. Manual and calibration profiles keep this control's mouse version."
+            })
+        }
         addSectionTitle(container, "TouchAim mode and calibration")
         val mode = addChoice(
             container,

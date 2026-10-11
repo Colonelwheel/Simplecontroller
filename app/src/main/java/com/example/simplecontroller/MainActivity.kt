@@ -860,6 +860,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             "Radial Response Curve Stick",
             "TouchPad",
             "Touch Aim",
+            "Touch Aim (Game Mouse)",
             "Re-center Button",
             "--- Layouts ---",
             "Xbox Controller Layout",
@@ -878,11 +879,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     3 -> layoutManager.createControl(ControlType.RADIAL_CURVED_STICK)
                     4 -> layoutManager.createControl(ControlType.TOUCHPAD)
                     5 -> layoutManager.createControl(ControlType.TOUCH_AIM)
-                    6 -> layoutManager.createControl(ControlType.RECENTER)
-                    7 -> {} // This is just a divider item
-                    8 -> createXboxControllerLayout()
-                    9 -> createPlayer1XboxLayout()
-                    10 -> createPlayer2XboxLayout()
+                    6 -> layoutManager.createControl(ControlType.TOUCH_AIM, touchAimGameMouse = true)
+                    7 -> layoutManager.createControl(ControlType.RECENTER)
+                    8 -> {} // This is just a divider item
+                    9 -> createXboxControllerLayout()
+                    10 -> createPlayer1XboxLayout()
+                    11 -> createPlayer2XboxLayout()
                 }
             }
             .create()

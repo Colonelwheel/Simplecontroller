@@ -5,6 +5,8 @@ import java.util.UUID
 import java.util.Locale
 
 const val CONTROLLER_PROFILE_FORMAT_VERSION = 5
+const val GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION = 6
+const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION
 
 @Serializable
 data class ControllerPage(
@@ -21,6 +23,11 @@ data class ControllerProfile(
     val homePageId: String = "",
     val pages: List<ControllerPage> = emptyList()
 )
+
+/** Keep legacy-only files readable by earlier apps; new mouse controls require an aware reader. */
+fun ControllerProfile.requiredFormatVersion(): Int = if (pages.any { page ->
+    page.controls.any { it.type == ControlType.TOUCH_AIM && it.touchAimGameMouse }
+}) GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION else CONTROLLER_PROFILE_FORMAT_VERSION
 
 data class ControllerPageOption(val id: String, val name: String)
 

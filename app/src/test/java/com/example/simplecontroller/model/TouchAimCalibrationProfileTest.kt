@@ -13,6 +13,17 @@ class TouchAimCalibrationProfileTest {
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test
+    fun fullCalibrationApply_preservesBothTargetMouseBackends() {
+        val saved = profile("00000000-0000-0000-0000-000000000001", "Reusable", 10)
+        listOf(false, true).forEach { backend ->
+            val target = control().copy(touchAimGameMouse = backend)
+            assertTrue(saved.applyTo(target))
+            assertEquals(backend, target.touchAimGameMouse)
+            assertEquals(TouchAimMode.CALIBRATED_TWO_STATE, target.touchAimMode)
+        }
+    }
+
+    @Test
     fun oldTouchAimLayout_defaultsToManualThreeStage() {
         val oldJson = """
             {

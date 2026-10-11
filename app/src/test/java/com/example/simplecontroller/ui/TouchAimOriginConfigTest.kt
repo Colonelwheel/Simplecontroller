@@ -10,6 +10,16 @@ import org.junit.Test
 
 class TouchAimOriginConfigTest {
     @Test
+    fun gameMouse_configKeepsAllOriginalAimSettingsExceptMouseBackend() {
+        val legacy = touchAim().touchAimConfig()
+        val game = touchAim().copy(touchAimGameMouse = true).touchAimConfig()
+        assertFalse(legacy.gameMouse)
+        assertTrue(game.gameMouse)
+        assertEquals(legacy, game.copy(gameMouse = false))
+        assertTrue(game.copy(sensitivity = .42f).gameMouse)
+    }
+
+    @Test
     fun existingTouchPositionMode_usesControlCenterWithoutNeutralBegin() {
         val config = touchAim().copy(
             touchAimOutput = TouchAimOutput.RIGHT_STICK,

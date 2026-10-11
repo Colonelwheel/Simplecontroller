@@ -211,6 +211,8 @@ data class Control(
 
     /* Touch Aim: continuous aim plus cumulative contact stages */
     var touchAimOutput: TouchAimOutput = TouchAimOutput.MOUSE,
+    /** Opt-in PC relative mouse events; legacy controls keep cursor-position movement. */
+    var touchAimGameMouse: Boolean = false,
     var touchUseSize: Boolean = true,
     var touchUseMajor: Boolean = true,
     var touchUseMinor: Boolean = true,

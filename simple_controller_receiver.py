@@ -27,6 +27,7 @@ from camera_follow import CameraFollowSettings, CameraFollowState
 from face_input_server import (FaceInputState, FaceInputServer, MergedGamepad, MergedDesktopInput,
                                synchronized, canonical_phone_key, keyboard_name, FACE_INPUT_TAG)
 from voice_input_server import VoiceInputState, VoiceInputServer
+from relative_mouse import send_relative_mouse
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
@@ -629,6 +630,19 @@ def parse_float(value):
         logger.error(f"Failed to convert value: {value}")
         return 0.0
 
+def handle_game_mouse_delta(command):
+    """Opt-in relative SendInput movement; preserve the legacy mouse paths."""
+    try:
+        dx, dy = map(float, command.removeprefix("GAME_DELTA:").split(","))
+        if not (math.isfinite(dx) and math.isfinite(dy)):
+            raise ValueError("movement must be finite")
+        # Match legacy TouchAim scaling and truncation before the native backend.
+        send_relative_mouse(int(dx * DELTA_GAIN), int(dy * DELTA_GAIN))
+    except (ValueError, OverflowError) as error:
+        logger.warning(f"Bad GAME_DELTA packet: {command} ({error})")
+    except OSError as error:
+        logger.error(f"Game mouse movement failed: {error}")
+
 def handle_touchpad(command):
     """Handle touchpad input with stability smoother from first file"""
     # ---------- quick DELTA path ----------
@@ -1145,6 +1159,7 @@ def process_command(data, addr, player_id='player1'):
     data = data.strip()
     if not data:
         return
+    ordered_output = None
 
     # Stateless discovery used by Android's USB Tether Mode. Keep this before
     # connection tracking so discovery probes do not become controller sessions.
@@ -1197,6 +1212,7 @@ def process_command(data, addr, player_id='player1'):
         if not output_packet_is_current(session_id, sequence):
             logger.debug(f"Dropped pre-release output packet: {session_id}:{sequence}")
             return None
+        ordered_output = (session_id, sequence)
         data = output_command
 
     if player_id in camera_follow_last_input_at:
@@ -1221,7 +1237,16 @@ def process_command(data, addr, player_id='player1'):
         print("BTN", data)            # << add this line
     # ------------------------------------------------------------
 
-    # 2️⃣  Route any movement packet straight to handle_touchpad()
+    # The game-mouse backend is additive. Serialize its release-barrier check
+    # with output so a concurrent global release cannot admit a stale movement.
+    if data.startswith("GAME_DELTA:"):
+        with release_state_lock:
+            if ordered_output and not output_packet_is_current(*ordered_output):
+                return None
+            handle_game_mouse_delta(data)
+        return
+
+    # 2️⃣  Route legacy movement packets straight to handle_touchpad()
     if data.startswith(("DELTA:", "TOUCHPAD:", "POS:")):
         handle_touchpad(data)
         return                             # ← prevent duplicate work later
