@@ -23,6 +23,8 @@ import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.isLocalPageAction
+import com.example.simplecontroller.model.FloatingLocalAction
+import com.example.simplecontroller.net.PhoneOutputScope
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
@@ -56,6 +58,87 @@ class ControlView(
     private var suppressLatchReleaseSideEffect = false
     private var pageActionGestureConsumed = false
     private var safeForSilentDetach = false
+    private var outputRoot: PhoneOutputScope? = null
+    private val outputScopeId = "control:${model.id}:${System.identityHashCode(this)}"
+    private var allowOutputScopeCreation = false
+    private val mouseSuppressionOwner = Any()
+    private var allowMouseSuppression = false
+    private var physicalGestureActive = false
+    private var activationGestureConsumed = false
+
+    fun refreshLegacyOutputBusy() {
+        val busy = physicalGestureActive || isPressed || isLatched || leftHeld || fingerIsDown || ownsManualStick ||
+            pendingSingleTap != null || awaitingSecondTap ||
+            continuousSender.isActive() || autoTapController?.isActive == true ||
+            buttonAimHandler?.hasRuntimeState() == true || buttonDirectionalHandler?.hasRuntimeState() == true ||
+            touchAimHandler?.hasRuntimeState() == true || directionalHandler.hasRuntimeState() || uiHelper.hasPendingOutputWork()
+        UdpClient.setLegacyOutputBusy(this, !UdpClient.floatingSupported && busy)
+    }
+
+    /** Children isolate separate executors and continuous aim from ordinary Button output. */
+    fun outputScopeFor(slot: String): PhoneOutputScope? {
+        if (!UdpClient.floatingSupported || !allowOutputScopeCreation) return null
+        val root = outputRoot?.takeIf { it.isActive }
+            ?: UdpClient.beginOutputScope(outputScopeId).also { outputRoot = it }
+        return root.child(slot)
+    }
+
+    fun engageMouseSuppression() {
+        if (model.mouseSuppressCameraFollow && allowMouseSuppression) {
+            UdpClient.setMouseCameraSuppression(mouseSuppressionOwner, true)
+        }
+    }
+
+    fun endMouseSuppression() {
+        allowMouseSuppression = false
+        UdpClient.setMouseCameraSuppression(mouseSuppressionOwner, false)
+    }
+
+    fun sendOwnedCommand(command: String, slot: String = "ordinary", forceRelease: Boolean = false) {
+        if (command.startsWith("MOUSE_", true) && !command.endsWith("_UP", true)) engageMouseSuppression()
+        val scope = outputScopeFor(slot)
+        if (scope != null) {
+            if (forceRelease) scope.sendLegacyForceRelease(command) else scope.sendCommand(command)
+            if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
+        } else if (!UdpClient.floatingSupported) UdpClient.sendCommand(command)
+    }
+
+    fun sendOwnedKey(key: String, pressed: Boolean, slot: String = "ordinary") {
+        val scope = outputScopeFor(slot)
+        if (scope != null) {
+            scope.sendKey(key, pressed)
+            if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
+        }
+        else if (!UdpClient.floatingSupported) UdpClient.sendKeyCommand(key, pressed)
+    }
+
+    fun sendOwnedMacro(stickName: String, x: Float, y: Float, slot: String = "ordinary") {
+        val scope = outputScopeFor(slot)
+        if (scope != null) {
+            scope.sendStickMacro(stickName, x, y, model.excludeFromCameraFollow)
+            if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
+        }
+        else if (!UdpClient.floatingSupported) UdpClient.sendStickMacroPosition(stickName, x, y, model.excludeFromCameraFollow)
+    }
+
+    fun sendOwnedStick(stickName: String, x: Float, y: Float, slot: String = "stick") {
+        val scope = outputScopeFor(slot)
+        if (scope != null) scope.sendStick(stickName, x, y, model.excludeFromCameraFollow)
+        else if (!UdpClient.floatingSupported) UdpClient.sendStickPosition(stickName, x, y, model.excludeFromCameraFollow)
+    }
+
+    fun releaseFloatingRuntime() = releaseEverythingLocally()
+
+    private fun refreshOutputRetention() {
+        val root = outputRoot?.takeIf { it.isActive } ?: return
+        root.child("ordinary").setRetained(isLatched && !isPressed, ::releaseFloatingRuntime)
+        root.child("button-action").setRetained(
+            buttonAimHandler?.isReplaceableRetainedOutput() == true, ::releaseFloatingRuntime
+        )
+        root.child("directional-stick").setRetained(
+            !physicalGestureActive && directionalHandler.hasRuntimeState(), ::releaseFloatingRuntime
+        )
+    }
 
 
     /* ───────── member variables ────────── */
@@ -146,7 +229,8 @@ class ControlView(
         onRetainedStickChanged = {
             retainedButtonAimStickName = it
             invalidate()
-        }
+        },
+        scopeProvider = { outputScopeFor("button-aim") }
     )
     private val buttonAimHandler: ButtonAimHandler?
     private val manualStickOwnerToken = Any()
@@ -210,7 +294,7 @@ class ControlView(
         }
 
         autoTapPayloadExecutor = if (model.type == ControlType.BUTTON) {
-            uiHelper.createButtonAimPayloadExecutor()
+            uiHelper.createButtonAimPayloadExecutor("auto-tap")
         } else {
             null
         }
@@ -244,6 +328,7 @@ class ControlView(
                 },
                 onStateChanged = {
                     uiHelper.updateLabel()
+                    refreshLegacyOutputBusy()
                     invalidate()
                 }
             )
@@ -252,15 +337,20 @@ class ControlView(
         directionalHandler = DirectionalStickHandler(
             model,
             uiHandler,
-            uiHelper.createButtonAimPayloadExecutor()
+            uiHelper.createButtonAimPayloadExecutor("directional-stick"),
+            scopeProvider = { outputScopeFor("stick") }
         )
-        continuousSender = ContinuousSender(model, uiHandler)
+        continuousSender = ContinuousSender(model, uiHandler,
+            scopeProvider = { outputScopeFor("stick") }, onRetainedReplaced = ::releaseFloatingRuntime)
         touchAimHandler = if (model.type == ControlType.TOUCH_AIM) {
             TouchAimHandler(
                 model = model,
                 onStateChanged = { invalidate() },
                 controlSize = { width.toFloat() to height.toFloat() },
-                payloadExecutor = uiHelper.createButtonAimPayloadExecutor(),
+                payloadExecutor = uiHelper.createButtonAimPayloadExecutor("touch-state"),
+                scopeProvider = { outputScopeFor("touch-aim") },
+                stateScopeProvider = { outputScopeFor("touch-state") },
+                onMouseAimEngaged = ::engageMouseSuppression,
                 onPayloadError = { reason ->
                     Toast.makeText(context, "TouchAim: $reason", Toast.LENGTH_SHORT).show()
                 }
@@ -269,7 +359,7 @@ class ControlView(
             null
         }
         val buttonPayloadExecutor = if (model.type == ControlType.BUTTON) {
-            uiHelper.createButtonAimPayloadExecutor()
+            uiHelper.createButtonAimPayloadExecutor("button-action")
         } else null
         buttonAimHandler = if (model.type == ControlType.BUTTON) {
             ButtonAimHandler(
@@ -301,7 +391,8 @@ class ControlView(
                 onPayloadError = { reason ->
                     Toast.makeText(context, "One-shot alternate: $reason", Toast.LENGTH_SHORT).show()
                 },
-                onStateChanged = { updateButtonAimPresentation() }
+                onStateChanged = { updateButtonAimPresentation() },
+                onMouseAimEngaged = ::engageMouseSuppression
             )
         } else {
             null
@@ -339,6 +430,8 @@ class ControlView(
 
     private fun updateButtonAimPresentation() {
         uiHelper.updateLabel(buttonAimHandler?.runtimeLabel())
+        refreshOutputRetention()
+        refreshLegacyOutputBusy()
         invalidate()
     }
 
@@ -537,9 +630,37 @@ class ControlView(
 
     /* ---------- play mode: interact ---------- */
     fun playTouch(e: MotionEvent) {
+        if (activationGestureConsumed) {
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                activationGestureConsumed = false
+            }
+            return
+        }
+        if (e.actionMasked == MotionEvent.ACTION_DOWN && UdpClient.activationPending && !uiHelper.isReleaseAllAction()) {
+            activationGestureConsumed = true
+            Toast.makeText(context, "Preparing scoped controls; touch again when ready.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) {
+            physicalGestureActive = true
+            if (!UdpClient.floatingSupported) UdpClient.setLegacyOutputBusy(this, true)
+            allowOutputScopeCreation = true
+            allowMouseSuppression = true
+        }
+        try {
         when (model.type) {
             /* ----- BUTTON ----- */
             ControlType.BUTTON -> {
+                if (model.floatingLocalAction != FloatingLocalAction.NONE) {
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> if (!pageActionGestureConsumed && isAttachedToWindow) {
+                            pageActionGestureConsumed = true
+                            (context as? MainActivity)?.floatingAction(model.floatingLocalAction, model.floatingActionTargetId)
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> pageActionGestureConsumed = false
+                    }
+                    return
+                }
                 if (model.isLocalPageAction()) {
                     when (e.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
@@ -737,6 +858,7 @@ class ControlView(
                     if (!model.directionalMode) {
                         val stickName = ManualStickArbiter.canonicalStickName(model.payload)
                         SwipeManager.stopContinuousSendingForStick(stickName)
+                        ManualStickArbiter.registerOutputScope(manualStickOwnerToken, outputScopeFor("stick"))
                         val acquisition = ManualStickArbiter.acquire(
                             stickName,
                             manualStickOwnerToken,
@@ -756,6 +878,13 @@ class ControlView(
                     (e.actionMasked == MotionEvent.ACTION_POINTER_UP &&
                         e.getPointerId(e.actionIndex) == manualStickPointerId)
                 ) {
+                    if (e.actionMasked == MotionEvent.ACTION_UP && !model.autoCenter && ownsManualStick) {
+                        outputScopeFor("stick")?.setRetained(true, ::releaseFloatingRuntime)
+                    } else if (UdpClient.floatingSupported) {
+                        if (e.actionMasked != MotionEvent.ACTION_UP) continuousSender.stopAndCenter()
+                        // A centered manual claim must relinquish the channel, not block the next surface.
+                        outputScopeFor("stick")?.releaseAllClaims()
+                    }
                     releaseManualStickOwnership(center = false)
                 }
             }
@@ -764,6 +893,7 @@ class ControlView(
             ControlType.TOUCHPAD -> {
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
+                        engageMouseSuppression()
                         // Stop continuous sending when touching the pad again
                         stopContinuousSending()
 
@@ -819,7 +949,7 @@ class ControlView(
                                     if (stillDown && !movedTooMuch && !leftHeld) {
                                         leftHeld = true
                                         suppressNextUpClick = true   // convert this tap into a hold; no click on UP
-                                        UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                        sendOwnedCommand("MOUSE_LEFT_DOWN")
                                         triggerStrongVibration(25)
                                         // consume the primed tap so you can't lock again much later
                                         lastTapWasClean = false
@@ -840,7 +970,7 @@ class ControlView(
                                 // Add 750ms delay before activating mouse down in click lock mode
                                 mouseClickHandler.postDelayed({
                                     if (leftHeld) { // Check if still in locked state
-                                        UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                                        sendOwnedCommand("MOUSE_LEFT_DOWN")
                                         // Trigger vibration when mouse actually activates
                                         triggerStrongVibration(25) // Short vibration for mouse click
                                         Log.d("HAPTIC_DEBUG", "Mouse click lock activated after delay")
@@ -849,11 +979,11 @@ class ControlView(
                             } else {
                                 // Cancel any pending mouse down activation
                                 mouseClickHandler.removeCallbacksAndMessages(null)
-                                UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                sendOwnedCommand("MOUSE_LEFT_UP")
                             }
                         } else if (model.holdLeftWhileTouch) {
                             // Standard hold mode
-                            UdpClient.sendCommand("MOUSE_LEFT_DOWN")
+                            sendOwnedCommand("MOUSE_LEFT_DOWN")
                             leftHeld = true
                             // Trigger vibration for mouse click activation
                             triggerStrongVibration(25) // Short vibration for mouse click
@@ -892,10 +1022,12 @@ class ControlView(
                         if (GlobalSettings.scrollMode) {
                             // Scroll mode ON → use vertical delta only
                             // (flip sign here if you want “natural” scrolling)
-                            UdpClient.sendScroll(-scaledDy)
+                            outputScopeFor("touchpad")?.sendScroll(-scaledDy)
+                                ?: run { if (!UdpClient.floatingSupported) UdpClient.sendScroll(-scaledDy) }
                         } else {
                             // Normal touch-pad cursor movement
-                            UdpClient.sendTouchpadDelta(scaledDx, scaledDy)
+                            outputScopeFor("touchpad")?.sendMouseDelta(scaledDx, scaledDy)
+                                ?: run { if (!UdpClient.floatingSupported) UdpClient.sendTouchpadDelta(scaledDx, scaledDy) }
                         }
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -904,7 +1036,7 @@ class ControlView(
                         touchPreviousDy = 0f
 
                         // Send a final zero movement to ensure mouse stops
-                        UdpClient.sendTouchpadPosition(0f, 0f)
+                        if (!UdpClient.floatingSupported) UdpClient.sendTouchpadPosition(0f, 0f)
 
                         // End-of-gesture flags / cleanup
                         fingerIsDown = false
@@ -923,7 +1055,7 @@ class ControlView(
                             if (leftHeld) {
                                 // While locked: a clean tap = unlock
                                 if (isCleanTap) {
-                                    UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                    sendOwnedCommand("MOUSE_LEFT_UP")
                                     leftHeld = false
                                     lastUnlockTime = upTime          // NEW: short cooldown before a re-lock
                                     triggerStrongVibration(15)
@@ -935,8 +1067,8 @@ class ControlView(
                             } else {
                                 if (isCleanTap) {
                                     // Single clean tap = normal click
-                                    UdpClient.sendCommand("MOUSE_LEFT_DOWN")
-                                    UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                    sendOwnedCommand("MOUSE_LEFT_DOWN")
+                                    sendOwnedCommand("MOUSE_LEFT_UP")
                                     triggerStrongVibration(20)
                                     Log.d("TOUCHPAD", "Single tap: click")
 
@@ -956,7 +1088,7 @@ class ControlView(
                             // Only release mouse button on up/cancel if using standard hold mode
                             if (!model.toggleLeftClick &&
                                 leftHeld && model.holdLeftWhileTouch) {
-                                UdpClient.sendCommand("MOUSE_LEFT_UP")
+                                sendOwnedCommand("MOUSE_LEFT_UP")
                                 leftHeld = false
                             }
                         }
@@ -971,6 +1103,13 @@ class ControlView(
                 touchAimHandler?.onTouch(e)
                 invalidate()
             }
+        }
+        } finally {
+            if (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) {
+                physicalGestureActive = false
+            }
+            refreshOutputRetention()
+            refreshLegacyOutputBusy()
         }
     }
 
@@ -1074,7 +1213,7 @@ class ControlView(
             }
         } else {
             // Touchpad mode
-            UdpClient.sendCommand("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
+            sendOwnedCommand("${model.payload}:${"%.2f".format(sx)},${"%.2f".format(sy)}")
         }
 
         // If auto-center triggered, ensure continuous sending is stopped and send final 0,0
@@ -1119,6 +1258,7 @@ class ControlView(
      */
     fun stopContinuousSending() {
         continuousSender.stopContinuousSending()
+        refreshLegacyOutputBusy()
     }
 
     fun stopContinuousSendingForStick(stickName: String) {
@@ -1150,6 +1290,7 @@ class ControlView(
      */
     fun stopDirectionalCommands() {
         directionalHandler.stopDirectionalCommands()
+        refreshLegacyOutputBusy()
     }
 
     /**
@@ -1193,6 +1334,8 @@ class ControlView(
      * This deliberately leaves the serialized model and all global settings unchanged.
      */
     fun releaseEverythingLocally() {
+        physicalGestureActive = false
+        activationGestureConsumed = false
         pageActionGestureConsumed = false
         val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
         val buttonDirectionsOwnedRuntime = buttonDirectionalHandler?.hasRuntimeState() == true
@@ -1211,7 +1354,7 @@ class ControlView(
         touchAimHandler?.releaseAll()
         releaseManualStickOwnership(center = true)
 
-        if (leftHeld) UdpClient.sendCommand("MOUSE_LEFT_UP")
+        if (leftHeld) sendOwnedCommand("MOUSE_LEFT_UP")
         leftHeld = false
         fingerIsDown = false
         touchInitialized = false
@@ -1240,6 +1383,11 @@ class ControlView(
             // Do not reinterpret a non-button payload name as a keyboard key.
             isLatched = false
         }
+        allowOutputScopeCreation = false
+        outputRoot?.finish()
+        outputRoot = null
+        endMouseSuppression()
+        UdpClient.setLegacyOutputBusy(this, false)
         invalidate()
     }
 
@@ -1248,6 +1396,7 @@ class ControlView(
      * This method is needed by LayoutManager
      */
     fun showProps() {
+        releaseFloatingRuntime()
         // Reconcile the old runtime payload/config before the dialog mutates the model.
         releaseAutoTap()
         releaseButtonAim()

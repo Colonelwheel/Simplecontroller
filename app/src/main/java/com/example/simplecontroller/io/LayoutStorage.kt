@@ -14,6 +14,12 @@ import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.capturePageGeometry
 import com.example.simplecontroller.model.newPageId
+import com.example.simplecontroller.model.FloatingLocalAction
+import com.example.simplecontroller.model.FloatingZone
+import com.example.simplecontroller.model.ControlGeometry
+import com.example.simplecontroller.model.floatingValidationError
+import com.example.simplecontroller.model.remapControlIds
+import com.example.simplecontroller.model.withOnlyControlIds
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.encodeToString
@@ -343,8 +349,80 @@ fun clearStagedControllerProfileTransfer(ctx: Context) {
 /** Serialization round-trip guarantees detached nested lists now and as Control evolves. */
 fun deepCopyControls(controls: List<Control>, regenerateIds: Boolean = false): List<Control> {
     val copied: List<Control> = json.decodeFromString(json.encodeToString(controls))
-    return if (regenerateIds) copied.map { it.copy(id = "control_${newPageId()}") } else copied
+    if (!regenerateIds) return copied
+    val idMap = copied.associate { it.id to "control_${newPageId()}" }
+    return copied.map { it.copy(
+        id = idMap.getValue(it.id),
+        floatingActionTargetId = idMap[it.floatingActionTargetId] ?: it.floatingActionTargetId
+    ) }
 }
+
+/** Common single-control duplicate path, including detached legacy mutable directional settings. */
+fun detachedControlCopy(
+    source: Control,
+    newId: String = "control_${newPageId()}",
+    offsetX: Float = 40f,
+    offsetY: Float = 40f
+): Control = deepCopyControls(listOf(source)).single().let { detached ->
+    detached.copy(
+        id = newId, x = detached.x + offsetX, y = detached.y + offsetY,
+        floatingActionTargetId = if (detached.floatingActionTargetId == detached.id) newId else detached.floatingActionTargetId
+    )
+}
+
+/**
+ * Duplicates within one profile. A whole-profile transfer deliberately preserves IDs instead.
+ * Navigation-only copies explicitly pass includeFloatingZones=false and become standalone Buttons.
+ */
+fun detachedControllerPageCopy(
+    source: ControllerPage,
+    destinationPageId: String,
+    newName: String,
+    include: (Control) -> Boolean = { true },
+    redirectSelfTargets: Boolean = true,
+    includeFloatingZones: Boolean = true
+): ControllerPage {
+    val selected = source.controls.filter(include)
+    val controlIdMap = selected.associate { it.id to "control_${newPageId()}" }
+    val zones = if (includeFloatingZones) source.floatingZones else emptyList()
+    require(zones.all { zone -> zone.memberIds.all { it in controlIdMap } }) {
+        "A floating group must be copied with all its members."
+    }
+    val zoneIdMap = zones.associate { it.id to "zone_${newPageId()}" }
+    val targetIdMap = controlIdMap + zoneIdMap
+    val copiedControls = deepCopyControls(selected).map { control -> control.copy(
+        id = controlIdMap.getValue(control.id),
+        pageTargetId = if (redirectSelfTargets && control.pageTargetId == source.id) destinationPageId else control.pageTargetId,
+        floatingActionTargetId = targetIdMap[control.floatingActionTargetId] ?: control.floatingActionTargetId
+    ) }
+    val detachedZones: List<FloatingZone> = json.decodeFromString(json.encodeToString(zones))
+    return ControllerPage(
+        id = destinationPageId, name = newName, controls = copiedControls,
+        portraitGeometry = source.portraitGeometry?.withOnlyControlIds(controlIdMap.keys)?.remapControlIds(controlIdMap),
+        landscapeGeometry = source.landscapeGeometry?.withOnlyControlIds(controlIdMap.keys)?.remapControlIds(controlIdMap),
+        floatingZones = detachedZones.map { zone ->
+            val knobIdMap = zone.ring?.knobs.orEmpty().associate { it.id to "knob_${newPageId()}" }
+            zone.copy(
+                id = zoneIdMap.getValue(zone.id),
+                memberIds = zone.memberIds.map(controlIdMap::getValue),
+                startMemberId = controlIdMap[zone.startMemberId] ?: zone.startMemberId,
+                portraitMemberGeometry = remapMemberGeometry(zone.portraitMemberGeometry, controlIdMap),
+                landscapeMemberGeometry = remapMemberGeometry(zone.landscapeMemberGeometry, controlIdMap),
+                portraitRestorationGeometry = remapMemberGeometry(zone.portraitRestorationGeometry, controlIdMap),
+                landscapeRestorationGeometry = remapMemberGeometry(zone.landscapeRestorationGeometry, controlIdMap),
+                ring = zone.ring?.let { ring -> ring.copy(
+                    knobs = ring.knobs.map { it.copy(id = knobIdMap.getValue(it.id)) },
+                    startKnobId = knobIdMap[ring.startKnobId] ?: ring.startKnobId,
+                    directBoostAimKnobId = knobIdMap[ring.directBoostAimKnobId] ?: ring.directBoostAimKnobId
+                ) }
+            )
+        }
+    )
+}
+
+private fun remapMemberGeometry(
+    geometry: Map<String, ControlGeometry>, idMap: Map<String, String>
+): Map<String, ControlGeometry> = geometry.mapKeys { (id, _) -> idMap.getValue(id) }
 
 fun validateControllerProfile(
     decoded: ControllerProfile,
@@ -400,6 +478,7 @@ fun validateControllerProfile(
         val usedControlIds = mutableSetOf<String>()
         val controls = deepCopyControls(source.controls).mapIndexed { controlIndex, original ->
             var control = original
+            floatingLocalActionError(control)?.let { throw IllegalArgumentException(it) }
             require(control.cameraFollowStrengthPercent.isFinite() &&
                 control.cameraFollowStrengthPercent in 0f..200f) {
                 "Camera Follow strength must be between 0 and 200 percent."
@@ -475,7 +554,7 @@ fun validateControllerProfile(
             name = name,
             controls = controls,
             portraitGeometry = migratedPortraitGeometry
-        )
+        ).also { page -> page.floatingValidationError()?.let { throw IllegalArgumentException(it) } }
     }
 
     val validIds = pages.mapTo(mutableSetOf()) { it.id }
@@ -518,6 +597,7 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
     if (names.distinct().size != names.size) return "Page names must be unique."
 
     profile.pages.forEach { page ->
+        page.floatingValidationError()?.let { return it }
         val controlIds = page.controls.map { it.id }
         if (controlIds.any(String::isBlank)) return "Every control must have a nonblank stable ID."
         if (controlIds.distinct().size != controlIds.size) {
@@ -528,6 +608,7 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
             validateOrientationGeometry(page.landscapeGeometry, "${page.name} Landscape")
         }.exceptionOrNull()?.let { return it.message ?: "Orientation geometry is invalid." }
         page.controls.forEach { control ->
+            floatingLocalActionError(control)?.let { return it }
             if (!control.cameraFollowStrengthPercent.isFinite() ||
                 control.cameraFollowStrengthPercent !in 0f..200f) {
                 return "Camera Follow strength must be between 0 and 200 percent."
@@ -571,6 +652,17 @@ private fun stableRecoveredPageId(
         if (value !in usedIds) return value
         attempt++
     }
+}
+
+fun floatingLocalActionError(control: Control): String? {
+    if (control.floatingLocalAction == FloatingLocalAction.NONE) return null
+    return if (control.type != ControlType.BUTTON || control.pageAction != PageAction.NONE ||
+        control.holdToggle || control.autoTapEnabled || control.buttonAimEnabled ||
+        control.buttonDirectional.enabled || control.buttonAimOneShotAlternateEnabled ||
+        control.buttonAimPayloadTiming != com.example.simplecontroller.model.ButtonAimPayloadTiming.IMMEDIATE ||
+        control.floatingActionTargetId.isBlank()) {
+        "Scoped floating actions require a target and an ordinary immediate Button."
+    } else null
 }
 
 private fun buttonDirectionalError(control: Control): String? {

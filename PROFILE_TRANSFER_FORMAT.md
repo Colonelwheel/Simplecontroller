@@ -10,6 +10,7 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested `ControllerProfile` format version `10` for floating zones/groups/rings and stored scoped/suppression options, including disabled settings;
 - nested `ControllerProfile` format version `9` for optional Button Aim boundary cancellation/re-arming;
 - nested `ControllerProfile` format version `8` for Camera Follow exclusion or nondefault strength;
 - nested `ControllerProfile` format version `7` for Button Aim Game Mouse;
@@ -72,7 +73,8 @@ The separate all-profile backup contains:
 - saved TouchAim calibration profiles, including their intrinsic device/control metadata;
 - saved manual TouchAim profiles;
 - saved Button Aim profiles;
-- saved Directional/WASD and Stick+ profiles.
+- saved Directional/WASD and Stick+ profiles;
+- named floating boost profiles and optional ring aiming/action snapshots.
 
 Restore adds profiles without replacing existing ones. Controller-profile name collisions receive
 an `Imported` suffix. Reusable profiles receive new unique IDs and names when needed, and imported
@@ -85,9 +87,10 @@ transport settings, theme, the current-profile preference, and other app/device 
 ## Current constants and implementation
 
 - Transfer version: `1`
-- All-profile backup version: `1`
-- Maximum nested controller-profile format: `9` (formats `2` through `8` remain importable)
-- Writers use `9` when a Button stores either boundary cancellation/re-arming option as true;
+- Maximum backup version: `2`; writers use `2` when the new boost library is present, otherwise `1`. Historical backup 1 remains readable; backup 1 containing the new library is rejected.
+- Maximum nested controller-profile format: `10` (formats `2` through `9` remain importable)
+- Writers use `10` when floating/scoped configuration is stored, even disabled; otherwise
+  `9` when a Button stores either boundary cancellation/re-arming option as true;
   otherwise `8` when any control excludes its movement from Camera Follow or stores strength
   other than 100%; otherwise `7` when a Button has Game Mouse selected for Base or Alternate;
   otherwise `6` when a TouchAim control has `touchAimGameMouse: true`, otherwise `5`.
@@ -115,3 +118,9 @@ transport settings, theme, the current-profile preference, and other app/device 
 The `sideloadDebug` build retains target API 34 and application ID
 `com.example.simplecontroller`. The separate `playRelease` build targets API 36 and uses
 `io.github.colonelwheel.simplecontroller`. Both builds must retain this contract and golden fixture.
+
+## Floating configuration and library contract
+
+Floating geometry and references are detached saved configuration. Runtime placement, visibility, pointer/timer/armed state, ownership and suppression are excluded. Copies remap related IDs and both orientation/restoration maps; whole-profile transfer preserves isolated IDs.
+
+Named boost profiles use schema 1 with frozen snapshots. Boost-only application preserves target layers, geometry, movement and normal/fine tuning. Explicit ring aiming/actions application validates knob-slot mapping atomically. Envelope and nested library versions are checked before decoding or internal writes. All-profile staging, verification, additive restore and rollback include the library.

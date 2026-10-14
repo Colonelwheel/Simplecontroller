@@ -69,8 +69,8 @@ class LayoutManager(
     /**
      * Create control views for all controls in the list
      */
-    fun spawnControlViews() {
-        controls.forEach { control ->
+    fun spawnControlViews(include: (Control) -> Boolean = { true }) {
+        controls.filter(include).forEach { control ->
             canvas.addView(controlCreator(control).apply { tag = "control" })
         }
     }

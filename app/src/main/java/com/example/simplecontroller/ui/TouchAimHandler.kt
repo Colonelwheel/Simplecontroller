@@ -12,6 +12,7 @@ import com.example.simplecontroller.model.TouchAimMode
 import com.example.simplecontroller.model.TouchAimSensorSample
 import com.example.simplecontroller.model.TouchStageAction
 import com.example.simplecontroller.net.UdpClient
+import com.example.simplecontroller.net.PhoneOutputScope
 
 enum class TouchContactLevel(val rank: Int, val displayName: String) {
     AIM_ONLY(-1, "AIM"),
@@ -26,7 +27,10 @@ class TouchAimHandler(
     private val onStateChanged: () -> Unit,
     private val controlSize: () -> Pair<Float, Float>,
     private val payloadExecutor: ButtonAimPayloadExecutor,
-    private val onPayloadError: (String) -> Unit = {}
+    private val onPayloadError: (String) -> Unit = {},
+    private val scopeProvider: () -> PhoneOutputScope? = { null },
+    private val stateScopeProvider: () -> PhoneOutputScope? = scopeProvider,
+    private val onMouseAimEngaged: () -> Unit = {}
 ) {
     private data class StageConfig(
         val level: TouchContactLevel,
@@ -41,10 +45,12 @@ class TouchAimHandler(
     private val heldCommands = linkedMapOf<String, OutputCommand>()
     private val pendingPresses = linkedMapOf<String, OutputCommand>()
     private val pressGenerations = mutableMapOf<String, Int>()
+    private var stateOutputScope: PhoneOutputScope? = null
     private val aimOutput = AimOutputSession(
         ownerToken = Any(),
         controlSize = controlSize,
-        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick
+        beforeStickAcquire = SwipeManager::stopContinuousSendingForStick,
+        scopeProvider = scopeProvider
     )
 
     var currentLevel: TouchContactLevel = TouchContactLevel.AIM_ONLY
@@ -62,6 +68,10 @@ class TouchAimHandler(
     private var shootPayloadLease: ButtonAimPayloadLease? = null
     private var touchSessionGeneration = 0
     private var confirmationRunnable: Runnable? = null
+
+    fun hasRuntimeState(): Boolean = activePointerId != MotionEvent.INVALID_POINTER_ID ||
+        heldCommands.isNotEmpty() || pendingPresses.isNotEmpty() || aimPayloadLease != null ||
+        shootPayloadLease != null || aimOutput.isActive()
 
     fun onTouch(event: MotionEvent) {
         when (event.actionMasked) {
@@ -101,6 +111,8 @@ class TouchAimHandler(
         }
 
         aimOutput.finish(flushMouse = false)
+        stateOutputScope?.finish()
+        stateOutputScope = null
 
         activePointerId = MotionEvent.INVALID_POINTER_ID
         currentLevel = TouchContactLevel.AIM_ONLY
@@ -120,6 +132,7 @@ class TouchAimHandler(
             releaseAll()
         }
         activePointerId = event.getPointerId(event.actionIndex)
+        stateOutputScope = stateScopeProvider()
         touchSessionGeneration++
         if (isTwoStateMode()) {
             val detectorError = twoStateDetectorError()
@@ -139,6 +152,7 @@ class TouchAimHandler(
             newConfig = model.touchAimConfig(),
             allowRetainedTakeover = true
         )
+        if (aimStart.started && model.touchAimOutput == TouchAimOutput.MOUSE) onMouseAimEngaged()
         if (aimStart.started && aimStart.replacedRetainedOwner &&
             model.touchAimConfig().originMode == AimOriginMode.CONTROL_CENTER
         ) {
@@ -480,33 +494,46 @@ class TouchAimHandler(
         val raw = command.raw.trim()
         val upper = raw.uppercase()
         when {
-            upper.startsWith("X360") -> UdpClient.sendCommand("${upper.substringBefore('_')}_HOLD")
-            upper.startsWith("LT:") || upper.startsWith("RT:") -> UdpClient.sendCommand(upper)
-            upper.startsWith("MOUSE_") -> UdpClient.sendCommand(mouseDown(upper))
-            upper.startsWith("KEY_DOWN:") -> UdpClient.sendCommand(upper)
-            else -> UdpClient.sendKeyCommand(raw, true)
+            upper.startsWith("X360") -> sendStateCommand("${upper.substringBefore('_')}_HOLD")
+            upper.startsWith("LT:") || upper.startsWith("RT:") -> sendStateCommand(upper)
+            upper.startsWith("MOUSE_") -> sendStateCommand(mouseDown(upper))
+            upper.startsWith("KEY_DOWN:") -> sendStateCommand(upper)
+            else -> sendStateKey(raw, true)
         }
+    }
+
+    private fun sendStateCommand(command: String) {
+        if (command.startsWith("MOUSE_", true) && !command.endsWith("_UP", true)) onMouseAimEngaged()
+        val scope = stateOutputScope
+        if (scope != null) scope.sendCommand(command)
+        else if (!UdpClient.floatingSupported) UdpClient.sendCommand(command)
+    }
+
+    private fun sendStateKey(key: String, pressed: Boolean) {
+        val scope = stateOutputScope
+        if (scope != null) scope.sendKey(key, pressed)
+        else if (!UdpClient.floatingSupported) UdpClient.sendKeyCommand(key, pressed)
     }
 
     private fun sendPress(command: OutputCommand) {
         val raw = command.raw.trim()
         val upper = raw.uppercase()
         when {
-            upper.startsWith("X360") -> UdpClient.sendCommand(upper.substringBefore('_'))
+            upper.startsWith("X360") -> sendStateCommand(upper.substringBefore('_'))
             upper.startsWith("LT:") || upper.startsWith("RT:") -> {
-                UdpClient.sendCommand(upper)
+                sendStateCommand(upper)
                 scheduleRelease(command)
             }
             upper.startsWith("MOUSE_") -> {
-                UdpClient.sendCommand(mouseDown(upper))
+                sendStateCommand(mouseDown(upper))
                 scheduleRelease(command)
             }
             upper.startsWith("KEY_DOWN:") -> {
-                UdpClient.sendCommand(upper)
+                sendStateCommand(upper)
                 scheduleRelease(command)
             }
             else -> {
-                UdpClient.sendKeyCommand(raw, true)
+                sendStateKey(raw, true)
                 scheduleRelease(command)
             }
         }
@@ -528,14 +555,14 @@ class TouchAimHandler(
         val raw = command.raw.trim()
         val upper = raw.uppercase()
         when {
-            upper.startsWith("X360") -> UdpClient.sendCommand("${upper.substringBefore('_')}_RELEASE")
-            upper.startsWith("LT:") -> UdpClient.sendCommand("LT:0.0")
-            upper.startsWith("RT:") -> UdpClient.sendCommand("RT:0.0")
-            upper.startsWith("MOUSE_") -> UdpClient.sendCommand(mouseUp(upper))
+            upper.startsWith("X360") -> sendStateCommand("${upper.substringBefore('_')}_RELEASE")
+            upper.startsWith("LT:") -> sendStateCommand("LT:0.0")
+            upper.startsWith("RT:") -> sendStateCommand("RT:0.0")
+            upper.startsWith("MOUSE_") -> sendStateCommand(mouseUp(upper))
             upper.startsWith("KEY_DOWN:") || upper.startsWith("KEY_UP:") -> {
-                UdpClient.sendCommand("KEY_UP:${upper.substringAfter(':')}")
+                sendStateCommand("KEY_UP:${upper.substringAfter(':')}")
             }
-            else -> UdpClient.sendKeyCommand(raw, false)
+            else -> sendStateKey(raw, false)
         }
     }
 

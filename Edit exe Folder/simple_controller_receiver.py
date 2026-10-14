@@ -28,6 +28,7 @@ from face_input_server import (FaceInputState, FaceInputServer, MergedGamepad, M
                                synchronized, canonical_phone_key, keyboard_name, FACE_INPUT_TAG)
 from voice_input_server import VoiceInputState, VoiceInputServer
 from relative_mouse import send_relative_mouse
+from phone_output_protocol import PhoneOutputProtocolState, state_key as phone_state_key, inactive_command
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
@@ -515,13 +516,24 @@ def release_xbox_button(button, player_id='player1'):
         logger.error(f"Failed to release button for {player_id}: {str(e)}")
 
 def output_packet_is_current(session_id, sequence):
-    """Return False only when a packet predates this session's release barrier."""
+    """Reject packets behind global release or quiescent phone-adoption barriers."""
     with release_state_lock:
-        return sequence > release_barriers.get(session_id, -1)
+        protocol = globals().get("phone_output_protocol")
+        return (sequence > release_barriers.get(session_id, -1)
+                and (protocol is None or protocol.legacy_packet_is_current(session_id, sequence)))
 
 def current_release_generation(player_id):
     with release_state_lock:
         return release_generations.get(player_id, 0)
+
+
+phone_output_protocol = PhoneOutputProtocolState(
+    release_state_lock, output_packet_is_current,
+    lambda command, player: apply_phone_aggregate(command, player),
+    lambda command, player, guard, session: dispatch_phone_event(command, player, guard, session),
+    lambda key, player: phone_output_is_masked(key, player),
+    lambda player: neutralize_legacy_phone_outputs(player),
+)
 
 @synchronized(release_state_lock)
 def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
@@ -529,6 +541,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
     if not selected:
         return
+    phone_output_protocol.clear_outputs(selected)
 
     try:
         face_input_state.reset(selected)
@@ -858,6 +871,173 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
     except Exception as e:
         logger.error(f"Error handling trigger input for {player_id}: {str(e)}")
 
+def neutralize_legacy_phone_outputs(player_id):
+    """Quiescent protocol adoption affects phone ownership only, under the shared lock."""
+    pad = gamepads[player_id]
+    release_generations[player_id] += 1
+    for timer in tuple(pending_button_release_timers[player_id]):
+        timer.cancel()
+    pending_button_release_timers[player_id].clear()
+    for button in tuple(pad.phone_buttons):
+        phone_button_tokens[player_id][button] = object()
+        pad.release_button(button=button)
+    button_states[player_id].clear()
+    pad.left_trigger_float(value_float=0)
+    pad.right_trigger_float(value_float=0)
+    camera_follow_phone_left_excluded[player_id] = False
+    pad.left_joystick_float(x_value_float=0, y_value_float=0)
+    camera_follow_states[player_id].set_manual_right_stick(0,0)
+    camera_follow_states[player_id].set_macro_right_stick(0,0)
+    apply_camera_follow_output(player_id,force=True)
+    for key in tuple(key_states[player_id]):
+        handle_key_release(key,player_id)
+    for target in tuple(desktop_input.phone):
+        desktop_input.phone_set(target,False)
+    key_states[player_id].clear()
+    mouse_states[player_id].update(left_down=False,is_touchpad_active=False)
+    smoother.end_touch()
+    pad.update()
+
+
+def phone_output_is_masked(key, player_id):
+    """Report real source ownership; never infer game zoom or weapon restrictions."""
+    parts = key.split("|")
+    if len(parts) != 3:
+        return False
+    _, kind, name = parts
+    pad = gamepads[player_id]
+    if kind == "XBOX" and name in face_button_map:
+        button = face_button_map[name]
+        return button in pad.face_buttons or button in pad.voice_buttons
+    if kind == "TRIGGER":
+        return pad.face_triggers.get(name, 0) > 0 or pad.voice_triggers.get(name, 0) > 0
+    if kind == "MOUSE":
+        return bool(desktop_input.face.get("MOUSE_" + name))
+    if kind == "KEY":
+        target = canonical_phone_key(name)
+        return bool(desktop_input.face.get(target))
+    return False
+
+
+def apply_phone_aggregate(command, player_id):
+    """Apply negotiated aggregate state without legacy Xbox re-press edges.
+
+    Protocol validation/freshness and this mutation share release_state_lock.
+    Face and voice continue to be merged by the existing output proxies.
+    """
+    if command.startswith("X360"):
+        name, operation = command[4:].rsplit("_", 1)
+        button = face_button_map[name]
+        phone_button_tokens[player_id][button] = object()
+        pad = gamepads[player_id]
+        (pad.press_button if operation == "HOLD" else pad.release_button)(button=button)
+        button_states[player_id][button] = operation == "HOLD"
+        pad.update()
+    elif command.startswith(("LT:", "RT:")):
+        trigger, value = command.split(":", 1)
+        handle_trigger_input(value, "LEFT" if trigger == "LT" else "RIGHT", player_id)
+    elif command.startswith("STICK_"):
+        tag, coordinates = command.split(":", 1)
+        x, y = coordinates.split(",", 1)
+        side = "RIGHT" if tag.endswith("_R") else "LEFT"
+        physical = "R" if side == "RIGHT" else "L"
+        session = phone_output_protocol.players.get(player_id)
+        if session:
+            if side == "LEFT":
+                macro = phone_output_protocol.effective_command(session,
+                    f"{player_id}|MACRO|L","STICK_MACRO_L:0.0,0.0")
+                manual = phone_output_protocol.effective_command(session,
+                    f"{player_id}|MANUAL|L","STICK_L:0.0,0.0")
+                macro_coordinates = tuple(float(v) for v in macro.split(":",1)[1].split(",",1))
+                # Match the existing receiver deadzone before choosing priority.
+                # Ending a scoped macro restores a still-owned manual vector;
+                # ending manual movement cannot release another macro owner.
+                selected = macro if any(abs(v) >= 0.05 for v in macro_coordinates) else manual
+                tag,coordinates = selected.split(":",1)
+                x,y = coordinates.split(",",1)
+            sequence = phone_output_protocol.newest_sequence(session,
+                {f"{player_id}|MANUAL|{physical}",f"{player_id}|MACRO|{physical}"})
+            previous = latest_stick_packets.get((player_id,side))
+            if previous and previous["session"] == session:
+                sequence = max(sequence,previous["seq"])
+            latest_stick_packets[(player_id,side)] = {"session":session,"seq":sequence}
+        handle_stick_input(x, y, side, player_id,
+                           source="macro" if "MACRO" in tag else "manual",
+                           exclude_from_camera_follow=tag.endswith("_NO_FOLLOW"))
+    elif command.startswith("KEY_DOWN:"):
+        handle_key_press(command.split(":", 1)[1], player_id)
+    elif command.startswith("KEY_UP:"):
+        handle_key_release(command.split(":", 1)[1], player_id)
+    elif command.startswith("CAMERA_FOLLOW:"):
+        set_camera_follow_enabled(player_id, command.endswith(":1"))
+    else:
+        handle_mouse_buttons(command)
+
+
+def dispatch_phone_event(command, player_id, guard, session):
+    """Opaque actions stay legacy actions; scoped continuations retain their guard."""
+    if not guard():
+        return
+    if command.startswith("PHONE_REPLAY:"):
+        key = command.removeprefix("PHONE_REPLAY:")
+        current = phone_output_protocol.current_command(session, key)
+        if not current:
+            return
+        if current.startswith("X360") and current.endswith("_HOLD"):
+            apply_phone_aggregate(current.replace("_HOLD", "_RELEASE"), player_id)
+            time.sleep(0.005)  # Preserve the existing ordinary Xbox repeat edge.
+            if guard():
+                apply_phone_aggregate(current, player_id)
+        return
+    if command.startswith("PHONE_FORCE:"):
+        command = command.removeprefix("PHONE_FORCE:")
+        # Authored force commands intentionally retain their separate legacy
+        # meaning; generated scoped releases never enter this branch.
+        process_command(command, ("127.0.0.1", 0), player_id)
+        return
+    if command.startswith("WAIT_") or command.startswith("KEY_DOWN:WAIT_"):
+        wait = command.split(":", 1)[-1]
+        threading.Thread(target=process_timed_sequence,
+                         args=([wait], player_id, current_release_generation(player_id), guard),
+                         daemon=True).start()
+        return
+    # Already under the protocol lock. A delayed sequence explicitly carries the
+    # guard and releases the lock while waiting, preserving facial heartbeats.
+    process_command(command, ("127.0.0.1", 0), player_id, phone_guard=guard)
+
+
+def dispatch_scoped_legacy_state(command, player_id, guard):
+    """Own known reversible outputs inside opaque legacy sequences too."""
+    if not hasattr(guard, "apply"):
+        return False
+    raw = command.strip()
+    upper = raw.upper()
+    if upper.startswith(("LS:","RS:","STICK:")) and "," in upper:
+        alias,coordinates = upper.split(":",1)
+        upper = ("STICK_R" if alias == "RS" else "STICK_L") + ":" + coordinates
+    finite = False
+    if upper.startswith("X360") and "_" not in upper:
+        upper += "_HOLD"
+        finite = True
+    if phone_state_key(upper, player_id) is None:
+        return False
+    if not guard.apply(upper):
+        return True
+    if finite:
+        timer = None
+        def release():
+            with release_state_lock:
+                try:
+                    guard.release(inactive_command(upper))
+                finally:
+                    pending_button_release_timers[player_id].discard(timer)
+        timer = threading.Timer(0.1, release)
+        timer.daemon = True
+        pending_button_release_timers[player_id].add(timer)
+        timer.start()
+    return True
+
+
 def handle_wait_command(command, player_id='player1'):
     """Handle a wait command"""
     try:
@@ -929,8 +1109,10 @@ def handle_key_release(key, player_id='player1'):
             except Exception as e:
                 logger.error(f"Failed to release key {key}: {str(e)}")
 
-def handle_button_press(command, player_id='player1'):
+def handle_button_press(command, player_id='player1', phone_guard=None):
     """Handle various button commands with proper release handling"""
+    if phone_guard is not None and dispatch_scoped_legacy_state(command, player_id, phone_guard):
+        return True
     if player_id not in mouse_states or player_id not in gamepads:
         logger.error(f"Unknown player ID: {player_id}")
         return False
@@ -1095,7 +1277,8 @@ def handle_button_press(command, player_id='player1'):
                     def do_release():
                         with release_state_lock:
                             try:
-                                if (release_generations[player_id] != release_generation
+                                if ((phone_guard is not None and not phone_guard())
+                                        or release_generations[player_id] != release_generation
                                         or phone_button_tokens[player_id].get(btn) is not token):
                                     return
                                 gamepad.release_button(button=btn)
@@ -1132,14 +1315,15 @@ def handle_button_press(command, player_id='player1'):
         logger.error(f"Failed to process command for {player_id}: {command} - {str(e)}")
         return False
 
-def process_timed_sequence(commands, player_id='player1', release_generation=None):
+def process_timed_sequence(commands, player_id='player1', release_generation=None, phone_guard=None):
     """Process a sequence of commands with timing delays"""
     try:
         if release_generation is None:
             release_generation = current_release_generation(player_id)
 
         for cmd in commands:
-            if current_release_generation(player_id) != release_generation:
+            if ((phone_guard is not None and not phone_guard())
+                    or current_release_generation(player_id) != release_generation):
                 logger.info(f"Cancelled delayed command sequence for {player_id}")
                 return
 
@@ -1154,7 +1338,8 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
 
                     deadline = time.monotonic() + wait_seconds
                     while time.monotonic() < deadline:
-                        if current_release_generation(player_id) != release_generation:
+                        if ((phone_guard is not None and not phone_guard())
+                                or current_release_generation(player_id) != release_generation):
                             logger.info(f"Cancelled delayed command sequence for {player_id}")
                             return
                         time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
@@ -1163,16 +1348,19 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
                 # Check and dispatch atomically with global release. WAIT remains
                 # outside this lock so face heartbeats can run during sequences.
                 with release_state_lock:
-                    if release_generations[player_id] != release_generation:
+                    if ((phone_guard is not None and not phone_guard())
+                            or release_generations[player_id] != release_generation):
                         return
-                    handle_button_press(cmd, player_id)
+                    handle_button_press(cmd, player_id, phone_guard=phone_guard)
     except Exception as e:
         logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
 
-def process_command(data, addr, player_id='player1'):
+def process_command(data, addr, player_id='player1', phone_guard=None):
     """Process incoming command from the Android app"""
     data = data.strip()
     if not data:
+        return
+    if phone_guard is not None and not phone_guard():
         return
     ordered_output = None
 
@@ -1196,6 +1384,15 @@ def process_command(data, addr, player_id='player1'):
     if data.startswith(("player1:", "player2:")):
         player_id, data = data.split(":", 1)       # now data begins with DELTA:/TOUCHPAD:/POS:
         active_connections[addr_key]['player_id'] = player_id
+
+    handled, response = phone_output_protocol.process(data, player_id)
+    if handled:
+        if response and data.startswith(("PHONE_STATE_V1:", "PHONE_EVENT_V1:")):
+            camera_follow_last_input_at[player_id] = time.monotonic()
+            camera_follow_input_lost[player_id] = False
+        return response
+    if phone_guard is not None and dispatch_scoped_legacy_state(data, player_id, phone_guard):
+        return
 
     if data.startswith("RELEASE_ALL:"):
         parts = data.split(":", 2)
@@ -1227,8 +1424,13 @@ def process_command(data, addr, player_id='player1'):
         if not output_packet_is_current(session_id, sequence):
             logger.debug(f"Dropped pre-release output packet: {session_id}:{sequence}")
             return None
-        ordered_output = (session_id, sequence)
-        data = output_command
+        guard = lambda: output_packet_is_current(session_id, sequence)
+        # Recheck and dispatch under the same lock as activation. A delayed
+        # legacy sequence carries this guard while it waits outside the lock.
+        with release_state_lock:
+            if not guard():
+                return None
+            return process_command(output_command, addr, player_id, phone_guard=guard)
 
     if player_id in camera_follow_last_input_at:
         camera_follow_last_input_at[player_id] = time.monotonic()
@@ -1500,7 +1702,7 @@ def process_command(data, addr, player_id='player1'):
         release_generation = current_release_generation(player_id)
         threading.Thread(
             target=process_timed_sequence, 
-            args=(commands, player_id, release_generation),
+            args=(commands, player_id, release_generation, phone_guard),
             daemon=True
         ).start()
         logger.info(f"Started command sequence with {len(commands)} commands for {player_id}")
@@ -1508,7 +1710,7 @@ def process_command(data, addr, player_id='player1'):
     
     # Handle simple button commands
     else:
-        handle_button_press(data, player_id)
+        handle_button_press(data, player_id, phone_guard=phone_guard)
         return None
 
     # Anything else just gets logged

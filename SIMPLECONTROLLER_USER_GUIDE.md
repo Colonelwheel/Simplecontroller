@@ -1033,3 +1033,7 @@ smoothing, 90 ms Enter Shoot, and 120 ms Return to Aim fields have persistent
 labels and explanations. **Clear all boost commands** clears boost command boxes
 while preserving movement commands and threshold distances; Save applies the
 change. See [Aim control options](AIM_CONTROL_OPTIONS.md) for details.
+
+## Floating controls
+
+See [FLOATING_CONTROLS.md](FLOATING_CONTROLS.md). In Edit, use Add or hold Edit to create/configure zones. In Play, hold Edit for the accessible scoped Finish list. Floating features require a compatible updated Windows receiver; existing controls retain their legacy/Pico path. No installed receiver or APK is changed by a build.

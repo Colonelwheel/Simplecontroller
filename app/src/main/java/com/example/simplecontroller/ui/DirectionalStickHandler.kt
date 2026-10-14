@@ -9,6 +9,7 @@ import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.StickDirection
 import com.example.simplecontroller.model.directionalPayload
 import com.example.simplecontroller.net.UdpClient
+import com.example.simplecontroller.net.PhoneOutputScope
 import kotlin.math.abs
 
 /**
@@ -18,10 +19,25 @@ import kotlin.math.abs
 class DirectionalStickHandler(
     private val model: Control,
     private val uiHandler: Handler = Handler(Looper.getMainLooper()),
-    payloadExecutor: ButtonAimPayloadExecutor
+    payloadExecutor: ButtonAimPayloadExecutor,
+    private val scopeProvider: () -> PhoneOutputScope? = { null }
 ) {
+    private val executor = payloadExecutor
+    fun hasRuntimeState(): Boolean = executor.activeLeaseCount() > 0 || continuousDirectional != null
     private val commandState = DirectionalCommandStateController(payloadExecutor) { reason ->
         Log.w("DirectionalStick", "Ignored invalid held payload: $reason")
+    }
+
+    private fun sendOwnedCommand(command: String) {
+        val scope = scopeProvider()
+        if (scope != null) scope.sendCommand(command)
+        else if (!UdpClient.floatingSupported) UdpClient.sendCommand(command)
+    }
+
+    private fun sendOwnedPosition(name: String, x: Float, y: Float) {
+        val scope = scopeProvider()
+        if (scope != null) scope.sendStick(name, x, y, model.excludeFromCameraFollow)
+        else if (!UdpClient.floatingSupported) UdpClient.sendStickPosition(name, x, y, model.excludeFromCameraFollow)
     }
     // Track which directional commands are being continuously sent
     private var continuousDirectional: Runnable? = null
@@ -89,7 +105,7 @@ class DirectionalStickHandler(
             // Only send this for actual STICK type controls, not buttons
             if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
                 model.type == ControlType.RADIAL_CURVED_STICK) {
-                UdpClient.sendStickPosition(model.payload, analogX, analogY, model.excludeFromCameraFollow)
+                sendOwnedPosition(model.payload, analogX, analogY)
             }
         }
 
@@ -182,9 +198,9 @@ class DirectionalStickHandler(
                                 }
                                 
                                 if (useUdp) {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 } else {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 }
                             }
                     }
@@ -210,9 +226,9 @@ class DirectionalStickHandler(
                                 }
                                 
                                 if (useUdp) {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 } else {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 }
                             }
                     }
@@ -238,9 +254,9 @@ class DirectionalStickHandler(
                                 }
                                 
                                 if (useUdp) {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 } else {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 }
                             }
                     }
@@ -266,9 +282,9 @@ class DirectionalStickHandler(
                                 }
                                 
                                 if (useUdp) {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 } else {
-                                    UdpClient.sendCommand(finalCmd)
+                                    sendOwnedCommand(finalCmd)
                                 }
                             }
                     }
@@ -306,7 +322,7 @@ class DirectionalStickHandler(
         if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
             model.type == ControlType.RADIAL_CURVED_STICK) {
             // Also send a final zero position via UDP to ensure server knows we've stopped
-            UdpClient.sendStickPosition(model.id, 0f, 0f, model.excludeFromCameraFollow)
+            sendOwnedPosition(model.id, 0f, 0f)
         }
     }
 

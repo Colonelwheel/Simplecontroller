@@ -1,0 +1,67 @@
+# Floating controls
+
+Floating controls require a Windows receiver that acknowledges PHONE_OUTPUT_V1 and its phone-only activation barrier. The Android app keeps its existing controls available with older receivers and ConsoleBridge/Pico. New floating zones are unavailable on those transports. Receiver source is included; an installed EXE or desktop shortcut is not changed by building the app.
+
+## Create and edit
+
+In Edit, use Add -> Floating ring or Floating Button / group from selection. Hold the existing Edit button to open Floating controls; this works without a second physical input. In Play, holding Edit opens the active-instance Finish list, which also supplies access when an instance's Finish overlaps other visible controls.
+
+For a group, draw a rectangle and lift. The preview initially selects fully contained ungrouped Buttons; each checkbox adjusts membership with one tap. Configure the zone and select its initial member, or explicitly select Reveal only. A single Button starts on its sole member. Ordinary Button properties retain their existing editor, payload, Hold, Turbo, Auto-Tap, Button Aim and directional validation.
+
+Conversion changes the working layout and blocks pause autosave until an explicit Save. The prompt offers Save a copy so the previous saved profile stays available. Save under a new name to preserve it. Zone resizing changes activation geometry only. In Edit, member movement updates the group's relative arrangement while its restoration geometry remains unchanged. Ungroup restores both original orientation arrangements while retaining the latest Button settings.
+
+Zone outlines are visible in Edit and dormant zones are invisible in Play. Edit a zone to change its rectangle, enabled state, saved starting role, ring settings, group Swipe policy, stacking order, duplication or ungrouping. A duplicate receives detached settings and remapped member/zone/knob references.
+
+## Play
+
+A real initial DOWN on otherwise unused zone space places and activates the selected starting target once. Reveal-only groups produce no initial output. Existing visible controls and app UI take precedence. One instance per zone stays visible after lift until its scoped Finish; many instances may coexist.
+
+Captured movement remains movement when dragged into the inner area. A fresh intentional aim touch selects an enabled knob; aim remains aim through boosts and return. Direct boost starts are command-only unless Start aiming when a direct boost enters inner area is enabled. Direct Boost 2 never activates Boost 1.
+
+Targets are translated to fit, not shrunk. Placement keeps the original first-contact gesture origin after edge correction. A configuration whose visible control cannot fit gives an explicit error. Preview boost reachability shows actual-size ring/threshold geometry, disabled reference layers and unavailable cardinal sectors at the shown placement.
+
+Each instance has Finish, including deliberate drag into its target. Finish cancels timers/shots/repeating and owned outputs, closes its transport scope and suppression claims, hides it, and consumes the rest of that gesture. Other legitimate owners continue. Release All remains global.
+
+## Ring options and defaults
+
+Movement, inner aim, Boost 1 and Boost 2 are enabled independently. Disabled settings remain stored. New rings start with movement and aim enabled, boosts disabled, one aim knob, Mouse aiming, no ADS and Fire mode None. These are configuration defaults, not game-tested recommendations.
+
+New ring dimensions use dp. The default movement radius is 88 dp and inner radius 48 dp. Linear movement with sensitivity 1 is measured from the center: 22 dp = 25%, 44 dp = 50%, 88 dp = 100%; center is neutral and outward movement caps at full tilt. Boost distance uses raw physical distance independently of the response curve. Existing directional Buttons keep their saved first-contact pixel thresholds (defaults 48 and 96 px).
+
+Each of up to three aim knobs chooses None, Hold, Tap, Release-shot or Repeat. ADS and fire bindings are independent and may be blank. Mouse, Game Mouse and Right Stick aim expose existing tuning semantics. Aim normally continues outside. Optional stop-outside discards outside mouse travel, centers RS, and resumes without a new DOWN or accumulated travel. Aim-output centering, ADS/fire outside behavior and lift retention remain separate.
+
+Boost drag stages are cumulative; direct taps activate only the selected stage. Each stage selects Tap, Hold or Repeat. Hold latch after threshold exit and Repeat continuation after exit are separate from lift retention. Threshold hysteresis avoids MOVE-stream retriggering. Defaults are 120/160 dp thresholds, 35 ms press and 35 ms gap, zero Boost-2 delay, exit cancellation enabled, and latch/continuation/retention disabled. Direct-tap areas have finite saved inner/outer bounds and start disabled.
+
+Return-fire is off by default. When enabled, only a qualifying same-pointer boost visit followed by inner return starts the selected delay. Aim resumes immediately. Exit cancellation defaults on: leaving cancels and a newly qualified return starts a complete new delay. With it off, the original deadline continues without duplicate/restarted work; this does not enable outside aiming or make an otherwise canceled release-shot eligible.
+
+Boost-2 entry delay is separate from return-fire delay. It freezes the selected payload/action. UP before an unexpired deadline cancels the action completely, including with future retention enabled. A delayed Release-shot arms at its deadline and fires only on an eligible later lift; CANCEL and Finish never fire it. There is at most one waiting finite shot with a real release gap. Conflicting fire sources are rejected or indicated rather than stealing owners.
+
+Fine sensitivity is opt-in, starts immediately on a selected boost return, and follows the selected backend/profile semantics. It remains while this ring's qualifying owned ADS latch remains, including later touches, or is gesture-scoped for a nonlatched qualifier. It does not change another aiming surface.
+
+## Scoped actions and Camera Follow
+
+An ordinary control's property sheet opens Floating / Camera Follow options. Buttons can assign Finish, Stop fire, Release ADS or End suppression to an explicit target. Stop fire retains independent ADS and movement. Output ownership preserves other controls and existing face/voice sources; a pulse cannot make a full release while another source holds that output. Actual masked-output feedback is shown by the ring.
+
+Mouse suppression is opt-in. Engagement claims suppression even while stationary; a ring claim persists through lift until scoped end or hard cleanup. Movement/direct-boost summon alone does not claim it. Movement exclusion from Camera Follow remains a separate setting. Ending one claim preserves other claimants and the user's enabled preference.
+
+## Saved formats and reusable profiles
+
+Floating configuration or stored suppression/scoped actions require nested controller format 10, including inactive configuration. Legacy profiles retain their existing conditional formats. Transfer envelope 1 still checks nested formats before decoding. A new named boost library requires backup envelope 2 independently of controller format; historical backup 1 remains readable.
+
+Save a named boost profile as a frozen snapshot. Apply boost settings only preserves layers, placement, movement, zone geometry and all normal/fine aiming tuning. An optional saved ring aiming/actions preset has its own explicit apply action and validates knob-slot mapping before any change. Editing/deleting a reusable profile does not alter previously applied controls.
+
+Summoned position/visibility, pointers, timers, suppression, ownership and armed shots are never serialized. Pause, page/profile/orientation/transport/player change, disconnect, removal and existing hard cleanup end affected sessions.
+
+## Verification boundaries
+
+JVM tests exercise pure ring transitions, pulse timing, ownership, geometry, serialization, version rejection and copies. Receiver tests use fake native outputs and local mock sockets. APK/AAB compilation and lint do not establish phone touch feel, Android dispatch on hardware, audio/haptics, receiver deployment, game timing or Pico behavior. No connected primary-phone test/install, data clearing, receiver EXE replacement or firmware flash belongs to these checks.
+
+## Verified implementation checks - October 13, 2026
+
+- 311 JVM tests passed in each of Sideload Debug and Play Release, including 41 ring tests and 19 shared-output coordinator tests.
+- 265 receiver regressions passed with fake native outputs and local mock sockets. Root and Edit exe Folder receiver/helper sources match byte for byte.
+- Synthetic examples verify 25% movement at 22 dp with an 88 dp radius; early lift cancels delayed firing; direct Boost 2 never invents Boost 1; Finish preserves another ADS/RT owner; lost earlier OFF packets still require terminal-state acknowledgement; and ending an LS macro restores another owner's held manual vector.
+- Sideload APK and Play AAB packaging passed. Full lint passed for both variants with zero errors (197 Sideload warnings, 195 Play warnings).
+- A separately authorized in-place ADB update succeeded on the connected S22. Signing certificates matched, the installed APK matched the built APK, and all 116 saved files retained identical names and SHA-256 hashes. The previous APK and a verified saved-file snapshot were retained in isolated local output, outside Git.
+
+The app was not launched for touch/game testing. The installed receiver EXE was not rebuilt or replaced; new floating activation remains gated until that receiver acknowledges the new capability and activation barrier.

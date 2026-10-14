@@ -41,6 +41,11 @@ interface ButtonAimPayloadTransport {
     fun onCameraFollow(command: String)
     fun onScrollToggle()
     fun onReleaseAll()
+    /** Explicit authored UP differs from releasing only this executor's legitimate claim. */
+    fun onForceRelease(command: String) {
+        if (command.startsWith("KEY_UP:")) sendKey(command.substringAfter(':'), false)
+        else sendCommand(command)
+    }
 }
 
 fun interface ButtonAimScheduledTask {
@@ -323,7 +328,7 @@ class ButtonAimPayloadExecutor(
         }
         val alreadyReleased = cancelReplay(desired.key)
         val previous = effectiveOutputs.remove(desired.key)
-        if (!alreadyReleased) emitInactive(previous ?: desired)
+        if (!alreadyReleased) emitForcedInactive(previous ?: desired)
     }
 
     private fun cancelPulse(state: LeaseState, key: LogicalKey) {
@@ -436,6 +441,16 @@ class ButtonAimPayloadExecutor(
             is DesiredOutput.Mouse -> transport.sendCommand("MOUSE_${output.button}_UP")
             is DesiredOutput.Key -> transport.sendKey(output.keyName, false)
             is DesiredOutput.Trigger -> transport.sendCommand("${output.trigger}:0.0")
+            is DesiredOutput.StickMacro -> transport.sendStickMacro(output.stickName, 0f, 0f)
+        }
+    }
+
+    private fun emitForcedInactive(output: DesiredOutput) {
+        when (output) {
+            is DesiredOutput.Xbox -> transport.onForceRelease("X360${output.button}_RELEASE")
+            is DesiredOutput.Mouse -> transport.onForceRelease("MOUSE_${output.button}_UP")
+            is DesiredOutput.Key -> transport.onForceRelease("KEY_UP:${output.keyName}")
+            is DesiredOutput.Trigger -> transport.onForceRelease("${output.trigger}:0.0")
             is DesiredOutput.StickMacro -> transport.sendStickMacro(output.stickName, 0f, 0f)
         }
     }

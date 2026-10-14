@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.UdpClient
+import com.example.simplecontroller.net.PhoneOutputScope
 import kotlin.math.abs
 
 /**
@@ -15,9 +16,17 @@ import kotlin.math.abs
  */
 class ContinuousSender(
     private val model: Control,
-    private val uiHandler: Handler = Handler(Looper.getMainLooper())
+    private val uiHandler: Handler = Handler(Looper.getMainLooper()),
+    private val scopeProvider: () -> PhoneOutputScope? = { null },
+    private val onRetainedReplaced: () -> Unit = {}
 ) {
     private var continuousSender: Runnable? = null
+    private var retainedScope: PhoneOutputScope? = null
+
+    private fun sendPosition(x: Float, y: Float, capturedScope: PhoneOutputScope? = scopeProvider()) {
+        if (capturedScope != null) capturedScope.sendStick(model.payload, x, y, model.excludeFromCameraFollow)
+        else if (!UdpClient.floatingSupported) UdpClient.sendStickPosition(model.payload, x, y, model.excludeFromCameraFollow)
+    }
 
     // Store last position values
     private var lastStickX = 0f
@@ -49,14 +58,19 @@ class ContinuousSender(
                 if (useUdp) {
                     if (model.type == ControlType.TOUCHPAD) {
                         // For touchpads, use the touchpad-specific sender
-                        UdpClient.sendTouchpadPosition(curvedX, curvedY)
+                        val scope = scopeProvider()
+                        if (scope != null) scope.sendMouseDelta(curvedX, curvedY)
+                        else if (!UdpClient.floatingSupported) UdpClient.sendTouchpadPosition(curvedX, curvedY)
                     } else {
                         // For sticks, use the stick position sender with the model's payload
-                        UdpClient.sendStickPosition(model.payload, curvedX, curvedY, model.excludeFromCameraFollow)
+                        sendPosition(curvedX, curvedY)
                     }
                 } else {
                     // Fallback to TCP - format remains the same for both types
-                    UdpClient.sendCommand("${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}")
+                    val command = "${model.payload}:${"%.2f".format(curvedX)},${"%.2f".format(curvedY)}"
+                    val scope = scopeProvider()
+                    if (scope != null) scope.sendCommand(command)
+                    else if (!UdpClient.floatingSupported) UdpClient.sendCommand(command)
                 }
                 lastSendTimeMs = currentTimeMs
             }
@@ -74,6 +88,9 @@ class ContinuousSender(
 
         // just cancel any earlier runnable – *don’t* zero the coords
         continuousSender?.let { uiHandler.removeCallbacks(it) }
+        val capturedScope = scopeProvider()
+        retainedScope = capturedScope
+        capturedScope?.setRetained(!model.autoCenter, ::retainedReplaced)
 
         // Bail out early only when the stick is *meant* to snap back and is already near centre
         if (model.autoCenter &&
@@ -85,6 +102,10 @@ class ContinuousSender(
         continuousSender = object : Runnable {
             private var decay = 1f                 // stays 1 → no fade when autoCenter == false
             override fun run() {
+                if (capturedScope != null && !capturedScope.isActive) {
+                    continuousSender = null
+                    return
+                }
                 val curX = if (model.autoCenter) lastStickX * decay else lastStickX
                 val curY = if (model.autoCenter) lastStickY * decay else lastStickY
 
@@ -92,7 +113,8 @@ class ContinuousSender(
                 if (abs(curX) > minMag || abs(curY) > minMag) {
                     val sendX = applyResponseCurve(curX)
                     val sendY = applyResponseCurve(curY)
-                    UdpClient.sendStickPosition(model.payload, sendX, sendY, model.excludeFromCameraFollow)
+                    sendPosition(sendX, sendY, capturedScope)
+                    capturedScope?.setRetained(!model.autoCenter, ::retainedReplaced)
 
                     if (model.autoCenter) decay *= 0.95f      // glide only in snap‑back mode
                     uiHandler.postDelayed(this, sendIntervalMs)
@@ -107,7 +129,7 @@ class ContinuousSender(
 
     /* helper: single 0,0 packet + stop */
     private fun sendCenter() {
-        UdpClient.sendStickPosition(model.payload, 0f, 0f, model.excludeFromCameraFollow)
+        sendPosition(0f, 0f, retainedScope ?: scopeProvider())
         continuousSender = null
     }
 
@@ -133,6 +155,11 @@ class ContinuousSender(
             model.type == ControlType.RADIAL_CURVED_STICK) {
             sendCenter()
         }
+    }
+
+    private fun retainedReplaced() {
+        stopAndCenter()
+        onRetainedReplaced()
     }
 
 

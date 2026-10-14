@@ -6,6 +6,7 @@ import com.example.simplecontroller.model.ButtonAimMouseProfile
 import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.TouchAimOutput
 import com.example.simplecontroller.net.UdpClient
+import com.example.simplecontroller.net.PhoneOutputScope
 import kotlin.math.abs
 import kotlin.math.hypot
 
@@ -126,6 +127,13 @@ internal class ManualStickOwnershipRegistry {
 object ManualStickArbiter {
     private val registry = ManualStickOwnershipRegistry()
     private val rightStickSuppressionToken = Any()
+    private val outputScopes = mutableMapOf<Any, PhoneOutputScope>()
+    private val lastVectors = mutableMapOf<String, Triple<Float, Float, Boolean>>()
+
+    @Synchronized
+    fun registerOutputScope(owner: Any, scope: PhoneOutputScope?) {
+        if (scope == null) outputScopes.remove(owner) else outputScopes[owner] = scope
+    }
 
     fun acquire(
         stickName: String,
@@ -150,6 +158,15 @@ object ManualStickArbiter {
             }
         }
         if (!transition.first.acquired) return transition.first
+        if (transition.first.replacedRetainedOwner) {
+            // Publish the previous value under the new lease before closing the replaced scope.
+            // That invalidates old packets without inserting a neutral between retained owners.
+            val scope = synchronized(this) { outputScopes[owner] }
+            val vector = synchronized(this) { lastVectors[canonical] }
+            if (scope != null && vector != null) {
+                scope.sendStick(canonical, vector.first, vector.second, vector.third)
+            }
+        }
         transition.second?.onYielded?.invoke(canonical)
         return transition.first
     }
@@ -163,14 +180,21 @@ object ManualStickArbiter {
         registry.hasRetainedOwner(canonicalStickName(stickName))
 
     @Synchronized
-    internal fun setState(stickName: String, owner: Any, state: ManualStickOwnerState): Boolean =
-        registry.updateState(canonicalStickName(stickName), owner, state)
+    internal fun setState(stickName: String, owner: Any, state: ManualStickOwnerState): Boolean {
+        val updated = registry.updateState(canonicalStickName(stickName), owner, state)
+        if (updated) outputScopes[owner]?.setRetained(state == ManualStickOwnerState.RETAINED)
+        return updated
+    }
 
     @Synchronized
     fun send(stickName: String, owner: Any, x: Float, y: Float, excludeFromCameraFollow: Boolean = false): Boolean {
         val canonical = canonicalStickName(stickName)
         if (!registry.owns(canonical, owner)) return false
-        UdpClient.sendStickPosition(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f), excludeFromCameraFollow)
+        val scope = outputScopes[owner]
+        if (scope != null) {
+            if (!scope.sendStick(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f), excludeFromCameraFollow)) return false
+        } else UdpClient.sendStickPosition(canonical, x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f), excludeFromCameraFollow)
+        lastVectors[canonical] = Triple(x.coerceIn(-1f, 1f), y.coerceIn(-1f, 1f), excludeFromCameraFollow)
         return true
     }
 
@@ -178,7 +202,15 @@ object ManualStickArbiter {
         val canonical = canonicalStickName(stickName)
         val released = synchronized(this) {
             val didRelease = registry.release(canonical, owner)
-            if (didRelease && center) UdpClient.sendStickPosition(canonical, 0f, 0f)
+            if (didRelease && center) {
+                val scope = outputScopes[owner]
+                if (scope != null) {
+                    scope.sendStick(canonical, 0f, 0f, false)
+                    scope.releaseAllClaims()
+                }
+                else UdpClient.sendStickPosition(canonical, 0f, 0f)
+            }
+            if (didRelease) outputScopes.remove(owner)
             if (didRelease && canonical == "STICK_R") {
                 UdpClient.setManualRightStickActive(rightStickSuppressionToken, false)
             }
@@ -204,10 +236,13 @@ class AimOutputSession(
     private val ownerToken: Any,
     private val controlSize: () -> Pair<Float, Float>,
     private val beforeStickAcquire: (String) -> Unit = {},
-    private val onRetainedStickChanged: (String?) -> Unit = {}
+    private val onRetainedStickChanged: (String?) -> Unit = {},
+    private val outputScope: PhoneOutputScope? = null,
+    private val scopeProvider: () -> PhoneOutputScope? = { outputScope }
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var config: AimOutputConfig? = null
+    private var activeOutputScope: PhoneOutputScope? = null
     private var sessionActive = false
     private var activePointerId = INVALID_POINTER_ID
     private var ownsStick = false
@@ -223,6 +258,9 @@ class AimOutputSession(
     private var lastAimSendTime = 0L
     private var lastStickX = 0f
     private var lastStickY = 0f
+    private var boundarySuspended = false
+    private var boundaryOffsetX = 0f
+    private var boundaryOffsetY = 0f
     private val resendGeneration = CallbackGeneration()
     private var resendStick: Runnable? = null
 
@@ -245,6 +283,7 @@ class AimOutputSession(
             invalidateStickResend()
             onRetainedStickChanged(null)
         }
+        if (!continuingRetainedStick) activeOutputScope = scopeProvider()
         config = newConfig
         sessionActive = true
         activePointerId = pointerId
@@ -253,11 +292,15 @@ class AimOutputSession(
         lastX = x
         lastY = y
         lastAimSendTime = eventTime
+        boundarySuspended = false
+        boundaryOffsetX = 0f
+        boundaryOffsetY = 0f
         resetMotionState()
 
         val stickName = newStickName
         var replacedRetainedOwner = false
         if (stickName != null) {
+            activeOutputScope?.let { ManualStickArbiter.registerOutputScope(ownerToken, it) }
             beforeStickAcquire(stickName)
             val acquisition = if (continuingRetainedStick) {
                 ManualStickArbiter.setState(stickName, ownerToken, ManualStickOwnerState.ACTIVE)
@@ -280,7 +323,11 @@ class AimOutputSession(
                 }
             }
         }
-        if (stickName != null && !ownsStick) resetSessionState()
+        if (stickName != null && !ownsStick) {
+            ManualStickArbiter.registerOutputScope(ownerToken, null)
+            activeOutputScope?.finish()
+            resetSessionState()
+        }
         return AimOutputBeginResult(stickName == null || ownsStick, replacedRetainedOwner)
     }
 
@@ -288,6 +335,13 @@ class AimOutputSession(
     fun update(pointerId: Int, x: Float, y: Float, eventTime: Long, forceSend: Boolean = false): Boolean {
         val activeConfig = config ?: return false
         if (!sessionActive || activePointerId != pointerId) return false
+
+        if (boundarySuspended) {
+            lastX = x
+            lastY = y
+            lastAimSendTime = eventTime
+            return true
+        }
 
         val stickName = activeConfig.output.stickName()
         if (stickName != null) {
@@ -323,6 +377,15 @@ class AimOutputSession(
         if (autoCenter) finish(flushMouse = false) else retainStick()
     }
 
+    /** Normal UP may flush its final inside motion; CANCEL/Finish deliberately never call this. */
+    fun flushPendingMouse() {
+        val activeConfig = config ?: return
+        if (!sessionActive || boundarySuspended || activeConfig.output != TouchAimOutput.MOUSE) return
+        sendMouse(activeConfig)
+        pendingDx = 0f
+        pendingDy = 0f
+    }
+
     fun completePending(autoCenter: Boolean) {
         if (ownerState == ManualStickOwnerState.CENTERED_PENDING) {
             finishCenteredPending()
@@ -346,6 +409,7 @@ class AimOutputSession(
             ManualStickArbiter.setState(stickName, ownerToken, ownerState)
         } else {
             ManualStickArbiter.release(stickName, ownerToken, center = true)
+            activeOutputScope?.finish()
             resetSessionState()
         }
         return true
@@ -362,6 +426,7 @@ class AimOutputSession(
             ManualStickArbiter.release(stickName, ownerToken, center = true)
         }
         onRetainedStickChanged(null)
+        activeOutputScope?.finish()
         resetSessionState()
     }
 
@@ -373,13 +438,56 @@ class AimOutputSession(
         config?.output?.stickName()?.takeIf { isRetained() }
 
     /** Change only the response strength while preserving pointer ownership and aim continuity. */
-    fun updateSensitivity(sensitivity: Float) {
+    fun updateSensitivity(sensitivity: Float, discardPendingMouse: Boolean = false) {
         val updated = config?.copy(sensitivity = sensitivity.coerceAtLeast(0f)) ?: return
+        if (discardPendingMouse) {
+            pendingDx = 0f
+            pendingDy = 0f
+            previousMouseDx = 0f
+            previousMouseDy = 0f
+        }
         config = updated
         val stickName = updated.output.stickName()
-        if (sessionActive && ownsStick && stickName != null) {
+        if (sessionActive && ownsStick && stickName != null && !boundarySuspended) {
             sendStick(updated, stickName, lastX, lastY)
         }
+    }
+
+    /** Pause only aim output; retain this pointer and stick lease for a jump-free return. */
+    fun suspendAtBoundary(pointerId: Int, x: Float, y: Float, eventTime: Long): Boolean {
+        if (!sessionActive || activePointerId != pointerId) return false
+        boundarySuspended = true
+        lastX = x
+        lastY = y
+        lastAimSendTime = eventTime
+        invalidateStickResend()
+        resetMotionState()
+        config?.output?.stickName()?.takeIf { ownsStick }?.let {
+            ManualStickArbiter.send(it, ownerToken, 0f, 0f, config?.excludeFromCameraFollow == true)
+        }
+        return true
+    }
+
+    /** Outside travel is discarded; no new DOWN, output lease, or payload activation is created. */
+    fun resumeFromBoundary(pointerId: Int, x: Float, y: Float, eventTime: Long): Boolean {
+        if (!sessionActive || activePointerId != pointerId) return false
+        val activeConfig = config ?: return false
+        if (boundarySuspended && activeConfig.output.stickName() != null) {
+            if (activeConfig.originMode == AimOriginMode.INITIAL_TOUCH) {
+                boundaryOffsetX = x - originX
+                boundaryOffsetY = y - originY
+            } else {
+                val (width, height) = controlSize()
+                boundaryOffsetX = x - width / 2f
+                boundaryOffsetY = y - height / 2f
+            }
+        }
+        boundarySuspended = false
+        lastX = x
+        lastY = y
+        lastAimSendTime = eventTime
+        resetMotionState()
+        return true
     }
 
     private fun sendStick(activeConfig: AimOutputConfig, stickName: String, x: Float, y: Float) {
@@ -387,10 +495,12 @@ class AimOutputSession(
             AimOriginMode.CONTROL_CENTER -> {
                 val (width, height) = controlSize()
                 if (width <= 0f || height <= 0f) return
-                ((x - width / 2f) / (width / 2f)).coerceIn(-1f, 1f) to
-                    ((y - height / 2f) / (height / 2f)).coerceIn(-1f, 1f)
+                ((x - boundaryOffsetX - width / 2f) / (width / 2f)).coerceIn(-1f, 1f) to
+                    ((y - boundaryOffsetY - height / 2f) / (height / 2f)).coerceIn(-1f, 1f)
             }
-            AimOriginMode.INITIAL_TOUCH -> radialDisplacement(activeConfig, x - originX, y - originY)
+            AimOriginMode.INITIAL_TOUCH -> radialDisplacement(
+                activeConfig, x - boundaryOffsetX - originX, y - boundaryOffsetY - originY
+            )
         }
 
         val sensitivity = activeConfig.sensitivity.coerceAtLeast(0f)
@@ -433,7 +543,8 @@ class AimOutputSession(
             }
         }
         if (abs(outX) >= MOUSE_DEADZONE || abs(outY) >= MOUSE_DEADZONE) {
-            if (activeConfig.gameMouse) UdpClient.sendGameMouseDelta(outX, outY)
+            if (activeOutputScope != null) activeOutputScope?.sendMouseDelta(outX, outY, activeConfig.gameMouse)
+            else if (activeConfig.gameMouse) UdpClient.sendGameMouseDelta(outX, outY)
             else UdpClient.sendTouchpadDelta(outX, outY)
         }
     }
@@ -474,6 +585,7 @@ class AimOutputSession(
             ManualStickArbiter.release(stickName, ownerToken, center = false)
         }
         onRetainedStickChanged(null)
+        activeOutputScope?.finish()
         resetSessionState()
     }
 
@@ -481,6 +593,8 @@ class AimOutputSession(
         if (config?.output?.stickName() != stickName) return
         invalidateStickResend()
         onRetainedStickChanged(null)
+        ManualStickArbiter.registerOutputScope(ownerToken, null)
+        activeOutputScope?.finish()
         resetSessionState()
     }
 
@@ -492,6 +606,7 @@ class AimOutputSession(
 
     private fun resetSessionState() {
         config = null
+        activeOutputScope = null
         sessionActive = false
         activePointerId = INVALID_POINTER_ID
         ownsStick = false
@@ -501,6 +616,9 @@ class AimOutputSession(
         lastX = 0f
         lastY = 0f
         lastAimSendTime = 0L
+        boundarySuspended = false
+        boundaryOffsetX = 0f
+        boundaryOffsetY = 0f
         resetMotionState()
     }
 

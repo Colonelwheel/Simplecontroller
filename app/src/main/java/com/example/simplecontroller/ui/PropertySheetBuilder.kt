@@ -9,6 +9,7 @@ import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.io.detachedControlCopy
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.ButtonAimMouseProfile
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
@@ -212,6 +213,7 @@ class PropertySheetBuilder(
         val components = buildUIComponents(container)
 
         addSectionTitle(container, context.getString(R.string.property_sheet_actions))
+        val floatingOptions = largeActionButton(container, "Floating and scoped control options")
 
         // Add a horizontal row of buttons for Delete and Duplicate
         val buttonRow = LinearLayout(context).apply {
@@ -224,11 +226,7 @@ class PropertySheetBuilder(
             text = "Duplicate"
             setTextColor(ContextCompat.getColor(context, R.color.primary_blue))
             setOnClickListener {
-                val copy = model.copy(
-                    id = "${model.id}_copy_${System.currentTimeMillis()}",
-                    x = model.x + 40f,
-                    y = model.y + 40f
-                )
+                val copy = detachedControlCopy(model)
                 (context as? MainActivity)?.createControlFrom(copy)
             }
         }
@@ -260,6 +258,11 @@ class PropertySheetBuilder(
 
         alertDialog.show()
         sheetStyle.dialog(alertDialog)
+        floatingOptions.setOnClickListener {
+            saveProperties(components)
+            alertDialog.dismiss()
+            (context as? MainActivity)?.editFloatingControlOptions(model)
+        }
 
         components.touchAim?.let { fields ->
             fields.calibrateButton.setOnClickListener {

@@ -16,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.setPadding
 import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.io.LayoutManager
+import com.example.simplecontroller.io.detachedControlCopy
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.net.NetworkClient
@@ -54,6 +55,34 @@ class ControlViewHelper(
     // For turbo/repeat functionality
     private var repeater: Runnable? = null
     private var cameraFollowHandledForPress = false
+    private var nextExecutorSlot = 0
+    private var pendingOutputCallbacks = 0
+    private var pendingPulseCallbacks = 0
+    private var outputCallbackGeneration = 0
+    private var pulseCallbackGeneration = 0
+
+    fun hasPendingOutputWork(): Boolean = repeater != null || pulseRepeater != null ||
+        isPulseLoopActive || activePulseTrigger != null || pendingOutputCallbacks > 0
+
+    private fun postOutputRelease(handler: Handler, delayMs: Long, action: () -> Unit) {
+        val generation = outputCallbackGeneration
+        val pulseGeneration = pulseCallbackGeneration
+        val isPulse = handler === pulseHandler
+        pendingOutputCallbacks++
+        if (isPulse) pendingPulseCallbacks++
+        parentView.refreshLegacyOutputBusy()
+        handler.postDelayed({
+            if (generation == outputCallbackGeneration && (!isPulse || pulseGeneration == pulseCallbackGeneration)) {
+                try { action() } finally {
+                    if (generation == outputCallbackGeneration && (!isPulse || pulseGeneration == pulseCallbackGeneration)) {
+                        pendingOutputCallbacks--
+                        if (isPulse) pendingPulseCallbacks--
+                    }
+                    parentView.refreshLegacyOutputBusy()
+                }
+            }
+        }, delayMs)
+    }
 
     // UI elements
     private val label = TextView(context).apply {
@@ -86,16 +115,18 @@ class ControlViewHelper(
     }
 
     /** Payload transport used only by Button Aim's explicit base/alternate ownership model. */
-    fun createButtonAimPayloadExecutor(): ButtonAimPayloadExecutor =
+    fun createButtonAimPayloadExecutor(slot: String = "executor:${nextExecutorSlot++}"): ButtonAimPayloadExecutor =
         ButtonAimPayloadExecutor(
             transport = object : ButtonAimPayloadTransport {
-                override fun sendCommand(command: String) = UdpClient.sendCommand(command)
+                override fun sendCommand(command: String) = parentView.sendOwnedCommand(command, slot)
 
                 override fun sendKey(key: String, pressed: Boolean) =
-                    UdpClient.sendKeyCommand(key, pressed)
+                    parentView.sendOwnedKey(key, pressed, slot)
 
                 override fun sendStickMacro(stickName: String, x: Float, y: Float) =
-                    UdpClient.sendStickMacroPosition(stickName, x, y, model.excludeFromCameraFollow)
+                    parentView.sendOwnedMacro(stickName, x, y, slot)
+
+                override fun onForceRelease(command: String) = parentView.sendOwnedCommand(command, slot, forceRelease = true)
 
                 override fun onCameraFollow(command: String) {
                     UdpClient.setCameraFollowStrength(model.cameraFollowStrengthPercent)
@@ -157,11 +188,7 @@ class ControlViewHelper(
      * Create a duplicate of this control
      */
     private fun duplicateSelf() {
-        val copy = model.copy(
-            id = "${model.id}_copy_${System.currentTimeMillis()}",
-            x = model.x + 40f,
-            y = model.y + 40f
-        )
+        val copy = detachedControlCopy(model)
         (context as? MainActivity)?.createControlFrom(copy)
     }
 
@@ -228,6 +255,17 @@ class ControlViewHelper(
         Log.d("ControlViewHelper", "sendCommand() called with: '$command'")
 
         val upperCommand = command.trim().uppercase()
+        if (UdpClient.floatingSupported && (upperCommand.endsWith("_RELEASE") ||
+                upperCommand.startsWith("KEY_UP:") ||
+                (upperCommand.startsWith("MOUSE_") && upperCommand.endsWith("_UP")) ||
+                Regex("^(LT|RT):0(?:\\.0+)?$").matches(upperCommand))) {
+            parentView.sendOwnedCommand(command, forceRelease = true)
+            return
+        }
+        if (UdpClient.floatingSupported && upperCommand.startsWith("KEY_DOWN:")) {
+            parentView.sendOwnedCommand(command)
+            return
+        }
         if (upperCommand == "CAMERA_FOLLOW" ||
             upperCommand == "CAMERA_FOLLOW:1" ||
             upperCommand == "CAMERA_FOLLOW:0"
@@ -291,13 +329,13 @@ class ControlViewHelper(
                 pulseRepeater = object : Runnable {
                     override fun run() {
                         Log.d("ControlViewHelper", "Pulse (latched) sending: $downCmd → $upCmd")
-                        UdpClient.sendCommand(downCmd)
+                        parentView.sendOwnedCommand(downCmd)
                         activePulseTrigger = trigger
-                        pulseHandler.postDelayed({
-                            UdpClient.sendCommand(upCmd)
+                        postOutputRelease(pulseHandler, delayMs / 2) {
+                            parentView.sendOwnedCommand(upCmd)
                             if (activePulseTrigger == trigger) activePulseTrigger = null
                             Log.d("ControlViewHelper", "Pulse (latched) released: $upCmd")
-                        }, delayMs / 2)
+                        }
 
                         pulseHandler.postDelayed(this, delayMs)
                     }
@@ -306,13 +344,13 @@ class ControlViewHelper(
             } else {
                 // 🔂 Not latched → send once
                 Log.d("ControlViewHelper", "Pulse Trigger: $downCmd → wait $holdTime → $upCmd")
-                UdpClient.sendCommand(downCmd)
+                parentView.sendOwnedCommand(downCmd)
                 activePulseTrigger = trigger
-                pulseHandler.postDelayed({
-                    UdpClient.sendCommand(upCmd)
+                postOutputRelease(pulseHandler, delayMs) {
+                    parentView.sendOwnedCommand(upCmd)
                     if (activePulseTrigger == trigger) activePulseTrigger = null
                     Log.d("ControlViewHelper", "Pulse Trigger released: $upCmd")
-                }, delayMs)
+                }
             }
 
             return // skip rest of sendCommand
@@ -321,7 +359,7 @@ class ControlViewHelper(
 
         parseStickDirectionCommand(command)?.let { stickCommand ->
             Log.d("ControlViewHelper", "Sending stick direction command via UdpClient: $command")
-            UdpClient.sendStickMacroPosition(stickCommand.stickName, stickCommand.x, stickCommand.y, model.excludeFromCameraFollow)
+            parentView.sendOwnedMacro(stickCommand.stickName, stickCommand.x, stickCommand.y)
             return
         }
 
@@ -355,29 +393,29 @@ class ControlViewHelper(
                 Log.d("ControlViewHelper", "Press-and-hold → converting Xbox cmd to HOLD: '$cmdToSend'")
             }
             Log.d("ControlViewHelper", "Treating as Xbox command, using UdpClient.sendCommand")
-            UdpClient.sendCommand(cmdToSend)
+            parentView.sendOwnedCommand(cmdToSend)
 
         } else if (isTriggerCommand) {
             Log.d("ControlViewHelper", "Sending analog trigger command via UdpClient: $command")
-            UdpClient.sendCommand(command)
+            parentView.sendOwnedCommand(command)
 
         } else if (!isMouseCommand && !isTouchpadCommand && !isStickCommand) {
             // Keyboard key path
             Log.d("ControlViewHelper", "Treating as keyboard command, using UdpClient.sendKeyCommand")
-            UdpClient.sendKeyCommand(command, true)
+            parentView.sendOwnedKey(command, true)
 
             // 👇 NEW: Only auto-release if turbo is on OR the finger isn't actually held down.
             val shouldAutoRelease = !isLatchedNow && (GlobalSettings.globalTurbo || !fingerPressed)
             if (shouldAutoRelease) {
-                uiHandler.postDelayed({
+                postOutputRelease(uiHandler, 100) {
                     Log.d("ControlViewHelper", "Sending delayed key release for: '$command'")
-                    UdpClient.sendKeyCommand(command, false)
-                }, 100)
+                    parentView.sendOwnedKey(command, false)
+                }
             }
 
         } else {
             Log.d("ControlViewHelper", "Treating as special command, using UdpClient.sendCommand")
-            UdpClient.sendCommand(command)
+            parentView.sendOwnedCommand(command)
         }
     }
 
@@ -402,6 +440,9 @@ class ControlViewHelper(
 
         // Cancel any pending pulse tasks to be absolutely sure
         pulseHandler.removeCallbacksAndMessages(null)
+        pulseCallbackGeneration++
+        pendingOutputCallbacks -= pendingPulseCallbacks
+        pendingPulseCallbacks = 0
         activePulseTrigger = null
 
         // Process all commands in the payload
@@ -416,7 +457,7 @@ class ControlViewHelper(
                     // Stick direction button payloads -> center the stick on lift
                     stickCommand != null -> {
                         Log.d("ControlViewHelper", "Sending stick direction release: ${stickCommand.stickName}:0.00,0.00")
-                        UdpClient.sendStickMacroPosition(stickCommand.stickName, 0f, 0f, model.excludeFromCameraFollow)
+                        parentView.sendOwnedMacro(stickCommand.stickName, 0f, 0f)
                     }
 
                     cmd.equals("RELEASE_ALL", ignoreCase = true) -> Unit
@@ -431,28 +472,28 @@ class ControlViewHelper(
                             "${cmd}_RELEASE"
                         }
                         Log.d("ControlViewHelper", "Sending Xbox release via UdpClient: '$releaseCmd'")
-                        UdpClient.sendCommand(releaseCmd)
+                        parentView.sendOwnedCommand(releaseCmd)
                     }
 
                     // Triggers → analog zero
                     cmd.startsWith("LT:") || cmd.startsWith("RT:") -> {
                         val releaseCmd = if (cmd.startsWith("LT:")) "LT:0.0" else "RT:0.0"
                         Log.d("ControlViewHelper", "Sending analog trigger release: $releaseCmd")
-                        UdpClient.sendCommand(releaseCmd)
+                        parentView.sendOwnedCommand(releaseCmd)
                     }
 
                     // 👇 NEW: Mouse down payloads get matched "up" on lift
                     cmd == "MOUSE_LEFT_DOWN" -> {
                         Log.d("ControlViewHelper", "Mouse release: MOUSE_LEFT_UP")
-                        UdpClient.sendCommand("MOUSE_LEFT_UP")
+                        parentView.sendOwnedCommand("MOUSE_LEFT_UP")
                     }
                     cmd == "MOUSE_RIGHT_DOWN" -> {
                         Log.d("ControlViewHelper", "Mouse release: MOUSE_RIGHT_UP")
-                        UdpClient.sendCommand("MOUSE_RIGHT_UP")
+                        parentView.sendOwnedCommand("MOUSE_RIGHT_UP")
                     }
                     cmd == "MOUSE_MIDDLE_DOWN" -> {
                         Log.d("ControlViewHelper", "Mouse release: MOUSE_MIDDLE_UP")
-                        UdpClient.sendCommand("MOUSE_MIDDLE_UP")
+                        parentView.sendOwnedCommand("MOUSE_MIDDLE_UP")
                     }
 
                     // Keyboard keys (skip mouse/touchpad/stick/trigger tokens)
@@ -460,7 +501,7 @@ class ControlViewHelper(
                             !cmd.startsWith("TOUCHPAD:") &&
                             !cmd.startsWith("STICK") -> {
                         Log.d("ControlViewHelper", "Sending keyboard release: '$cmd'")
-                        UdpClient.sendKeyCommand(cmd, false)
+                        parentView.sendOwnedKey(cmd, false)
                     }
                 }
             }
@@ -512,11 +553,15 @@ class ControlViewHelper(
 
     /** Cancel every delayed/repeating action owned by this helper without changing settings. */
     fun cancelPendingActionsForReleaseAll() {
+        outputCallbackGeneration++
+        pulseCallbackGeneration++
+        pendingOutputCallbacks = 0
+        pendingPulseCallbacks = 0
         repeater?.let { uiHandler.removeCallbacks(it) }
         repeater = null
         uiHandler.removeCallbacksAndMessages(null)
         pulseHandler.removeCallbacksAndMessages(null)
-        activePulseTrigger?.let { UdpClient.sendCommand("$it:0.0") }
+        activePulseTrigger?.let { parentView.sendOwnedCommand("$it:0.0") }
         activePulseTrigger = null
         pulseRepeater = null
         isPulseLoopActive = false
@@ -711,7 +756,7 @@ object SwipeManager {
                     // For directional sticks, we just stop any active commands
                 } else {
                     // For analog sticks, send center position (0,0)
-                    UdpClient.sendStickPosition(view.model.payload, 0f, 0f)
+                    view.sendOwnedStick(view.model.payload, 0f, 0f)
                 }
             }
         }

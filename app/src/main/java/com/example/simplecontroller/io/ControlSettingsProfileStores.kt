@@ -4,11 +4,15 @@ import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.ButtonAimProfile
+import com.example.simplecontroller.model.FloatingBoostProfile
 import com.example.simplecontroller.model.StickDirectionalProfile
 import com.example.simplecontroller.model.TouchAimManualProfile
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 data class SettingsProfileOperationResult<T>(
@@ -31,7 +35,8 @@ private class AtomicNamedProfileStore<T>(
     private val nameOf: (T) -> String,
     private val updatedAtOf: (T) -> Long,
     private val withName: (T, String, Long) -> T,
-    private val validationError: (T) -> String?
+    private val validationError: (T) -> String?,
+    private val preflight: (JsonObject) -> Unit = {}
 ) {
     private val json = Json {
         prettyPrint = true
@@ -98,7 +103,11 @@ private class AtomicNamedProfileStore<T>(
         val fileId = file.name.removePrefix(prefix).removeSuffix(SUFFIX)
         if (!isCanonicalUuid(fileId)) return@runCatching null
         val decoded = AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use {
-            json.decodeFromString(serializer, it.readText())
+            val text = it.readText()
+            val objectValue = json.parseToJsonElement(text) as? JsonObject
+                ?: error("Invalid saved settings profile.")
+            preflight(objectValue)
+            json.decodeFromString(serializer, text)
         }
         decoded.takeIf {
             idOf(it) == fileId && isCanonicalUuid(idOf(it)) && validationError(it) == null
@@ -183,4 +192,33 @@ object StickDirectionalProfileStore {
     fun rename(context: Context, profile: StickDirectionalProfile, name: String, nowMs: Long) =
         store.rename(context, profile, name, nowMs)
     fun delete(context: Context, id: String): Boolean = store.delete(context, id)
+}
+
+object FloatingBoostProfileStore {
+    private val store = AtomicNamedProfileStore(
+        tag = "FloatingBoostProfile",
+        prefix = "floating_boost_profile_",
+        serializer = FloatingBoostProfile.serializer(),
+        idOf = FloatingBoostProfile::id,
+        nameOf = FloatingBoostProfile::name,
+        updatedAtOf = FloatingBoostProfile::updatedAtEpochMs,
+        withName = { profile, name, updated -> profile.copy(name = name, updatedAtEpochMs = updated) },
+        validationError = FloatingBoostProfile::validationError,
+        preflight = { value -> requireSupportedFloatingBoostSchema(value) }
+    )
+
+    fun list(context: Context): List<FloatingBoostProfile> = store.list(context)
+    fun backupSnapshot(context: Context) = store.backupSnapshot(context)
+    fun save(context: Context, profile: FloatingBoostProfile) = store.save(context, profile)
+    fun rename(context: Context, profile: FloatingBoostProfile, name: String, nowMs: Long) =
+        store.rename(context, profile, name, nowMs)
+    fun delete(context: Context, id: String): Boolean = store.delete(context, id)
+}
+
+/** Run before typed decode so a future preset shape cannot be silently discarded. */
+fun requireSupportedFloatingBoostSchema(value: JsonObject) {
+    val version = value["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
+    require(version in 1..FloatingBoostProfile.CURRENT_SCHEMA_VERSION) {
+        "Boost profile version $version is newer than supported version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION} or invalid."
+    }
 }

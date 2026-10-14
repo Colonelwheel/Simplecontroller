@@ -9,6 +9,9 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -35,7 +38,9 @@ object UdpClient {
 
     /** Enable/disable CBv0 binary sending at runtime. */
     fun setConsoleBridgeEnabled(enabled: Boolean) {
+        if (useCbv0 != enabled) invalidatePhoneCapability()
         useCbv0 = enabled
+        if (!enabled) requestPhoneCapability()
     }
 
     /** Decide which UDP port to target based on protocol. */
@@ -62,15 +67,133 @@ object UdpClient {
     // Connection status
     private var isInitialized = false
 
+    private data class OutputRoute(val socket: DatagramSocket?, val address: InetAddress?,
+                                   val port: Int, val consoleBridge: Boolean,
+                                   val player: NetworkClient.PlayerRole)
+    private fun captureOutputRoute() = OutputRoute(socket, serverAddress, serverPort, useCbv0, playerRole)
+    private fun ticketIsCurrent(ticket: OutputSafetyEpoch.Ticket, route: OutputRoute): Boolean =
+        outputSafetyEpoch.isCurrent(ticket) && socket === route.socket && serverAddress == route.address &&
+            serverPort == route.port && useCbv0 == route.consoleBridge && playerRole == route.player
+
     // Every output gets a process-unique session/sequence. RELEASE_ALL advances the
     // generation locally and gives the receiver a barrier against older UDP packets.
     private val outputSafetyEpoch = OutputSafetyEpoch()
+
+    private val phoneActivationGate = PhoneProtocolActivationGate()
+    val floatingSupported: Boolean get() = phoneActivationGate.active
+    val serverSupportsFloating: Boolean get() = phoneActivationGate.receiverSupported
+    val activationPending: Boolean get() = phoneActivationGate.pending
+    private var activationSequence: Long? = null
+    private var capabilityNonce: String? = null
+    private val _scopedCleanupConfirmed = MutableStateFlow<Boolean?>(null)
+    val scopedCleanupConfirmed = _scopedCleanupConfirmed.asStateFlow()
+    private val _outputConflicts = MutableStateFlow<Map<String, Boolean>>(emptyMap())
+    val outputConflicts = _outputConflicts.asStateFlow()
+    private val conflictTracker = PhoneOutputConflictTracker(outputSafetyEpoch.sessionId)
+    fun outputIsMasked(key: String): Boolean = _outputConflicts.value[key] == true
+
+    internal fun acceptPhoneOutputFeedback(message: String) {
+        if (conflictTracker.accept(message)) _outputConflicts.value = conflictTracker.snapshot()
+    }
+    private val phoneCoordinator by lazy {
+        PhoneOutputCoordinator(outputSafetyEpoch.sessionId,
+            { outputSafetyEpoch.nextTicket().sequence }, ::sendPhonePacket,
+            { delayMs, task -> mainHandler.postDelayed({ task() }, delayMs) }).also { coordinator ->
+            coordinator.cleanupListener = { _scopedCleanupConfirmed.value = it }
+        }
+    }
+
+    fun beginOutputScope(stableId: String): PhoneOutputScope =
+        phoneCoordinator.beginScope(stableId,
+            if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1" else "player2")
+
+    fun invalidatePhoneCapability() {
+        phoneActivationGate.invalidate()
+        capabilityNonce = null
+        activationSequence = null
+        conflictTracker.clear()
+        _outputConflicts.value = emptyMap()
+        phoneCoordinator.invalidateAll()
+    }
+
+    fun requestPhoneCapability() {
+        if (useCbv0 || NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) return
+        val nonce = UUID.randomUUID().toString().replace("-", "")
+        capabilityNonce = nonce
+        val epoch = outputSafetyEpoch.nextTicket()
+        NetworkClient.requestPhoneFrame(
+            PhoneOutputProtocol.capability(outputSafetyEpoch.sessionId, nonce),
+            PhoneOutputProtocol.capabilityAck(outputSafetyEpoch.sessionId, nonce),
+            { !useCbv0 && capabilityNonce == nonce && outputSafetyEpoch.isCurrent(epoch) }) { confirmed ->
+            if (capabilityNonce == nonce) {
+                phoneActivationGate.receiverConfirmed(confirmed && !useCbv0)
+                tryActivatePhoneProtocol()
+            }
+        }
+    }
+
+    /** Do not switch a legacy press/latch/pending sender to scoped releases halfway through. */
+    fun setLegacyOutputBusy(owner: Any, busy: Boolean) {
+        phoneActivationGate.setLegacyBusy(owner, busy)
+        tryActivatePhoneProtocol()
+    }
+
+    private fun tryActivatePhoneProtocol() {
+        if (!phoneActivationGate.tryActivate(!useCbv0 &&
+                NetworkClient.connectionStatus.value == NetworkClient.ConnectionStatus.CONNECTED)) return
+        val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        activationSequence = ticket.sequence
+        NetworkClient.requestPhoneFrame(PhoneOutputProtocol.activation(ticket.sessionId,ticket.sequence),
+            PhoneOutputProtocol.acknowledgement(ticket.sessionId,ticket.sequence),
+            { activationPending && activationSequence == ticket.sequence && ticketIsCurrent(ticket,route) }) { okay ->
+            if (activationSequence == ticket.sequence) {
+                activationSequence = null
+                if (phoneActivationGate.activationConfirmed(okay)) resendCameraFollowState()
+            }
+        }
+    }
+
+    private fun sendPhonePacket(packet: PhoneOutputPacket) {
+        if (packet.cleanup) _scopedCleanupConfirmed.value = null
+        val epoch = outputSafetyEpoch.nextTicket()
+        val destination = serverAddress
+        val port = serverPort
+        val role = playerRole
+        val guard = { floatingSupported && !useCbv0 && outputSafetyEpoch.isCurrent(epoch) &&
+            destination == serverAddress && port == serverPort && role == playerRole && packet.isCurrent() }
+        if (!guard()) { packet.onConfirmed(false); return }
+        scope.launch {
+            if (!guard()) { mainHandler.post { packet.onConfirmed(false) }; return@launch }
+            NetworkClient.requestPhoneFrame("${packet.player}:${packet.command}", packet.acknowledgement, guard) { okay ->
+                packet.onConfirmed(okay)
+            }
+        }
+    }
 
     private val cameraFollowStateLock = Any()
     @Volatile private var cameraFollowEnabled = false
     private var cameraFollowStrength = 100f
     private var cameraFollowPreferences: SharedPreferences? = null
     private val manualRightStickOwners = mutableSetOf<Any>()
+    private val mouseCameraFollowOwners = mutableSetOf<Any>()
+    private fun cameraFollowEffective() = cameraFollowEnabled && manualRightStickOwners.isEmpty() && mouseCameraFollowOwners.isEmpty()
+
+    private fun sendEffectiveCameraFollow(enabled: Boolean) {
+        if (floatingSupported && !useCbv0) {
+            val player = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1" else "player2"
+            phoneCoordinator.sendState("$player|CAMERA|ENABLED", "CAMERA_FOLLOW:${if (enabled) 1 else 0}", player)
+        } else sendCommand("CAMERA_FOLLOW:${if (enabled) 1 else 0}")
+    }
+
+    fun setMouseCameraSuppression(owner: Any, active: Boolean) {
+        val change = synchronized(cameraFollowStateLock) {
+            val before = cameraFollowEffective()
+            if (active) mouseCameraFollowOwners.add(owner) else mouseCameraFollowOwners.remove(owner)
+            cameraFollowEffective().takeIf { before != it }
+        }
+        change?.let(::sendEffectiveCameraFollow)
+    }
 
     // Key state tracking for reliable directional commands
     private val activeKeys = ConcurrentHashMap<String, Boolean>()
@@ -127,6 +250,7 @@ object UdpClient {
 
                 // Explicit state is safe to resend and restores the receiver after reconnects.
                 resendCameraFollowState()
+                requestPhoneCapability()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize UDP client: ${e.message}", e)
                 isInitialized = false
@@ -136,16 +260,22 @@ object UdpClient {
 
     fun sendScroll(deltaY: Float) {
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
+        val useCbv0 = route.consoleBridge
         val command = "SCROLL:${"%.2f".format(deltaY)}"
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) {
-                NetworkClient.send(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command))
+            if (ticketIsCurrent(ticket, route)) {
+                NetworkClient.sendGuarded(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)) { ticketIsCurrent(ticket, route) }
             }
             return
         }
 
         scope.launch {
-            if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+            if (!ticketIsCurrent(ticket, route)) return@launch
             val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
             val wireCommand = if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)
             val msgStr = "$prefix$wireCommand"
@@ -162,23 +292,29 @@ object UdpClient {
             return
         }
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
+        val useCbv0 = route.consoleBridge
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) {
-                NetworkClient.send(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command))
+            if (ticketIsCurrent(ticket, route)) {
+                NetworkClient.sendGuarded(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)) { ticketIsCurrent(ticket, route) }
             }
             return
         }
 
         scope.launch {
             try {
-                if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+                if (!ticketIsCurrent(ticket, route)) return@launch
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
 
                 if (useCbv0) {
                     // Try CBv0 first (frame goes to :9010; player prefix added by the gateway)
                     val frame = CbProtocol.encode(command)
                     if (frame != null) {
-                        val packet = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        val packet = DatagramPacket(frame, frame.size, serverAddress, if (useCbv0) CB_PORT else serverPort)
                         socket?.send(packet)
                         return@launch
                     }
@@ -198,9 +334,9 @@ object UdpClient {
                     Log.e(TAG, "Error sending UDP command: ${e.message}")
                 }
                 // Try TCP as last resort
-                if (outputSafetyEpoch.isCurrent(ticket)) {
+                if (ticketIsCurrent(ticket, route)) {
                     val fallback = if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)
-                    NetworkClient.send(fallback)
+                    NetworkClient.sendGuarded(fallback) { ticketIsCurrent(ticket, route) }
                 }
             }
         }
@@ -209,6 +345,7 @@ object UdpClient {
     /** Invalidate queued sends and stop Android's keyboard keep-alive before local cleanup. */
     fun prepareReleaseAll() {
         outputSafetyEpoch.invalidateQueuedSends()
+        phoneCoordinator.invalidateAll()
         stopKeyStateSync()
         activeKeys.clear()
     }
@@ -251,20 +388,25 @@ object UdpClient {
     private fun resendCameraFollowStrength() {
         if (useCbv0) return
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
         val strength = synchronized(cameraFollowStateLock) { cameraFollowStrength }
         val command = cameraFollowStrengthCommand(ticket.sessionId, ticket.sequence, strength)
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) NetworkClient.send(command)
+            if (ticketIsCurrent(ticket, route)) NetworkClient.sendGuarded(command) { ticketIsCurrent(ticket, route) }
             return
         }
         scope.launch {
-            if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+            if (!ticketIsCurrent(ticket, route)) return@launch
             try {
                 val prefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
                 val buffer = "$prefix$command".toByteArray()
                 socket?.send(DatagramPacket(buffer, buffer.size, serverAddress, serverPort))
             } catch (e: Exception) {
-                if (outputSafetyEpoch.isCurrent(ticket)) NetworkClient.send(command)
+                if (ticketIsCurrent(ticket, route)) NetworkClient.sendGuarded(command) { ticketIsCurrent(ticket, route) }
             }
         }
     }
@@ -272,26 +414,26 @@ object UdpClient {
     fun toggleCameraFollow(): Boolean {
         val (enabled, effectiveEnabled) = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled = !cameraFollowEnabled
-            cameraFollowEnabled to (cameraFollowEnabled && manualRightStickOwners.isEmpty())
+            cameraFollowEnabled to cameraFollowEffective()
         }
-        sendCommand("CAMERA_FOLLOW:${if (effectiveEnabled) 1 else 0}")
+        sendEffectiveCameraFollow(effectiveEnabled)
         return enabled
     }
 
     fun setCameraFollowEnabled(enabled: Boolean) {
         val effectiveEnabled = synchronized(cameraFollowStateLock) {
             cameraFollowEnabled = enabled
-            cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            cameraFollowEffective()
         }
-        sendCommand("CAMERA_FOLLOW:${if (effectiveEnabled) 1 else 0}")
+        sendEffectiveCameraFollow(effectiveEnabled)
     }
 
     fun resendCameraFollowState() {
         resendCameraFollowStrength()
         val enabled = synchronized(cameraFollowStateLock) {
-            cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            cameraFollowEffective()
         }
-        sendCommand("CAMERA_FOLLOW:${if (enabled) 1 else 0}")
+        sendEffectiveCameraFollow(enabled)
     }
 
     /**
@@ -300,12 +442,12 @@ object UdpClient {
      */
     fun setManualRightStickActive(owner: Any, active: Boolean) {
         val effectiveChange = synchronized(cameraFollowStateLock) {
-            val wasEnabled = cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            val wasEnabled = cameraFollowEffective()
             if (active) manualRightStickOwners.add(owner) else manualRightStickOwners.remove(owner)
-            val isEnabled = cameraFollowEnabled && manualRightStickOwners.isEmpty()
+            val isEnabled = cameraFollowEffective()
             if (wasEnabled == isEnabled) null else isEnabled
         }
-        effectiveChange?.let { sendCommand("CAMERA_FOLLOW:${if (it) 1 else 0}") }
+        effectiveChange?.let(::sendEffectiveCameraFollow)
     }
 
     // -------------------------------------------------------------------
@@ -401,17 +543,23 @@ object UdpClient {
      */
     fun sendPosition(x: Float, y: Float) {
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
+        val useCbv0 = route.consoleBridge
         val command = "POS:${"%.2f".format(x)},${"%.2f".format(y)}"
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) {
-                NetworkClient.send(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command))
+            if (ticketIsCurrent(ticket, route)) {
+                NetworkClient.sendGuarded(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)) { ticketIsCurrent(ticket, route) }
             }
             return
         }
 
         scope.launch {
             try {
-                if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+                if (!ticketIsCurrent(ticket, route)) return@launch
                 // Create message with player prefix for server routing
                 val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
                 val position = "POS:${"%.1f".format(x)},${"%.1f".format(y)}"
@@ -443,26 +591,32 @@ object UdpClient {
 
     private fun sendMouseDelta(dx: Float, dy: Float, gameMouse: Boolean) {
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
+        val useCbv0 = route.consoleBridge
         val command = mouseDeltaCommand(dx, dy, gameMouse, useCbv0)
         // Build the common player prefix for legacy path
         val playerPrefix = if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1:" else "player2:"
 
         // If UDP not ready, fall back to TCP (legacy text)
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) {
-                NetworkClient.send(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command))
+            if (ticketIsCurrent(ticket, route)) {
+                NetworkClient.sendGuarded(if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)) { ticketIsCurrent(ticket, route) }
             }
             return
         }
 
         scope.launch {
             try {
-                if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+                if (!ticketIsCurrent(ticket, route)) return@launch
                 if (useCbv0) {
                     // Encode as CBv0 (TYPE_MOUSE_DELTA) and send to gateway port (:9010)
                     val frame = CbProtocol.encode("DELTA:${"%.3f".format(dx)},${"%.3f".format(dy)}")
                     if (frame != null) {
-                        val packet = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        val packet = DatagramPacket(frame, frame.size, serverAddress, if (useCbv0) CB_PORT else serverPort)
                         socket?.send(packet)
                         return@launch
                     }
@@ -477,9 +631,9 @@ object UdpClient {
             } catch (e: Exception) {
                 if (Math.random() < 0.01) Log.e(TAG, "UDP delta error: ${e.message}")
                 // Last resort: TCP legacy
-                if (outputSafetyEpoch.isCurrent(ticket)) {
+                if (ticketIsCurrent(ticket, route)) {
                     val fallback = if (useCbv0) command else outputSafetyEpoch.wrapOutput(ticket, command)
-                    NetworkClient.send(fallback)
+                    NetworkClient.sendGuarded(fallback) { ticketIsCurrent(ticket, route) }
                 }
             }
         }
@@ -539,6 +693,12 @@ object UdpClient {
     ) {
         val canon = normalizeStickName(stickNameRaw) // e.g., "STICK_L" or "STICK_R"
         val ticket = outputSafetyEpoch.nextTicket()
+        val route = captureOutputRoute()
+        val socket = route.socket
+        val serverAddress = route.address
+        val serverPort = route.port
+        val playerRole = route.player
+        val useCbv0 = route.consoleBridge
         val orderedCommand = orderedStickCommand(
             canon, isMacro, excludeFromCameraFollow && !useCbv0,
             ticket.sessionId, ticket.sequence, x, y
@@ -549,15 +709,15 @@ object UdpClient {
         // If UDP is not ready, retain ordering metadata for Python while preserving
         // ConsoleBridge's existing legacy fallback shape.
         if (!isInitialized || socket == null || serverAddress == null) {
-            if (outputSafetyEpoch.isCurrent(ticket)) {
-                NetworkClient.send(if (useCbv0) consoleBridgeFallback else orderedCommand)
+            if (ticketIsCurrent(ticket, route)) {
+                NetworkClient.sendGuarded(if (useCbv0) consoleBridgeFallback else orderedCommand) { ticketIsCurrent(ticket, route) }
             }
             return
         }
 
         scope.launch {
             try {
-                if (!outputSafetyEpoch.isCurrent(ticket)) return@launch
+                if (!ticketIsCurrent(ticket, route)) return@launch
                 if (useCbv0) {
                     // Map canon → CBv0-friendly side ("LS"/"RS")
                     val isRight = canon.contains("_R")
@@ -567,7 +727,7 @@ object UdpClient {
                     val cbCompat = "$side:${"%.2f".format(x)},${"%.2f".format(y)}"
                     val frame = CbProtocol.encode(cbCompat)
                     if (frame != null) {
-                        val pkt = DatagramPacket(frame, frame.size, serverAddress, targetPort())
+                        val pkt = DatagramPacket(frame, frame.size, serverAddress, if (useCbv0) CB_PORT else serverPort)
                         socket?.send(pkt)
                         return@launch
                     }
@@ -585,8 +745,8 @@ object UdpClient {
                     Log.e(TAG, "Error sending UDP stick: ${e.message}")
                 }
                 // Last resort TCP (legacy text)
-                if (outputSafetyEpoch.isCurrent(ticket)) {
-                    NetworkClient.send(if (useCbv0) consoleBridgeFallback else orderedCommand)
+                if (ticketIsCurrent(ticket, route)) {
+                    NetworkClient.sendGuarded(if (useCbv0) consoleBridgeFallback else orderedCommand) { ticketIsCurrent(ticket, route) }
                 }
             }
         }
@@ -599,6 +759,7 @@ object UdpClient {
      */
     fun close() {
         outputSafetyEpoch.invalidateQueuedSends()
+        invalidatePhoneCapability()
         // Stop key state sync
         stopKeyStateSync()
 

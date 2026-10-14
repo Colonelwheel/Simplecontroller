@@ -41,7 +41,8 @@ class ButtonAimHandler(
     touchSlopPx: Float,
     private val vibrate: (Long) -> Unit,
     private val onPayloadError: (String) -> Unit,
-    private val onStateChanged: () -> Unit
+    private val onStateChanged: () -> Unit,
+    private val onMouseAimEngaged: () -> Unit = {}
 ) {
     private val dpadOutput = ButtonAimDpadSession(payloadExecutor, controlSize)
     private val deliberateSwipe = DeliberateSwipeTracker(touchSlopPx)
@@ -93,6 +94,14 @@ class ButtonAimHandler(
             delayedFireRunnable != null ||
             finiteReleaseRunnable != null || baseUnlatchRunnable != null ||
             recoveryResetRunnable != null || aimOutput.isActive() || dpadOutput.isActive()
+
+    /** Retained Base may yield; live gestures and finite/post-release work remain locked. */
+    fun isReplaceableRetainedOutput(): Boolean =
+        gestureState == GestureState.IDLE && activePointerId == MotionEvent.INVALID_POINTER_ID &&
+            isLatched() && (legacyPayloadHeld || baseLease != null ||
+                payloadExecutor.activeLeaseCount(ButtonAimPayloadOwner.BASE) > 0) &&
+            alternateLease == null && delayedFireRunnable == null && finiteReleaseRunnable == null &&
+            baseUnlatchRunnable == null && holdThresholdRunnable == null && recoveryResetRunnable == null
 
     fun runtimeLabel(): String? = if (phaseState.phase == OneShotAlternatePhase.BASE) {
         null
@@ -250,6 +259,9 @@ class ButtonAimHandler(
             ).started
         }
         gestureOwnsAimOutput = ownsAim && !deferStickAimUntilSwipe
+        if (gestureOwnsAimOutput && selectedOutput in setOf(ButtonAimOutput.MOUSE, ButtonAimOutput.GAME_MOUSE)) {
+            onMouseAimEngaged()
+        }
         if (!ownsAim) {
             cancelUnexpectedGesture()
             return

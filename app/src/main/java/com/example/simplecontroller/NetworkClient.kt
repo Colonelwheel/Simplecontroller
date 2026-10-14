@@ -84,6 +84,10 @@ object NetworkClient {
     private var releaseTimeoutRunnable: Runnable? = null
     private var releaseResultCallback: ((Boolean) -> Unit)? = null
 
+    private data class PhoneRequest(val guard: () -> Boolean, val callback: (Boolean) -> Unit,
+                                    var retry: Runnable? = null, var timeout: Runnable? = null)
+    private val phoneRequests = mutableMapOf<String, PhoneRequest>()
+
     /**
      * Configure socket for minimal latency
      */
@@ -106,6 +110,7 @@ object NetworkClient {
 
     /** Update connection settings */
     fun updateSettings(host: String, port: Int, autoReconnectEnabled: Boolean) {
+        UdpClient.invalidatePhoneCapability()
         this.hostAddress = host
         this.portNumber = port
         this.autoReconnect = autoReconnectEnabled
@@ -119,6 +124,7 @@ object NetworkClient {
 
     /** Set the player role for this client */
     fun setPlayerRole(role: PlayerRole) {
+        if (currentPlayerRole != role) UdpClient.invalidatePhoneCapability()
         currentPlayerRole = role
         Log.d("NetworkClient", "Player role set to: $role")
 
@@ -126,6 +132,7 @@ object NetworkClient {
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
             val roleId = if (role == PlayerRole.PLAYER1) "player1" else "player2"
             send("REGISTER:$roleId")
+            UdpClient.requestPhoneCapability()
         }
     }
 
@@ -162,9 +169,8 @@ object NetworkClient {
                 sendRaw(connectMessage)
 
                 // Start listening for responses in a separate coroutine
-                startListening()
-
                 _connectionStatus.value = ConnectionStatus.CONNECTED
+                startListening()
                 reconnectAttempts = 0
                 Log.d("NetworkClient", "Connected successfully via UDP")
 
@@ -174,6 +180,7 @@ object NetworkClient {
                 // Register player role with server
                 val roleId = if (currentPlayerRole == PlayerRole.PLAYER1) "player1" else "player2"
                 send("REGISTER:$roleId")
+                UdpClient.requestPhoneCapability()
             } catch (e: Exception) {
                 Log.e("NetworkClient", "Connection error", e)
                 _connectionStatus.value = ConnectionStatus.ERROR
@@ -353,6 +360,16 @@ object NetworkClient {
     /** Handle messages from the server */
     private fun handleServerMessage(message: String) {
         when {
+            message.trim().startsWith("PHONE_") -> {
+                val feedback = message.trim()
+                val acknowledgement = if (feedback.startsWith("PHONE_ACK_V1:"))
+                    feedback.split(':').take(3).joinToString(":") else feedback
+                releaseHandler.post {
+                    val request = phoneRequests[acknowledgement]
+                    if (request?.guard?.invoke() == true) UdpClient.acceptPhoneOutputFeedback(feedback)
+                    finishPhoneRequest(acknowledgement, true)
+                }
+            }
             message.trim() == pendingReleaseAcknowledgement -> {
                 val acknowledgement = message.trim()
                 releaseHandler.post {
@@ -381,6 +398,8 @@ object NetworkClient {
 
     /** Close the connection */
     fun close() {
+        UdpClient.invalidatePhoneCapability()
+        finishPhoneRequests()
         // onPause/onStop can arrive before the main-thread retry runnable gets a turn.
         // Flush the already-prepared idempotent barrier before closing the socket.
         pendingReleaseCommand?.let { command ->
@@ -452,6 +471,8 @@ object NetworkClient {
 
     /** Internal method to close socket */
     private fun closeConnection() {
+        UdpClient.invalidatePhoneCapability()
+        finishPhoneRequests()
         socket?.close()
         socket = null
         _connectionStatus.value = ConnectionStatus.DISCONNECTED
@@ -495,30 +516,40 @@ object NetworkClient {
      * Non‑blocking, thread‑safe.
      */
     fun send(message: String) {
+        sendGuarded(message) { true }
+    }
+
+    /** Capture routing before either send queue runs; guards survive fallback queuing. */
+    fun sendGuarded(message: String, isCurrent: () -> Boolean) {
         if (isPageTransportCommand(message)) {
             Log.w("NetworkClient", "Blocked Android-local page command from receiver transport")
             return
         }
         android.util.Log.d("NetworkClient", "Sending: $message")
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+            val sendingSocket = socket ?: return
+            val sendingAddress = serverAddress ?: return
+            val sendingPort = portNumber
+            val sendingRole = currentPlayerRole
             scope.launch {
                 try {
+                    if (!isCurrent() || socket !== sendingSocket || serverAddress != sendingAddress ||
+                        portNumber != sendingPort || currentPlayerRole != sendingRole ||
+                        _connectionStatus.value != ConnectionStatus.CONNECTED) return@launch
                     // Prefix message with player ID if it doesn't already have one
                     val prefixedMessage = if (message.startsWith("REGISTER:") ||
                         message.startsWith("player1:") ||
                         message.startsWith("player2:")) {
                         message
                     } else {
-                        val playerPrefix = if (currentPlayerRole == PlayerRole.PLAYER1) "player1:" else "player2:"
+                        val playerPrefix = if (sendingRole == PlayerRole.PLAYER1) "player1:" else "player2:"
                         "$playerPrefix$message"
                     }
 
                     // Send the message via UDP
-                    serverAddress?.let { address ->
-                        val buffer = prefixedMessage.toByteArray()
-                        val packet = DatagramPacket(buffer, buffer.size, address, portNumber)
-                        socket?.send(packet)
-                    }
+                    val buffer = prefixedMessage.toByteArray()
+                    val packet = DatagramPacket(buffer, buffer.size, sendingAddress, sendingPort)
+                    if (isCurrent()) sendingSocket.send(packet)
                 } catch (e: Exception) {
                     Log.e("NetworkClient", "Failed to send message: ${e.message}")
                     _lastErrorMessage.value = "Failed to send data: ${e.message}"
@@ -532,6 +563,44 @@ object NetworkClient {
         } else {
             Log.w("NetworkClient", "Cannot send when not connected")
         }
+    }
+
+    /** Each scoped state/end identity has its own bounded, duplicate-safe retry. */
+    fun requestPhoneFrame(command: String, expectedAck: String, isCurrent: () -> Boolean,
+                          onResult: (Boolean) -> Unit) {
+        releaseHandler.post {
+            if (_connectionStatus.value != ConnectionStatus.CONNECTED || !isCurrent()) {
+                onResult(false)
+                return@post
+            }
+            finishPhoneRequest(expectedAck, false)
+            val request = PhoneRequest(isCurrent, onResult)
+            phoneRequests[expectedAck] = request
+            var attempts = 0
+            request.retry = object : Runnable {
+                override fun run() {
+                    if (phoneRequests[expectedAck] !== request) return
+                    if (!request.guard()) { finishPhoneRequest(expectedAck, false); return }
+                    sendGuarded(command, request.guard)
+                    attempts++
+                    if (attempts < RELEASE_RETRY_COUNT) releaseHandler.postDelayed(this, RELEASE_RETRY_INTERVAL_MS)
+                    else request.timeout = Runnable { finishPhoneRequest(expectedAck, false) }.also {
+                        releaseHandler.postDelayed(it, RELEASE_ACK_TIMEOUT_MS)
+                    }
+                }
+            }.also(releaseHandler::post)
+        }
+    }
+
+    private fun finishPhoneRequest(acknowledgement: String, confirmed: Boolean) {
+        val request = phoneRequests.remove(acknowledgement) ?: return
+        request.retry?.let(releaseHandler::removeCallbacks)
+        request.timeout?.let(releaseHandler::removeCallbacks)
+        request.callback(confirmed && request.guard())
+    }
+
+    private fun finishPhoneRequests() {
+        releaseHandler.post { phoneRequests.keys.toList().forEach { finishPhoneRequest(it, false) } }
     }
 
     private const val RELEASE_RETRY_COUNT = 5

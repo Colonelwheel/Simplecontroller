@@ -98,6 +98,17 @@ import com.example.simplecontroller.net.UdpClient
 import android.widget.CheckBox
 import android.view.ViewGroup
 import java.nio.charset.StandardCharsets
+import com.example.simplecontroller.ui.FloatingControlsController
+import com.example.simplecontroller.ui.FloatingControlsEditor
+import com.example.simplecontroller.ui.FloatingRingView
+import com.example.simplecontroller.ui.AndroidFloatingRingBackend
+import com.example.simplecontroller.model.FloatingZone
+import com.example.simplecontroller.model.FloatingLocalAction
+import com.example.simplecontroller.io.detachedControllerPageCopy
+import com.example.simplecontroller.model.controlsForFloatingOrientation
+import com.example.simplecontroller.model.FloatingZoneKind
+import com.example.simplecontroller.model.ControlGeometry
+import com.example.simplecontroller.model.FloatingZoneGeometry
 
 class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
@@ -153,6 +164,57 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private var displayedPageId: String = ""
     private var editingPageId: String = ""
     private var profileAutosaveBlocked = false
+    private var transitionGestureConsumed = false
+    private val floatingControls: FloatingControlsController by lazy {
+        FloatingControlsController(
+            this, canvas, { controls }, { controllerProfile.page(displayedPageId)!! },
+            { activeLayoutOrientation }, { layoutManager.createControlView(it) },
+            { zone ->
+                val backend = AndroidFloatingRingBackend(this, zone.ring!!, zone.id)
+                FloatingRingView(this, zone.ring!!, backend,
+                    { floatingControls.finish(zone.id) }).also {
+                    backend.onOutputReplaced = it.state::outputReplaced
+                    backend.onMovementReplaced = it.state::movementReplaced
+                    backend.onFeedbackChanged = it.state::refreshFeedback
+                    backend.pendingPayloads = it.state::payloadsForSlot
+                }
+            },
+            { zone -> floatingEditor.edit(zone) }
+        )
+    }
+    private val floatingEditor: FloatingControlsEditor by lazy {
+        FloatingControlsEditor(
+            this, canvas, { controls }, { controllerProfile.page(displayedPageId)!! },
+            { activeLayoutOrientation }, ::replaceFloatingZones,
+            { syncDisplayedPageIntoProfile(); layoutManager.showSaveDialog() }
+        )
+    }
+
+    private fun replaceFloatingZones(zones: List<FloatingZone>) {
+        syncDisplayedPageIntoProfile()
+        controllerProfile = controllerProfile.copy(pages = controllerProfile.pages.map {
+            if (it.id == displayedPageId) it.copy(floatingZones = zones) else it
+        })
+        renderPage(displayedPageId, safeToDetach = true)
+    }
+
+    fun floatingAction(action: FloatingLocalAction, targetId: String) = floatingControls.action(action, targetId)
+    fun floatingActionTargets(): List<Pair<String, String>> =
+        controllerProfile.page(displayedPageId)!!.floatingZones.map { it.id to it.name.ifBlank { "Floating control" } } +
+            controls.map { it.id to it.name.ifBlank { it.id } }
+    fun editFloatingControlOptions(control: Control) = floatingEditor.editControlOptions(control)
+    fun preserveSavedProfileDuringFloatingConversion() { profileAutosaveBlocked = true }
+    fun restoreFloatingGeometry(zone: FloatingZone) {
+        syncDisplayedPageIntoProfile()
+        controllerProfile = controllerProfile.copy(pages = controllerProfile.pages.map { page ->
+            if (page.id != displayedPageId) page else page.copy(
+                portraitGeometry = page.portraitGeometry?.copy(controls =
+                    page.portraitGeometry.controls + zone.portraitRestorationGeometry),
+                landscapeGeometry = page.landscapeGeometry?.copy(controls =
+                    page.landscapeGeometry.controls + zone.landscapeRestorationGeometry)
+            )
+        })
+    }
 
     /* ---------- edit-only widgets we show/hide ---------- */
     private lateinit var btnSave: View
@@ -300,11 +362,15 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main_menu, menu)
+        menu.add(0, 7101, 0, "Floating controls")
+        menu.add(0, 7102, 1, "Finish floating control")
         return true
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
+            7101 -> { if (GlobalSettings.editMode) floatingEditor.showManager() else floatingControls.showFinishList(); true }
+            7102 -> { floatingControls.showFinishList(); true }
             R.id.menu_toggle_theme -> {
                 ThemeManager.toggleDarkMode(this)
                 recreate() // Recreate activity to apply theme changes
@@ -368,6 +434,29 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     // Override dispatchTouchEvent to handle swipe mode
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
         if (activeTouchAimCalibration != null) return super.dispatchTouchEvent(ev)
+        if (transitionGestureConsumed) {
+            if (ev.actionMasked == MotionEvent.ACTION_UP || ev.actionMasked == MotionEvent.ACTION_CANCEL)
+                transitionGestureConsumed = false
+            return true
+        }
+        if (!GlobalSettings.editMode && UdpClient.activationPending && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            val location = IntArray(2)
+            canvas.getLocationOnScreen(location)
+            val x = ev.rawX - location[0]; val y = ev.rawY - location[1]
+            val hit = canvas.children.toList().asReversed().firstOrNull {
+                it.visibility == View.VISIBLE && it.isClickable &&
+                    x >= it.x && x <= it.x + it.width && y >= it.y && y <= it.y + it.height
+            }
+            val safetyAction = (hit as? ControlView)?.model?.let {
+                it.payload.trim().equals("RELEASE_ALL", true) || it.floatingLocalAction != FloatingLocalAction.NONE
+            } == true
+            if (!safetyAction && (hit == null || hit is ControlView)) {
+                transitionGestureConsumed = true
+                Toast.makeText(this, "Preparing scoped controls; touch again after receiver confirmation.", Toast.LENGTH_SHORT).show()
+                return true
+            }
+        }
+        if (::controllerProfile.isInitialized && floatingControls.dispatch(ev)) return true
         // When swipe mode is active and we're not in edit mode, handle with SwipeManager
         if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
             // If the manager processes it, we're done
@@ -398,6 +487,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             requestEditModeChange(!GlobalSettings.editMode)
         }
         uiBuilder.styleAppButton(btnEdit, primary = true)
+        btnEdit.contentDescription = "Edit. Hold to manage or finish floating controls."
+        btnEdit.setOnLongClickListener {
+            if (GlobalSettings.editMode) floatingEditor.showManager() else floatingControls.showFinishList()
+            true
+        }
 
         // Keep the status badge between the two tool columns on narrow windows.
         canvas.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
@@ -866,7 +960,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             "--- Layouts ---",
             "Xbox Controller Layout",
             "Player 1 Xbox Layout",
-            "Player 2 Xbox Layout"
+            "Player 2 Xbox Layout",
+            "Floating ring",
+            "Floating Button / group from selection"
         )
 
         // Show dialog with dark theme
@@ -886,6 +982,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     9 -> createXboxControllerLayout()
                     10 -> createPlayer1XboxLayout()
                     11 -> createPlayer2XboxLayout()
+                    12 -> floatingEditor.addRing()
+                    13 -> floatingEditor.selectButtons()
                 }
             }
             .create()
@@ -931,6 +1029,10 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Remove a control from the layout
      */
     fun removeControl(c: Control) {
+        if (controllerProfile.page(displayedPageId)?.floatingZones?.any { c.id in it.memberIds } == true) {
+            Toast.makeText(this, "Ungroup this Button before removing it.", Toast.LENGTH_LONG).show()
+            return
+        }
         if (activeTouchAimCalibration != null) {
             cancelTouchAimCalibration("Calibration stopped because a control was removed.")
         }
@@ -1323,7 +1425,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                             dialog.dismiss()
                             val importedReusable = result.touchAimCalibrationCount +
                                 result.touchAimManualProfileCount + result.buttonAimProfileCount +
-                                result.stickDirectionalProfileCount
+                                result.stickDirectionalProfileCount + result.floatingBoostProfileCount
                             Toast.makeText(
                                 this@MainActivity,
                                 "Imported ${result.controllerProfileCount} controller and " +
@@ -1371,6 +1473,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Clear all control views
      */
     override fun clearControlViews() {
+        floatingControls.clear()
         cancelTouchAimCalibration("Calibration stopped because the layout changed.")
         canvas.children.filter { it.tag == "control" }.toList()
             .forEach { canvas.removeView(it) }
@@ -1396,7 +1499,31 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         val canvasHeight = canvas.height.toFloat().takeIf { it > 0f }
             ?: priorCurrentGeometry?.canvasHeight
             ?: 0f
-        var page = existing.copy(controls = copiedControls).withGeometry(
+        val updatedZones = if (!GlobalSettings.editMode) existing.floatingZones else existing.floatingZones.map { zone ->
+            if (zone.kind == FloatingZoneKind.RING) zone else {
+                val geometry = copiedControls.filter { it.id in zone.memberIds }.associate {
+                    it.id to ControlGeometry(it.x, it.y, it.w, it.h)
+                }
+                val wrapper = zone.geometryFor(activeLayoutOrientation) ?: run {
+                    val source = zone.geometryFor(activeLayoutOrientation.opposite())!!
+                    val sx = if (source.canvasWidth > 0f) canvasWidth / source.canvasWidth else 1f
+                    val sy = if (source.canvasHeight > 0f) canvasHeight / source.canvasHeight else 1f
+                    FloatingZoneGeometry(canvasWidth, canvasHeight, source.zone.let {
+                        ControlGeometry(it.x * sx, it.y * sy, it.w * sx, it.h * sy)
+                    })
+                }
+                zone.withGeometry(activeLayoutOrientation, wrapper).let {
+                    if (activeLayoutOrientation == LayoutOrientation.PORTRAIT) it.copy(
+                        portraitMemberGeometry = geometry,
+                        portraitRestorationGeometry = geometry + it.portraitRestorationGeometry
+                    ) else it.copy(
+                        landscapeMemberGeometry = geometry,
+                        landscapeRestorationGeometry = geometry + it.landscapeRestorationGeometry
+                    )
+                }
+            }
+        }
+        var page = existing.copy(controls = copiedControls, floatingZones = updatedZones).withGeometry(
             activeLayoutOrientation,
             capturePageGeometry(copiedControls, canvasWidth, canvasHeight)
         )
@@ -1410,6 +1537,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun clearControlViewsSafely() {
+        floatingControls.clear()
         cancelTouchAimCalibration("Calibration stopped because the page changed.")
         canvas.children.filterIsInstance<ControlView>().toList().forEach { view ->
             view.markSafeForSilentDetach()
@@ -1423,7 +1551,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         controls.clear()
         controls.addAll(
             deepCopyControls(
-                page.controlsForOrientation(
+                page.controlsForFloatingOrientation(
                     activeLayoutOrientation,
                     canvas.width.toFloat(),
                     canvas.height.toFloat()
@@ -1431,7 +1559,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             )
         )
         displayedPageId = page.id
-        layoutManager.spawnControlViews()
+        val hidden = floatingControls.hiddenMemberIds()
+        layoutManager.spawnControlViews { it.id !in hidden }
+        floatingControls.bindPage()
         updatePageSelectorLabel()
     }
 
@@ -1525,8 +1655,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         cancelTouchAimCalibration("Calibration stopped because Play Mode started.")
         pageSession.resetToHome()
         editingPageId = controllerProfile.homePageId
-        renderPage(controllerProfile.homePageId, safeToDetach = true)
         GlobalSettings.editMode = false
+        renderPage(controllerProfile.homePageId, safeToDetach = true)
         btnEdit.text = "Edit"
         updateEditUi(false)
         switchToOrientation(
@@ -1777,7 +1907,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                         destinationPageId = id,
                         newName = pageName,
                         include = Control::isLocalPageAction,
-                        redirectSelfTargets = false
+                        redirectSelfTargets = false,
+                        includeFloatingZones = false
                     )
                 } else ControllerPage(id, pageName, emptyList())
                 addNewPage(page)
@@ -1900,7 +2031,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                         destinationPageId = newId,
                         newName = pageName,
                         include = Control::isLocalPageAction,
-                        redirectSelfTargets = false
+                        redirectSelfTargets = false,
+                        includeFloatingZones = false
                     )
                     val width = canvas.width.toFloat()
                     val height = canvas.height.toFloat()
@@ -1936,32 +2068,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         destinationPageId: String,
         newName: String,
         include: (Control) -> Boolean = { true },
-        redirectSelfTargets: Boolean
+        redirectSelfTargets: Boolean,
+        includeFloatingZones: Boolean = true
     ): ControllerPage {
-        val selected = source.controls.filter(include)
-        val detached = deepCopyControls(selected)
-        val idMap = selected.indices.associate { index ->
-            selected[index].id to "control_${newPageId()}"
-        }
-        val copiedControls = detached.map { control ->
-            control.copy(
-                id = idMap.getValue(control.id),
-                pageTargetId = if (redirectSelfTargets && control.pageTargetId == source.id) {
-                    destinationPageId
-                } else control.pageTargetId
-            )
-        }
-        val selectedIds = idMap.keys
-        return ControllerPage(
-            id = destinationPageId,
-            name = newName,
-            controls = copiedControls,
-            portraitGeometry = source.portraitGeometry
-                ?.withOnlyControlIds(selectedIds)
-                ?.remapControlIds(idMap),
-            landscapeGeometry = source.landscapeGeometry
-                ?.withOnlyControlIds(selectedIds)
-                ?.remapControlIds(idMap)
+        return detachedControllerPageCopy(
+            source, destinationPageId, newName, include, redirectSelfTargets,
+            includeFloatingZones = includeFloatingZones
         )
     }
 
@@ -2062,6 +2174,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun releaseOutputs(showFeedback: Boolean) {
+        floatingControls.clear()
         if (showFeedback) triggerReleaseAllHaptic()
         ReleaseAllCoordinator.releaseAll { status ->
             if (!showFeedback) return@releaseAll

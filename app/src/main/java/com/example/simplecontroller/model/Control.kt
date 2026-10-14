@@ -77,6 +77,10 @@ data class Control(
     // Movement eligibility only; manual right-stick priority is always preserved.
     var excludeFromCameraFollow: Boolean = false,
     var cameraFollowStrengthPercent: Float = 100f,
+    /** Opt-in owned suppression; runtime claims are deliberately not serialized. */
+    var mouseSuppressCameraFollow: Boolean = false,
+    var floatingLocalAction: FloatingLocalAction = FloatingLocalAction.NONE,
+    var floatingActionTargetId: String = "",
 
     /* button-specific */
     var holdToggle: Boolean = false,       // "latch" behaviour

@@ -2,6 +2,7 @@ package com.example.simplecontroller.io
 
 import android.content.Context
 import com.example.simplecontroller.model.ButtonAimProfile
+import com.example.simplecontroller.model.FloatingBoostProfile
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerProfile
@@ -21,7 +22,8 @@ import java.util.Locale
 import java.util.UUID
 
 const val CONTROLLER_PROFILES_BACKUP_FILE_TYPE = "simplecontroller-profiles-backup"
-const val CONTROLLER_PROFILES_BACKUP_VERSION = 1
+const val LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION = 1
+const val CONTROLLER_PROFILES_BACKUP_VERSION = 2
 const val CONTROLLER_PROFILES_BACKUP_EXTENSION = ".simplecontroller-profiles-backup.json"
 
 @Serializable
@@ -33,14 +35,19 @@ data class NamedControllerProfile(
 @Serializable
 data class ControllerProfilesBackup(
     val fileType: String = CONTROLLER_PROFILES_BACKUP_FILE_TYPE,
-    val backupVersion: Int = CONTROLLER_PROFILES_BACKUP_VERSION,
+    val backupVersion: Int = LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION,
     val activeControllerProfileName: String,
     val controllerProfiles: List<NamedControllerProfile>,
     val touchAimCalibrations: List<TouchAimCalibrationProfile> = emptyList(),
     val touchAimManualProfiles: List<TouchAimManualProfile> = emptyList(),
     val buttonAimProfiles: List<ButtonAimProfile> = emptyList(),
-    val stickDirectionalProfiles: List<StickDirectionalProfile> = emptyList()
+    val stickDirectionalProfiles: List<StickDirectionalProfile> = emptyList(),
+    val floatingBoostProfiles: List<FloatingBoostProfile> = emptyList()
 )
+
+/** New libraries need an envelope gate even when every nested controller uses legacy settings. */
+fun ControllerProfilesBackup.requiredBackupVersion(): Int =
+    if (floatingBoostProfiles.isNotEmpty()) CONTROLLER_PROFILES_BACKUP_VERSION else LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION
 
 data class ControllerProfilesBackupLoadResult(
     val backup: ControllerProfilesBackup,
@@ -60,7 +67,8 @@ data class ControllerProfilesBackupImportResult(
     val touchAimManualProfileCount: Int,
     val buttonAimProfileCount: Int,
     val stickDirectionalProfileCount: Int,
-    val warnings: List<String>
+    val warnings: List<String>,
+    val floatingBoostProfileCount: Int = 0
 )
 
 private val backupJson = Json {
@@ -106,14 +114,17 @@ fun createControllerProfilesBackup(
     val stickProfiles = StickDirectionalProfileStore.backupSnapshot(context).requireFullyReadable(
         "Stick directional"
     )
+    val boostProfiles = FloatingBoostProfileStore.backupSnapshot(context).requireFullyReadable("Floating boost")
 
     val backup = ControllerProfilesBackup(
+        backupVersion = if (boostProfiles.isNotEmpty()) CONTROLLER_PROFILES_BACKUP_VERSION else LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION,
         activeControllerProfileName = activeProfileName,
         controllerProfiles = profiles,
         touchAimCalibrations = calibrations,
         touchAimManualProfiles = manualProfiles,
         buttonAimProfiles = buttonProfiles,
-        stickDirectionalProfiles = stickProfiles
+        stickDirectionalProfiles = stickProfiles,
+        floatingBoostProfiles = boostProfiles
     )
     validateControllerProfilesBackup(backup).backup
 }
@@ -126,11 +137,11 @@ private fun <T> ProfileStoreBackupSnapshot<T>.requireFullyReadable(label: String
 }
 
 fun encodeControllerProfilesBackup(backup: ControllerProfilesBackup): String {
-    val validated = validateControllerProfilesBackup(backup).backup
+    val validated = validateControllerProfilesBackup(backup.copy(backupVersion = backup.requiredBackupVersion())).backup
     return backupJson.encodeToString(
         validated.copy(
             fileType = CONTROLLER_PROFILES_BACKUP_FILE_TYPE,
-            backupVersion = CONTROLLER_PROFILES_BACKUP_VERSION
+            backupVersion = validated.requiredBackupVersion()
         )
     )
 }
@@ -175,6 +186,9 @@ fun decodeControllerProfilesBackup(text: String): ControllerProfilesBackupLoadRe
         "Profile backup version $backupVersion is newer than supported version " +
             CONTROLLER_PROFILES_BACKUP_VERSION
     }
+    require(backupVersion >= 2 || (objectValue["floatingBoostProfiles"] as? JsonArray).orEmpty().isEmpty()) {
+        "Floating boost profiles require backup version 2."
+    }
 
     requireNestedVersions(objectValue)
     val decoded = backupJson.decodeFromString<ControllerProfilesBackup>(normalizedText)
@@ -204,7 +218,8 @@ private fun requireNestedVersions(objectValue: JsonObject) {
         Triple("touchAimCalibrations", "TouchAim calibration", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION),
         Triple("touchAimManualProfiles", "Manual TouchAim profile", TouchAimManualProfile.CURRENT_SCHEMA_VERSION),
         Triple("buttonAimProfiles", "Button Aim profile", ButtonAimProfile.CURRENT_SCHEMA_VERSION),
-        Triple("stickDirectionalProfiles", "Stick directional profile", StickDirectionalProfile.CURRENT_SCHEMA_VERSION)
+        Triple("stickDirectionalProfiles", "Stick directional profile", StickDirectionalProfile.CURRENT_SCHEMA_VERSION),
+        Triple("floatingBoostProfiles", "Floating boost profile", FloatingBoostProfile.CURRENT_SCHEMA_VERSION)
     ).forEach { (key, label, current) ->
         entries(key).forEachIndexed { index, item ->
             val itemObject = item as? JsonObject
@@ -231,6 +246,9 @@ fun validateControllerProfilesBackup(
     }
     require(decoded.backupVersion in 1..CONTROLLER_PROFILES_BACKUP_VERSION) {
         "Profile backup version ${decoded.backupVersion} is not supported."
+    }
+    require(decoded.floatingBoostProfiles.isEmpty() || decoded.backupVersion >= 2) {
+        "Floating boost profiles require backup version 2."
     }
     require(decoded.controllerProfiles.isNotEmpty()) {
         "An all-profiles backup must contain at least one controller profile."
@@ -263,6 +281,9 @@ fun validateControllerProfilesBackup(
         it.validationError()?.let { error -> throw IllegalArgumentException(error) }
     }
     validateReusableProfiles(decoded.stickDirectionalProfiles, "Stick directional profile") {
+        it.validationError()?.let { error -> throw IllegalArgumentException(error) }
+    }
+    validateReusableProfiles(decoded.floatingBoostProfiles, "Floating boost profile") {
         it.validationError()?.let { error -> throw IllegalArgumentException(error) }
     }
 
@@ -298,6 +319,7 @@ private fun profileId(profile: Any): String = when (profile) {
     is TouchAimManualProfile -> profile.id
     is ButtonAimProfile -> profile.id
     is StickDirectionalProfile -> profile.id
+    is FloatingBoostProfile -> profile.id
     else -> error("Unsupported reusable profile type.")
 }
 
@@ -306,6 +328,7 @@ private fun profileName(profile: Any): String = when (profile) {
     is TouchAimManualProfile -> profile.name
     is ButtonAimProfile -> profile.name
     is StickDirectionalProfile -> profile.name
+    is FloatingBoostProfile -> profile.name
     else -> error("Unsupported reusable profile type.")
 }
 
@@ -329,6 +352,7 @@ fun importControllerProfilesBackup(
     val existingManual = TouchAimManualProfileStore.list(context)
     val existingButton = ButtonAimProfileStore.list(context)
     val existingStick = StickDirectionalProfileStore.list(context)
+    val existingBoost = FloatingBoostProfileStore.list(context)
 
     fun freshId(reserved: MutableSet<String>): String {
         while (true) {
@@ -377,12 +401,20 @@ fun importControllerProfilesBackup(
         stickNames += name
         source.copy(id = freshId(stickIds), name = name)
     }
+    val boostNames = existingBoost.mapTo(mutableListOf()) { it.name }
+    val boostIds = existingBoost.mapTo(mutableSetOf()) { it.id.lowercase(Locale.ROOT) }
+    val boostProfiles = backup.floatingBoostProfiles.map { source ->
+        val name = uniqueImportedProfileName(source.name, boostNames)
+        boostNames += name
+        source.copy(id = freshId(boostIds), name = name)
+    }
 
     val createdControllerNames = mutableListOf<String>()
     val createdCalibrationIds = mutableListOf<String>()
     val createdManualIds = mutableListOf<String>()
     val createdButtonIds = mutableListOf<String>()
     val createdStickIds = mutableListOf<String>()
+    val createdBoostIds = mutableListOf<String>()
     try {
         calibrations.forEach { profile ->
             require(TouchAimCalibrationStore.save(context, profile).succeeded) {
@@ -408,6 +440,12 @@ fun importControllerProfilesBackup(
             }
             createdStickIds += profile.id
         }
+        boostProfiles.forEach { profile ->
+            require(FloatingBoostProfileStore.save(context, profile).succeeded) {
+                "Could not save imported floating boost profile '${profile.name}'."
+            }
+            createdBoostIds += profile.id
+        }
         controllers.forEach { named ->
             saveControllerProfile(context, named.name, named.profile).getOrThrow()
             createdControllerNames += named.name
@@ -432,6 +470,9 @@ fun importControllerProfilesBackup(
         require(stickProfiles.all { expected ->
             StickDirectionalProfileStore.list(context).any { it == expected }
         }) { "An imported Stick profile could not be verified." }
+        require(boostProfiles.all { expected ->
+            FloatingBoostProfileStore.list(context).any { it == expected }
+        }) { "An imported floating boost profile could not be verified." }
 
         val activeName = requireNotNull(
             importedControllerNames[backup.activeControllerProfileName.lowercase(Locale.ROOT)]
@@ -449,7 +490,8 @@ fun importControllerProfilesBackup(
             touchAimManualProfileCount = manualProfiles.size,
             buttonAimProfileCount = buttonProfiles.size,
             stickDirectionalProfileCount = stickProfiles.size,
-            warnings = loaded.warnings
+            warnings = loaded.warnings,
+            floatingBoostProfileCount = boostProfiles.size
         )
     } catch (failure: Throwable) {
         var rollbackComplete = true
@@ -467,6 +509,9 @@ fun importControllerProfilesBackup(
         }
         createdStickIds.asReversed().forEach {
             rollbackComplete = StickDirectionalProfileStore.delete(context, it) && rollbackComplete
+        }
+        createdBoostIds.asReversed().forEach {
+            rollbackComplete = FloatingBoostProfileStore.delete(context, it) && rollbackComplete
         }
         if (!rollbackComplete) {
             throw IllegalStateException(
