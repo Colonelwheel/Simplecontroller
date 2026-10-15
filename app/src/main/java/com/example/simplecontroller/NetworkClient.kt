@@ -320,14 +320,16 @@ object NetworkClient {
 
     /** Start listening for server responses */
     private fun startListening() {
+        val listeningSocket = socket ?: return
         scope.launch {
             val buffer = ByteArray(1024)
             val packet = DatagramPacket(buffer, buffer.size)
 
-            while (_connectionStatus.value == ConnectionStatus.CONNECTED) {
+            while (socket === listeningSocket && _connectionStatus.value == ConnectionStatus.CONNECTED) {
                 try {
-                    socket?.soTimeout = 5000               // 5-second timeout
-                    socket?.receive(packet)                // blocks
+                    listeningSocket.soTimeout = 5000       // 5-second timeout
+                    listeningSocket.receive(packet)        // blocks
+                    if (socket !== listeningSocket) break
                     val received = String(packet.data, 0, packet.length)
 
                     // Handle received message (e.g., PONG responses, etc.)
@@ -338,7 +340,7 @@ object NetworkClient {
                     continue
 
                 } catch (e: SocketException) {
-                    if (_connectionStatus.value == ConnectionStatus.DISCONNECTED) {
+                    if (socket !== listeningSocket || _connectionStatus.value != ConnectionStatus.CONNECTED) {
                         // Socket was intentionally closed; exit the loop
                         break
                     }
@@ -347,6 +349,7 @@ object NetworkClient {
                     break
 
                 } catch (e: Exception) {
+                    if (socket !== listeningSocket) break
                     Log.e("NetworkClient", "Error receiving data", e)
                     if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
                         _lastErrorMessage.value = "Connection error: ${e.message}"
@@ -388,12 +391,18 @@ object NetworkClient {
 
     /** Send a heartbeat to verify connection */
     private fun sendHeartbeat() {
-        try {
-            sendRaw("PING")
-        } catch (e: Exception) {
-            Log.e("NetworkClient", "Failed to send heartbeat", e)
-            handleDisconnect()
-        }
+        val sendingSocket = socket ?: return
+        val sendingAddress = serverAddress ?: return
+        val sendingPort = portNumber
+        sendUdpHeartbeat(scope, sendingSocket, sendingAddress, sendingPort,
+            isCurrent = {
+                socket === sendingSocket && serverAddress == sendingAddress &&
+                    portNumber == sendingPort && _connectionStatus.value == ConnectionStatus.CONNECTED
+            },
+            onFailure = { error ->
+                Log.e("NetworkClient", "Failed to send heartbeat", error)
+                handleDisconnect()
+            })
     }
 
     /** Close the connection */
@@ -551,6 +560,8 @@ object NetworkClient {
                     val packet = DatagramPacket(buffer, buffer.size, sendingAddress, sendingPort)
                     if (isCurrent()) sendingSocket.send(packet)
                 } catch (e: Exception) {
+                    if (socket !== sendingSocket || serverAddress != sendingAddress ||
+                        portNumber != sendingPort || currentPlayerRole != sendingRole) return@launch
                     Log.e("NetworkClient", "Failed to send message: ${e.message}")
                     _lastErrorMessage.value = "Failed to send data: ${e.message}"
 

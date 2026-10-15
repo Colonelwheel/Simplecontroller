@@ -120,8 +120,8 @@ class FloatingControlsController(
                 val zone=page().floatingZones.asReversed().firstOrNull {
                     it.enabled && it.id !in instances && it.ring?.isActive!=false && zoneRect(it).containsPoint(x,y)
                 } ?: return false
-                if(!UdpClient.floatingSupported) {
-                    Toast.makeText(context,"Floating controls require a compatible Windows receiver.",Toast.LENGTH_SHORT).show()
+                if(!UdpClient.prepareFloatingControls()) {
+                    Toast.makeText(context,"Connecting floating controls; lift and touch again.",Toast.LENGTH_SHORT).show()
                     consumed=true;return true
                 }
                 val spawned=summon(zone,x,y) ?: run { consumed=true;return true }

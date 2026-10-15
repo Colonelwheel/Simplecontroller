@@ -2,6 +2,8 @@
 
 Floating controls require a Windows receiver that acknowledges PHONE_OUTPUT_V1 and its phone-only activation barrier. The Android app keeps its existing controls available with older receivers and ConsoleBridge/Pico. New floating zones are unavailable on those transports. Receiver source is included; an installed EXE or desktop shortcut is not changed by building the app.
 
+The heartbeat sends unprefixed PING on an I/O worker, preserving the acknowledgement channel used by floating controls. Zone touches retry an unfinished capability/activation handshake instead of reporting an incompatible receiver. Until confirmation arrives, the initial gesture is consumed with connecting feedback; lift and touch again. That gesture is never replayed, and floating groups cannot silently fall back to unscoped legacy output.
+
 ## Create and edit
 
 In Edit, use Add -> Floating ring or Floating Button / group from selection. Hold the existing Edit button to open Floating controls; this works without a second physical input. In Play, holding Edit opens the active-instance Finish list, which also supplies access when an instance's Finish overlaps other visible controls.
@@ -77,3 +79,11 @@ The app was not launched for touch/game testing. The installed receiver EXE was 
 The drag/slider update passed 312 JVM tests in each Android variant, Sideload APK and Play AAB packaging, and full lint with zero errors (201 Sideload warnings, 199 Play warnings). The added regression checks that a rectangle saved on a 1000 x 2000 canvas appears at half scale on 500 x 1000, preserves fractional dimensions, and stays unchanged when saved again on that canvas. Source review covered gesture cancellation, pause/resume, overlapping outlines, and resize/rotation guards; physical phone dragging and resizing were not exercised automatically.
 
 The separately authorized in-place ADB update verified matching signing certificates and installed APK bytes. All 117 saved files matched the fresh pre-update snapshot by filename and SHA-256. No receiver source or protocol changes are needed for this editor update.
+
+## Receiver recognition verification - October 15, 2026
+
+Phone logs identified NetworkOnMainThreadException in the heartbeat, which closed the acknowledgement socket while the separate legacy UDP socket kept working. Heartbeats now use an I/O worker and captured route; listeners and queued send failures ignore replaced sockets. An intentional zone touch can reconnect a closed acknowledgement channel or retry unfinished negotiation. The misleading incompatible-receiver error is replaced with temporary connecting feedback while the scoped-output handshake completes.
+
+Both Android variants passed 315 JVM tests, APK/AAB packaging, and full lint with zero errors (201 Sideload warnings, 199 Play warnings). Three local UDP regressions verify worker-thread dispatch with the unchanged PING payload, no send on an obsolete route, and failure reporting only for a current socket. These are JVM socket checks, not phone touch or gameplay tests.
+
+The authorized in-place ADB update verified matching signing certificates and installed APK bytes. All 118 saved files retained identical names and SHA-256 hashes against the fresh pre-update snapshot. The app was not launched for touch/game testing; no receiver source or EXE change was needed.

@@ -84,7 +84,7 @@ object UdpClient {
     val serverSupportsFloating: Boolean get() = phoneActivationGate.receiverSupported
     val activationPending: Boolean get() = phoneActivationGate.pending
     private var activationSequence: Long? = null
-    private var capabilityNonce: String? = null
+    @Volatile private var capabilityNonce: String? = null
     private val _scopedCleanupConfirmed = MutableStateFlow<Boolean?>(null)
     val scopedCleanupConfirmed = _scopedCleanupConfirmed.asStateFlow()
     private val _outputConflicts = MutableStateFlow<Map<String, Boolean>>(emptyMap())
@@ -107,7 +107,7 @@ object UdpClient {
         phoneCoordinator.beginScope(stableId,
             if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1" else "player2")
 
-    fun invalidatePhoneCapability() {
+    @Synchronized fun invalidatePhoneCapability() {
         phoneActivationGate.invalidate()
         capabilityNonce = null
         activationSequence = null
@@ -116,8 +116,9 @@ object UdpClient {
         phoneCoordinator.invalidateAll()
     }
 
-    fun requestPhoneCapability() {
+    @Synchronized fun requestPhoneCapability() {
         if (useCbv0 || NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) return
+        if (capabilityNonce != null || floatingSupported || activationPending) return
         val nonce = UUID.randomUUID().toString().replace("-", "")
         capabilityNonce = nonce
         val epoch = outputSafetyEpoch.nextTicket()
@@ -125,11 +126,32 @@ object UdpClient {
             PhoneOutputProtocol.capability(outputSafetyEpoch.sessionId, nonce),
             PhoneOutputProtocol.capabilityAck(outputSafetyEpoch.sessionId, nonce),
             { !useCbv0 && capabilityNonce == nonce && outputSafetyEpoch.isCurrent(epoch) }) { confirmed ->
-            if (capabilityNonce == nonce) {
-                phoneActivationGate.receiverConfirmed(confirmed && !useCbv0)
-                tryActivatePhoneProtocol()
+            synchronized(this) {
+                if (capabilityNonce == nonce) {
+                    capabilityNonce = null
+                    phoneActivationGate.receiverConfirmed(confirmed && !useCbv0)
+                    tryActivatePhoneProtocol()
+                }
             }
         }
+    }
+
+    /** Retry negotiation on an intentional zone touch; never replay that touch later. */
+    fun prepareFloatingControls(): Boolean {
+        if (floatingSupported) return true
+        if (useCbv0) return false
+        // onStop closes the ACK socket even while the legacy UDP socket survives.
+        // A new intentional zone touch may reconnect, but never restart a live route.
+        when (NetworkClient.connectionStatus.value) {
+            NetworkClient.ConnectionStatus.DISCONNECTED, NetworkClient.ConnectionStatus.ERROR -> {
+                NetworkClient.start()
+                return false
+            }
+            NetworkClient.ConnectionStatus.CONNECTING -> return false
+            NetworkClient.ConnectionStatus.CONNECTED -> Unit
+        }
+        if (serverSupportsFloating) tryActivatePhoneProtocol() else requestPhoneCapability()
+        return floatingSupported
     }
 
     /** Do not switch a legacy press/latch/pending sender to scoped releases halfway through. */
