@@ -85,6 +85,17 @@ object UdpClient {
     val activationPending: Boolean get() = phoneActivationGate.pending
     private var activationSequence: Long? = null
     @Volatile private var capabilityNonce: String? = null
+    @Volatile private var floatingPreparationGeneration = 0L
+
+    /** Opaque permission to keep waiting for this same touch's original output route. */
+    class FloatingPreparationTicket internal constructor(private val routeIsCurrent: () -> Boolean) {
+        private var invalidated = false
+
+        @Synchronized internal fun isCurrent(): Boolean {
+            if (!invalidated && !routeIsCurrent()) invalidated = true
+            return !invalidated
+        }
+    }
     private val _scopedCleanupConfirmed = MutableStateFlow<Boolean?>(null)
     val scopedCleanupConfirmed = _scopedCleanupConfirmed.asStateFlow()
     private val _outputConflicts = MutableStateFlow<Map<String, Boolean>>(emptyMap())
@@ -108,6 +119,7 @@ object UdpClient {
             if (playerRole == NetworkClient.PlayerRole.PLAYER1) "player1" else "player2")
 
     @Synchronized fun invalidatePhoneCapability() {
+        floatingPreparationGeneration++
         phoneActivationGate.invalidate()
         capabilityNonce = null
         activationSequence = null
@@ -136,7 +148,7 @@ object UdpClient {
         }
     }
 
-    /** Retry negotiation on an intentional zone touch; never replay that touch later. */
+    /** Begin preparation once before capturing a pending touch's route ticket. */
     fun prepareFloatingControls(): Boolean {
         if (floatingSupported) return true
         if (useCbv0) return false
@@ -152,6 +164,34 @@ object UdpClient {
         }
         if (serverSupportsFloating) tryActivatePhoneProtocol() else requestPhoneCapability()
         return floatingSupported
+    }
+
+    /**
+     * Capture after initial preparation so its intentional DISCONNECTED -> CONNECTING start is
+     * allowed. Later connection loss, route/player/transport changes and Release All cancel it.
+     */
+    @Synchronized fun captureFloatingPreparationTicket(): FloatingPreparationTicket {
+        val epoch = outputSafetyEpoch.nextTicket()
+        val generation = floatingPreparationGeneration
+        val route = captureOutputRoute()
+        return FloatingPreparationTicket {
+            generation == floatingPreparationGeneration && !useCbv0 && ticketIsCurrent(epoch, route) &&
+                NetworkClient.connectionStatus.value.let {
+                    it == NetworkClient.ConnectionStatus.CONNECTING || it == NetworkClient.ConnectionStatus.CONNECTED
+                }
+        }
+    }
+
+    fun isFloatingPreparationCurrent(ticket: FloatingPreparationTicket): Boolean = ticket.isCurrent()
+
+    /** Bounded pending-touch polls may retry the handshake, but can never reconnect after loss. */
+    fun prepareFloatingControls(ticket: FloatingPreparationTicket): Boolean {
+        if (!isFloatingPreparationCurrent(ticket)) return false
+        if (NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) return false
+        if (!floatingSupported) {
+            if (serverSupportsFloating) tryActivatePhoneProtocol() else requestPhoneCapability()
+        }
+        return isFloatingPreparationCurrent(ticket) && floatingSupported
     }
 
     /** Do not switch a legacy press/latch/pending sender to scoped releases halfway through. */

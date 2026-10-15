@@ -413,8 +413,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Do not briefly start the saved manual connection first.
         val usbTetherReturnPending =
             networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)
-        if (networkPrefs.getBoolean("autoReconnect", false) && !usbTetherReturnPending) {
+        if (networkPrefs.getBoolean("autoReconnect", false) && !usbTetherReturnPending &&
+            NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) {
             NetworkClient.start()
+        }
+        if (!usbTetherReturnPending) prepareFloatingControlsForPlay()
+    }
+
+    private fun prepareFloatingControlsForPlay() {
+        if (!GlobalSettings.editMode && ::controllerProfile.isInitialized &&
+            controllerProfile.pages.any { page->page.floatingZones.any { it.enabled } }) {
+            UdpClient.prepareFloatingControls()
         }
     }
 
@@ -459,6 +468,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 transitionGestureConsumed = false
             return true
         }
+        // Floating zones can retain the live contact while preparing; ordinary controls still
+        // wait for the activation barrier below, so legacy holds are never switched mid-gesture.
+        if (::controllerProfile.isInitialized && floatingControls.dispatch(ev)) return true
         if (!GlobalSettings.editMode && UdpClient.activationPending && ev.actionMasked == MotionEvent.ACTION_DOWN) {
             val location = IntArray(2)
             canvas.getLocationOnScreen(location)
@@ -476,7 +488,6 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 return true
             }
         }
-        if (::controllerProfile.isInitialized && floatingControls.dispatch(ev)) return true
         // When swipe mode is active and we're not in edit mode, handle with SwipeManager
         if (GlobalSettings.globalSwipe && !GlobalSettings.editMode) {
             // If the manager processes it, we're done
@@ -982,7 +993,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             "Player 1 Xbox Layout",
             "Player 2 Xbox Layout",
             "Floating ring",
-            "Floating Button / group from selection"
+            "Floating Button / group from selection",
+            "Manage floating controls"
         )
 
         // Show dialog with dark theme
@@ -1002,8 +1014,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     9 -> createXboxControllerLayout()
                     10 -> createPlayer1XboxLayout()
                     11 -> createPlayer2XboxLayout()
-                    12 -> floatingEditor.addRing()
+                    12 -> floatingEditor.showRingMenu()
                     13 -> floatingEditor.selectButtons()
+                    14 -> floatingEditor.showManager()
                 }
             }
             .create()
@@ -1686,6 +1699,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             orientation = orientationStore.readPlayOrientation(),
             pageId = controllerProfile.homePageId
         )
+        prepareFloatingControlsForPlay()
     }
 
     private fun requestEditorOrientation(orientation: LayoutOrientation) {

@@ -131,6 +131,7 @@ class FloatingRingStateMachine(
     private var finished = false
     private var finishEntryEligible = true
     private var processingLift = false
+    private var directBoostOneUnlocked = false
     private var movementRetained = false
     private var movementVector = RingPoint(0f, 0f)
     private var lastX = 0f
@@ -205,6 +206,7 @@ class FloatingRingStateMachine(
         gestureGeneration++
         pointerId = id
         role = startingRole
+        directBoostOneUnlocked = false
         logicalOffsetX = offsetX
         logicalOffsetY = offsetY
         lastX = x
@@ -255,6 +257,8 @@ class FloatingRingStateMachine(
         val insideFinish = geometry.finish.contains(x, y)
         if (insideFinish && finishEntryEligible) { finish(); return }
         if (!insideFinish) finishEntryEligible = true
+        val previousLogicalX = lastX + logicalOffsetX
+        val previousLogicalY = lastY + logicalOffsetY
         lastX = x
         lastY = y
         processingLift = finalLift
@@ -270,7 +274,8 @@ class FloatingRingStateMachine(
             val destination = config.knob(config.directBoostAimKnobId)?.takeIf { it.enabled }
             if (destination != null) startAim(destination, x, y, time, directAddition = true)
         }
-        if (participatesInBoosts()) evaluateBoosts(logicalX, logicalY, direct, time)
+        if (participatesInBoosts()) evaluateBoosts(logicalX, logicalY, direct, time,
+            previousLogicalX, previousLogicalY)
         if (aimActive) {
             if (wasInsideAim && !insideAim) leaveAim(x, y, time)
             if ((!wasInsideAim && insideAim) || (direct && insideAim && visitedStages.isNotEmpty())) {
@@ -586,25 +591,48 @@ class FloatingRingStateMachine(
         null -> false
     }
 
-    private fun evaluateBoosts(x: Float, y: Float, direct: Boolean, eventTime: Long) {
+    private fun evaluateBoosts(
+        x: Float, y: Float, direct: Boolean, eventTime: Long,
+        previousX: Float, previousY: Float
+    ) {
         val selectedDirect = if (role == FloatingStartRole.BOOST_ONE) RingBoostStage.ONE else RingBoostStage.TWO
         val distance = geometry.distance(x, y)
+        val returnBoundary = config.boost2.directInnerDistanceDp * geometry.density
+        val returningToBoostOne = role == FloatingStartRole.BOOST_TWO && config.directBoostTwoToOne &&
+            config.boost1.enabled && !directBoostOneUnlocked &&
+            geometry.distance(previousX, previousY) >= returnBoundary && distance < returnBoundary
+        if (returningToBoostOne) directBoostOneUnlocked = true
+        fun isReturningStageOne(boost: BoostRuntime) =
+            role == FloatingStartRole.BOOST_TWO && directBoostOneUnlocked && boost.stage == RingBoostStage.ONE
         // Exit the outer stage first. Entry is cumulative, Stage 1 then Stage 2.
         boosts.asReversed().forEach { boost ->
-            if (direct && boost.stage != selectedDirect) return@forEach
+            val returningStageOne = isReturningStageOne(boost)
+            if (direct && boost.stage != selectedDirect && !returningStageOne) return@forEach
             val settings = config.boost(boost.stage)
-            val stillInside = if (direct) geometry.directHit(boost.stage, x, y)
+            val stillInside = if (direct && !returningStageOne) geometry.directHit(boost.stage, x, y)
                 else settings.enabled && distance >= (settings.distanceDp -
                     if (boost.inside) settings.hysteresisDp else 0f) * geometry.density
             if (boost.inside && !stillInside) { boost.inside = false; exitBoost(boost) }
         }
         boosts.forEach { boost ->
-            if (direct && boost.stage != selectedDirect) return@forEach
+            val returningStageOne = isReturningStageOne(boost)
+            if (direct && boost.stage != selectedDirect && !returningStageOne) return@forEach
             val settings = config.boost(boost.stage)
-            val enters = if (direct) geometry.directHit(boost.stage, x, y)
+            val crossedStageOne = returningStageOne && returningToBoostOne
+            val enters = if (direct && !returningStageOne) geometry.directHit(boost.stage, x, y)
                 else settings.enabled && distance >= settings.distanceDp * geometry.density
-            val direction = direction(x, y, boost.direction)
-            if (!boost.inside && enters) { boost.inside = true; enterBoost(boost, direction, eventTime) }
+            // A fast inward sample can skip the entire lower band. Visit it once using the
+            // incoming direction, then apply its normal exit/latch rules at the current point.
+            val direction = if (crossedStageOne && !enters) direction(previousX, previousY, boost.direction)
+                else direction(x, y, boost.direction)
+            if (!boost.inside && (enters || crossedStageOne)) {
+                boost.inside = true
+                enterBoost(boost, direction, eventTime)
+                if (distance < (settings.distanceDp - settings.hysteresisDp) * geometry.density) {
+                    boost.inside = false
+                    exitBoost(boost)
+                }
+            }
             else if (boost.inside && direction != boost.direction && !boost.pending && !boost.latched) {
                 if (settings.action != RingAction.TAP) stopOutput(boost.output)
                 enterBoost(boost, direction, eventTime)
@@ -843,6 +871,7 @@ class FloatingRingStateMachine(
     private fun endPointer() {
         pointerId = -1
         role = null
+        directBoostOneUnlocked = false
         aimActive = false
         aimSuspended = false
         fineGesture = false

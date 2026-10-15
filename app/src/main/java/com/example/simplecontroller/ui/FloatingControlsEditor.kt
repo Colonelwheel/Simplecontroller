@@ -38,6 +38,12 @@ class FloatingControlsEditor(
     private fun id()=UUID.randomUUID().toString()
     private fun message(text:String)=Toast.makeText(context,text,Toast.LENGTH_LONG).show()
     private fun geometry(c:Control)=ControlGeometry(c.x,c.y,c.w,c.h)
+    fun showRingMenu() {
+        AlertDialog.Builder(context).setTitle("Floating ring")
+            .setItems(arrayOf("Saved Presets","New")) { _,index->
+                if(index==0) ringPresets() else addRing()
+            }.setNegativeButton("Cancel",null).show()
+    }
     fun showManager() {
         val zones=page().floatingZones
         val labels=listOf("Add floating ring","Create floating Button / group from rectangle","Saved full ring presets")+
@@ -272,9 +278,11 @@ class FloatingControlsEditor(
         val start=f.choice("Starting aim knob",c.knobs.map { it.id },c.startKnobId)
         val direct=f.flag("Start aiming when a direct boost enters inner area",c.directBoostToAim)
         val dest=f.choice("Direct boost aim destination",c.knobs.map { it.id },c.directBoostAimKnobId)
+        val lower=f.flag("Activate Boost 1 when returning from direct Boost 2",c.directBoostTwoToOne)
+        f.note("On inward return past the Boost 2 direct area's inner edge, enabled Boost 1 starts using its normal action and threshold settings. Boost 1 direct tap need not be enabled.")
         dialog("Ring geometry",f) {
             val v=c.copy(innerRadiusDp=inner(),movementRadiusDp=outer(),startRole=role(),startKnobId=start(),
-                directBoostToAim=direct(),directBoostAimKnobId=dest())
+                directBoostToAim=direct(),directBoostAimKnobId=dest(),directBoostTwoToOne=lower())
             // Disabled starting selections are validated on the final zone Save.
             save(v);null
         }

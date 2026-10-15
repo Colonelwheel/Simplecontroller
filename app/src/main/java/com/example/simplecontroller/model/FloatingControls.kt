@@ -192,7 +192,8 @@ data class FloatingRingConfig(
     val startRole: FloatingStartRole = FloatingStartRole.MOVEMENT,
     val startKnobId: String = "aim_1",
     val directBoostToAim: Boolean = false,
-    val directBoostAimKnobId: String = "aim_1"
+    val directBoostAimKnobId: String = "aim_1",
+    val directBoostTwoToOne: Boolean = false
 ) {
     fun boost(stage: RingBoostStage): RingBoostSettings = when (stage) {
         RingBoostStage.ONE -> boost1

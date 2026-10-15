@@ -236,6 +236,130 @@ class FloatingRingStateMachineTest {
         assertEquals(7, f.state.status.pointerId)
     }
 
+    private fun directReturnConfig() = combat().let { base -> base.copy(
+        startRole = FloatingStartRole.BOOST_TWO,
+        directBoostTwoToOne = true,
+        boost2 = base.boost2.copy(directTapEnabled = true)
+    ) }
+
+    @Test fun directTwoReturn_entersLowerStageOnlyOnInwardCrossingWithoutItsDirectTap() {
+        val f = Fixture(directReturnConfig())
+        assertFalse(f.config.boost1.directTapEnabled)
+        assertTrue(f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO))
+        assertFalse("boost1" in f.backend.held)
+        f.move(180f); f.move(165f)
+        assertFalse("boost1" in f.backend.held)
+        f.move(159f)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertFalse("boost2" in f.backend.held)
+        f.move(140f); f.move(125f)
+        assertEquals(1, f.backend.events.count { it == "boost1:LT:1.0" })
+    }
+
+    @Test fun directTwoReturn_respectsLowerHoldHysteresisAndLatchSettings() {
+        listOf(false, true).forEach { latch ->
+            val cfg = directReturnConfig().let { it.copy(boost1 = it.boost1.copy(latchOnExit = latch)) }
+            val f = Fixture(cfg)
+            f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+            f.move(119f)
+            assertEquals("LT:1.0", f.backend.held["boost1"])
+            f.move(117f)
+            assertEquals(latch, "boost1" in f.backend.held)
+            f.move(0f)
+            assertEquals(latch, "boost1" in f.backend.held)
+        }
+    }
+
+    @Test fun directTwoReturn_fastInnerSwipeUsesIncomingDirectionAndQualifiesFineAim() {
+        val cfg = directReturnConfig().let { it.copy(
+            directBoostToAim = true,
+            aim = it.aim.copy(fine = RingFineAimSettings(enabled = true)),
+            boost1 = it.boost1.copy(payload = "", directionalPayloads = DirectionalCommands(up = "LT:1.0"))
+        ) }
+        val f = Fixture(cfg)
+        f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+        f.move(0f)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertTrue(f.state.status.fine)
+        assertEquals(.4f, f.backend.sensitivity.last(), 0f)
+        assertEquals(1, f.backend.aimBegins)
+        assertEquals(1, f.backend.events.count { it == "boost1:LT:1.0" })
+    }
+
+    @Test fun directTwoReturn_preservesDelayedRtAcrossInnerReturnWhenExitCancellationIsOff() {
+        val cfg = directReturnConfig().let { it.copy(
+            directBoostToAim = true,
+            aim = it.aim.copy(fine = RingFineAimSettings(enabled = true)),
+            knobs = listOf(RingAimKnob()),
+            boost2 = it.boost2.copy(payload = "RT:1.0", activationDelayMs = 300L,
+                cancelDelayOnExit = false, latchOnExit = true)
+        ) }
+        val f = Fixture(cfg)
+        f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+        f.clock.advance(100); f.move(125f); f.move(0f)
+        assertTrue(f.state.status.fine)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.clock.advance(199); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(1); assertEquals("RT:1.0", f.backend.held["boost2"])
+        f.state.finish()
+        assertTrue(f.backend.held.isEmpty())
+    }
+
+    @Test fun directTwoReturn_disabledLowerStageNeverActivates() {
+        val cfg = directReturnConfig().let { it.copy(boost1 = it.boost1.copy(enabled = false)) }
+        val f = Fixture(cfg)
+        f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+        f.move(125f); f.move(0f)
+        assertTrue(f.backend.events.none { it == "boost1:LT:1.0" })
+    }
+
+    @Test fun directTwoReturn_liftCancelAndFinishCannotStartLowerAction() {
+        listOf("lift", "cancel", "finish").forEach { end ->
+            val f = Fixture(directReturnConfig())
+            f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+            when (end) {
+                "lift" -> f.up()
+                "cancel" -> f.state.cancel()
+                else -> f.state.finish()
+            }
+            f.clock.advance(1000); f.clock.runCanceled()
+            assertTrue(end, f.backend.events.none { it == "boost1:LT:1.0" })
+        }
+    }
+
+    @Test fun directTwoReturn_lowerThresholdCanReenterAfterReturnAndResetsForNextGesture() {
+        val cfg = directReturnConfig().let { it.copy(boost1 = it.boost1.copy(latchOnExit = false, retainOnLift = false)) }
+        val f = Fixture(cfg)
+        f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+        f.move(125f); f.move(0f); f.move(125f)
+        assertEquals(2, f.backend.events.count { it == "boost1:LT:1.0" })
+        f.up(); assertFalse("boost1" in f.backend.held)
+        f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+        f.move(180f)
+        assertFalse("boost1" in f.backend.held)
+        assertEquals(2, f.backend.events.count { it == "boost1:LT:1.0" })
+    }
+
+    @Test fun directTwoReturn_tapAndRepeatUseExistingTimingAndExitRules() {
+        listOf(RingAction.TAP, RingAction.REPEAT).forEach { action ->
+            val cfg = directReturnConfig().let { it.copy(boost1 = it.boost1.copy(
+                action = action, latchOnExit = false, pulsePressMs = 20, pulseGapMs = 80,
+                repeatAfterExit = false, retainOnLift = false)) }
+            val f = Fixture(cfg)
+            f.state.down(7, f.cx, f.cy - 170f, 0L, FloatingStartRole.BOOST_TWO)
+            f.move(125f)
+            assertEquals("LT:1.0", f.backend.held["boost1"])
+            f.clock.advance(20); assertFalse("boost1" in f.backend.held)
+            f.clock.advance(80)
+            assertEquals(if (action == RingAction.REPEAT) 2 else 1,
+                f.backend.events.count { it == "boost1:LT:1.0" })
+            f.move(0f); f.clock.advance(1000)
+            assertFalse("boost1" in f.backend.held)
+            assertEquals(if (action == RingAction.REPEAT) 2 else 1,
+                f.backend.events.count { it == "boost1:LT:1.0" })
+        }
+    }
+
     @Test fun boostTwoDelayOffExitCancel_freezesPayloadAndExpiresInsideAfterReturn() {
         val base = combat()
         val cfg = base.copy(boost2 = base.boost2.copy(payload = "RT:1.0", activationDelayMs = 300,

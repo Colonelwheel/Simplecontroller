@@ -23,6 +23,7 @@ class FloatingRingPresetTest {
         assertFalse(restored.zone.ring!!.boost2.enabled)
         assertEquals(RingAction.REPEAT, restored.zone.ring!!.boost2.action)
         assertEquals("secondary", restored.zone.ring!!.directBoostAimKnobId)
+        assertTrue(restored.zone.ring!!.directBoostTwoToOne)
         assertEquals(300L, restored.zone.ring!!.knobs.first().fire.returnFire.delayMs)
         assertEquals(2000f, restored.zone.landscapeGeometry!!.canvasWidth, 0f)
         assertEquals(321.5f, restored.zone.portraitGeometry!!.zone.x, 0f)
@@ -190,7 +191,7 @@ class FloatingRingPresetTest {
                 retainOnLift = true, activationDelayMs = 275L, cancelDelayOnExit = false,
                 directTapEnabled = true, pulsePressMs = 37L, pulseGapMs = 73L),
             startRole = FloatingStartRole.MOVEMENT, startKnobId = "primary",
-            directBoostToAim = false, directBoostAimKnobId = "secondary"
+            directBoostToAim = false, directBoostAimKnobId = "secondary", directBoostTwoToOne = true
         )
     )
 

@@ -25,6 +25,7 @@ import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.isLocalPageAction
 import com.example.simplecontroller.model.FloatingLocalAction
 import com.example.simplecontroller.net.PhoneOutputScope
+import com.example.simplecontroller.net.PhoneOutputCoordinator
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.abs
 import kotlin.math.min
@@ -65,6 +66,15 @@ class ControlView(
     private var allowMouseSuppression = false
     private var physicalGestureActive = false
     private var activationGestureConsumed = false
+    private val isFloatingRuntime: Boolean get() = tag == "floating-runtime"
+    private val canSendLegacyOutput: Boolean get() = !isFloatingRuntime && !UdpClient.floatingSupported
+    private val rejectedFloatingOutputScope by lazy {
+        // A null provider means legacy fallback to the aim/directional/continuous helpers.
+        // Keep a non-null ended handle when rejecting floated output; this private coordinator
+        // never reaches UdpClient, the receiver, or the shared cleanup status.
+        PhoneOutputCoordinator("unavailable-floating", { 0L }, { it.onConfirmed(false) })
+            .beginScope(outputScopeId, "player1").also { it.finish() }
+    }
 
     fun refreshLegacyOutputBusy() {
         val busy = physicalGestureActive || isPressed || isLatched || leftHeld || fingerIsDown || ownsManualStick ||
@@ -77,7 +87,9 @@ class ControlView(
 
     /** Children isolate separate executors and continuous aim from ordinary Button output. */
     fun outputScopeFor(slot: String): PhoneOutputScope? {
-        if (!UdpClient.floatingSupported || !allowOutputScopeCreation) return null
+        if (!UdpClient.floatingSupported || !allowOutputScopeCreation) {
+            return if (isFloatingRuntime) rejectedFloatingOutputScope else null
+        }
         val root = outputRoot?.takeIf { it.isActive }
             ?: UdpClient.beginOutputScope(outputScopeId).also { outputRoot = it }
         return root.child(slot)
@@ -100,7 +112,7 @@ class ControlView(
         if (scope != null) {
             if (forceRelease) scope.sendLegacyForceRelease(command) else scope.sendCommand(command)
             if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
-        } else if (!UdpClient.floatingSupported) UdpClient.sendCommand(command)
+        } else if (canSendLegacyOutput) UdpClient.sendCommand(command)
     }
 
     fun sendOwnedKey(key: String, pressed: Boolean, slot: String = "ordinary") {
@@ -109,7 +121,7 @@ class ControlView(
             scope.sendKey(key, pressed)
             if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
         }
-        else if (!UdpClient.floatingSupported) UdpClient.sendKeyCommand(key, pressed)
+        else if (canSendLegacyOutput) UdpClient.sendKeyCommand(key, pressed)
     }
 
     fun sendOwnedMacro(stickName: String, x: Float, y: Float, slot: String = "ordinary") {
@@ -118,13 +130,13 @@ class ControlView(
             scope.sendStickMacro(stickName, x, y, model.excludeFromCameraFollow)
             if (slot == "ordinary") scope.setRetained(isLatched, ::releaseFloatingRuntime)
         }
-        else if (!UdpClient.floatingSupported) UdpClient.sendStickMacroPosition(stickName, x, y, model.excludeFromCameraFollow)
+        else if (canSendLegacyOutput) UdpClient.sendStickMacroPosition(stickName, x, y, model.excludeFromCameraFollow)
     }
 
     fun sendOwnedStick(stickName: String, x: Float, y: Float, slot: String = "stick") {
         val scope = outputScopeFor(slot)
         if (scope != null) scope.sendStick(stickName, x, y, model.excludeFromCameraFollow)
-        else if (!UdpClient.floatingSupported) UdpClient.sendStickPosition(stickName, x, y, model.excludeFromCameraFollow)
+        else if (canSendLegacyOutput) UdpClient.sendStickPosition(stickName, x, y, model.excludeFromCameraFollow)
     }
 
     fun releaseFloatingRuntime() = releaseEverythingLocally()
@@ -1023,11 +1035,11 @@ class ControlView(
                             // Scroll mode ON → use vertical delta only
                             // (flip sign here if you want “natural” scrolling)
                             outputScopeFor("touchpad")?.sendScroll(-scaledDy)
-                                ?: run { if (!UdpClient.floatingSupported) UdpClient.sendScroll(-scaledDy) }
+                                ?: run { if (canSendLegacyOutput) UdpClient.sendScroll(-scaledDy) }
                         } else {
                             // Normal touch-pad cursor movement
                             outputScopeFor("touchpad")?.sendMouseDelta(scaledDx, scaledDy)
-                                ?: run { if (!UdpClient.floatingSupported) UdpClient.sendTouchpadDelta(scaledDx, scaledDy) }
+                                ?: run { if (canSendLegacyOutput) UdpClient.sendTouchpadDelta(scaledDx, scaledDy) }
                         }
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
@@ -1036,7 +1048,7 @@ class ControlView(
                         touchPreviousDy = 0f
 
                         // Send a final zero movement to ensure mouse stops
-                        if (!UdpClient.floatingSupported) UdpClient.sendTouchpadPosition(0f, 0f)
+                        if (canSendLegacyOutput) UdpClient.sendTouchpadPosition(0f, 0f)
 
                         // End-of-gesture flags / cleanup
                         fingerIsDown = false

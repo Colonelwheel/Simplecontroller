@@ -13,10 +13,20 @@ alone does not enable scoped output.
 
 ControlView reports legacy gestures, holds, retained output, pending work and
 repeating senders through `UdpClient.setLegacyOutputBusy`. When all those owners
-are idle, Android sends `PHONE_ACTIVATE_V1:process:sequence`. New initial gestures
-are consumed during `activationPending`; no synthetic DOWN is sent afterward.
-The user can touch again after acknowledgement. Existing Release All remains
-accessible. If acknowledgement fails, floating activation stays unavailable.
+are idle, Android sends `PHONE_ACTIVATE_V1:process:sequence`. Ordinary initial
+gestures are consumed during `activationPending`; those controls require another
+touch after acknowledgement. Existing Release All remains accessible.
+
+Enabled floating zones prepare the connection on foreground/Play entry. A real
+zone DOWN arriving before readiness can wait up to 1500 ms while that same contact
+remains held. Only after the matching capability and activation ACK may the app
+derive a fresh single-pointer DOWN at the latest position and current uptime.
+No waiting movement, elapsed delay or old batched history is replayed. UP/CANCEL,
+focus/lifecycle cleanup, page/orientation/geometry change, or output route/epoch
+invalidation permanently cancels that pending contact. Pending polls can retry
+the handshake but cannot reconnect after a later disconnect. Unsupported floated
+members reject scoped output rather than taking legacy fallback paths. If
+acknowledgement fails, floating activation stays unavailable.
 
 The receiver applies the activation identity once, establishes a process ordering
 barrier, and neutralizes phone-owned legacy output at that quiescent boundary.

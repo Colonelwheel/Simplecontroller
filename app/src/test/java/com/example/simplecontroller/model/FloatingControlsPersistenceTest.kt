@@ -12,8 +12,16 @@ import com.example.simplecontroller.io.encodeControllerProfilesBackup
 import com.example.simplecontroller.io.validateControllerProfileForSave
 import org.junit.Assert.*
 import org.junit.Test
+import kotlinx.serialization.json.Json
 
 class FloatingControlsPersistenceTest {
+    @Test
+    fun ringSavedBeforeInwardBoostOption_keepsPriorDirectBoostBehavior() {
+        val restored = Json.decodeFromString(FloatingRingConfig.serializer(), "{}")
+        assertFalse(restored.directBoostTwoToOne)
+        assertNull(restored.validationError())
+    }
+
     @Test
     fun disabledRing_roundTripsEveryStoredActionAndRequiresFormatTen() {
         val ring = FloatingRingConfig(
@@ -34,7 +42,8 @@ class FloatingControlsPersistenceTest {
             boost2 = RingBoostSettings(distanceDp = 160f, directInnerDistanceDp = 160f,
                 directOuterDistanceDp = 184f, payload = "RT:1.0", activationDelayMs = 300,
                 cancelDelayOnExit = false, latchOnExit = true),
-            directBoostToAim = true
+            directBoostToAim = true,
+            directBoostTwoToOne = true
         )
         val source = profile(ControllerPage("page", "Base", floatingZones = listOf(ringZone(ring))))
         val encoded = encodeControllerProfileTransfer("Combat", source)
