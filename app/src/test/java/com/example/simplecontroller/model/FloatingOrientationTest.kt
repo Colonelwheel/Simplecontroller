@@ -4,6 +4,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class FloatingOrientationTest {
+    @Test fun activationFieldsMatchDisplayedCanvasAndNoOpSaveDoesNotRescaleAgain() {
+        val saved=FloatingZoneGeometry(1000f,2000f,ControlGeometry(100f,200f,300.5f,400.5f))
+        val displayed=saved.zoneOnCanvas(500f,1000f)
+        assertEquals(ControlGeometry(50f,100f,150.25f,200.25f),displayed)
+        val resaved=FloatingZoneGeometry(500f,1000f,displayed)
+        assertEquals(displayed,resaved.zoneOnCanvas(500f,1000f))
+        assertEquals(saved.zone,FloatingZoneGeometry(zone=saved.zone).zoneOnCanvas(500f,1000f))
+    }
+
     @Test fun missingOrientationTranslatesGroupWithoutScalingOrChangingSpacing() {
         val a=Control("a",ControlType.BUTTON,20f,300f,100f,80f,"X360A")
         val b=Control("b",ControlType.BUTTON,150f,300f,100f,80f,"X360B")

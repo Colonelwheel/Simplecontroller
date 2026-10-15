@@ -10,6 +10,7 @@ import android.view.View
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.children
+import androidx.core.widget.doAfterTextChanged
 import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.model.*
 import com.example.simplecontroller.io.FloatingBoostProfileStore
@@ -18,12 +19,15 @@ import com.example.simplecontroller.io.floatingLocalActionError
 import java.util.UUID
 import kotlin.math.min
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /** One-finger editor; all nested changes are drafts until the zone's Save action. */
 class FloatingControlsEditor(
     private val context:Context, private val canvas:FrameLayout,
     private val controls:()->MutableList<Control>, private val page:()->ControllerPage,
     private val orientation:()->LayoutOrientation, private val replaceZones:(List<FloatingZone>)->Unit,
+    private val syncPage:()->Unit,
     private val saveProfileCopy:()->Unit
 ) {
     private fun id()=UUID.randomUUID().toString()
@@ -84,14 +88,20 @@ class FloatingControlsEditor(
             }
         };dialog.show()
     }
-    fun edit(source:FloatingZone,newGroup:Boolean=false) {
+    fun edit(zone:FloatingZone,newGroup:Boolean=false) {
+        syncPage()
+        val source=page().floatingZones.firstOrNull { it.id==zone.id } ?: zone
         var draft=source
         val f=Form(context)
         val name=f.text("Name",source.name)
         val enabled=f.flag("Activation zone enabled",source.enabled)
         val current=source.geometryFor(orientation()) ?: source.geometryFor(orientation().opposite())!!
-        val x=f.number("Zone left (px)",current.zone.x);val y=f.number("Zone top (px)",current.zone.y)
-        val w=f.number("Zone width (px)",current.zone.w);val h=f.number("Zone height (px)",current.zone.h)
+        val rectangle=current.zoneOnCanvas(canvas.width.toFloat(),canvas.height.toFloat())
+        f.note("Drag the outline in Edit to move the zone. Tap or hold it for these settings. Covered zones can be selected from the Floating controls menu.")
+        val x=f.dimension("Zone left (px)",rectangle.x,canvas.width,position=true)
+        val y=f.dimension("Zone top (px)",rectangle.y,canvas.height,position=true)
+        val w=f.dimension("Zone width (px)",rectangle.w,canvas.width)
+        val h=f.dimension("Zone height (px)",rectangle.h,canvas.height)
         var start:()->String={ source.startMemberId }
         var swipe:()->Boolean={source.groupSwipe}
         if(source.kind!=FloatingZoneKind.RING) {
@@ -349,6 +359,39 @@ private class Form(val context:Context) {
     fun number(label:String,value:Float):()->Float {
         val getter=text(label,value.toString())
         return { getter().toFloatOrNull()?.takeIf { it.isFinite() } ?: throw IllegalArgumentException(label+" needs a finite number.") }
+    }
+    /** Sliders change exact fields only after deliberate user input; opening never rounds a value. */
+    fun dimension(label:String,value:Float,canvasExtent:Int,position:Boolean=false):()->Float {
+        note(label)
+        val edit=EditText(context).apply {
+            inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
+            setText(value.toString());contentDescription=label;setSingleLine(true)
+        }
+        body.addView(edit)
+        val limit=maxOf(canvasExtent,ceil(abs(value).toDouble()).toInt(),40).coerceAtMost(Int.MAX_VALUE/4)
+        val minimum=if(position) -limit else 1
+        val maximum=if(position) limit*2 else limit
+        val seek=SeekBar(context).apply {
+            max=maximum-minimum
+            progress=(value.roundToInt().coerceIn(minimum,maximum)-minimum)
+            minimumHeight=(48*resources.displayMetrics.density).toInt()
+            contentDescription=label+" slider"
+        }
+        seek.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar:SeekBar?,progress:Int,fromUser:Boolean) {
+                if(fromUser) edit.setText((progress+minimum).toString())
+            }
+            override fun onStartTrackingTouch(bar:SeekBar?) {}
+            override fun onStopTrackingTouch(bar:SeekBar?) {}
+        })
+        edit.doAfterTextChanged {
+            it.toString().toFloatOrNull()?.takeIf(Float::isFinite)?.let { number ->
+                seek.progress=number.roundToInt().coerceIn(minimum,maximum)-minimum
+            }
+        }
+        body.addView(seek)
+        return { edit.text.toString().toFloatOrNull()?.takeIf(Float::isFinite)
+            ?: throw IllegalArgumentException(label+" needs a finite number.") }
     }
     fun millis(label:String,value:Long):()->Long {
         val getter=text(label,value.toString())

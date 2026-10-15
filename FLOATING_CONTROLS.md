@@ -12,6 +12,12 @@ Conversion changes the working layout and blocks pause autosave until an explici
 
 Zone outlines are visible in Edit and dormant zones are invisible in Play. Edit a zone to change its rectangle, enabled state, saved starting role, ring settings, group Swipe policy, stacking order, duplication or ungrouping. A duplicate receives detached settings and remapped member/zone/knob references.
 
+In Edit, drag a visible zone outline with one finger to reposition its activation rectangle. Lift to keep the new position; cancellation or pointer loss discards that unfinished drag. Tap or hold the outline to open its settings, which offer left/top/width/height sliders alongside exact pixel fields. Values are measured on the displayed canvas, and opening settings preserves fractional and oversized saved values. Select a covered zone by holding Edit, then choosing its entry in Floating controls; its position and size sliders remain available even when another control covers the outline. Existing Buttons and app controls keep touch priority. Zone outlines use the same overlap order as Play.
+
+Moving or resizing a zone changes only its activation rectangle in the current editor orientation. Member Button sizes, group spacing/restoration positions, ring dimensions, starting role, and the other saved orientation remain unchanged. Profile Save retains the edited rectangle through the existing save path.
+
+Output cleanup cancels unfinished Edit drags while retaining the zone outlines. Leaving and returning to the app in Edit mode keeps the zones available; page and orientation rendering replace their outlines normally.
+
 ## Play
 
 A real initial DOWN on otherwise unused zone space places and activates the selected starting target once. Reveal-only groups produce no initial output. Existing visible controls and app UI take precedence. One instance per zone stays visible after lift until its scoped Finish; many instances may coexist.
@@ -65,3 +71,9 @@ JVM tests exercise pure ring transitions, pulse timing, ownership, geometry, ser
 - A separately authorized in-place ADB update succeeded on the connected S22. Signing certificates matched, the installed APK matched the built APK, and all 116 saved files retained identical names and SHA-256 hashes. The previous APK and a verified saved-file snapshot were retained in isolated local output, outside Git.
 
 The app was not launched for touch/game testing. The installed receiver EXE was not rebuilt or replaced; new floating activation remains gated until that receiver acknowledges the new capability and activation barrier.
+
+## Zone editor verification - October 14, 2026
+
+The drag/slider update passed 312 JVM tests in each Android variant, Sideload APK and Play AAB packaging, and full lint with zero errors (201 Sideload warnings, 199 Play warnings). The added regression checks that a rectangle saved on a 1000 x 2000 canvas appears at half scale on 500 x 1000, preserves fractional dimensions, and stays unchanged when saved again on that canvas. Source review covered gesture cancellation, pause/resume, overlapping outlines, and resize/rotation guards; physical phone dragging and resizing were not exercised automatically.
+
+The separately authorized in-place ADB update verified matching signing certificates and installed APK bytes. All 117 saved files matched the fresh pre-update snapshot by filename and SHA-256. No receiver source or protocol changes are needed for this editor update.

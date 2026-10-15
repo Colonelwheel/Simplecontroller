@@ -3,6 +3,13 @@ package com.example.simplecontroller.model
 import com.example.simplecontroller.ui.floatingBounds
 import com.example.simplecontroller.ui.placeFloatingBounds
 
+/** Resolve saved activation pixels once against the canvas currently being edited/displayed. */
+fun FloatingZoneGeometry.zoneOnCanvas(width: Float, height: Float): ControlGeometry {
+    val sx = if (canvasWidth > 0f && width > 0f) width / canvasWidth else 1f
+    val sy = if (canvasHeight > 0f && height > 0f) height / canvasHeight else 1f
+    return ControlGeometry(zone.x * sx, zone.y * sy, zone.w * sx, zone.h * sy)
+}
+
 /** Keep Button group sizes and relative spacing when deriving an orientation. */
 fun ControllerPage.controlsForFloatingOrientation(
     orientation:LayoutOrientation,width:Float,height:Float

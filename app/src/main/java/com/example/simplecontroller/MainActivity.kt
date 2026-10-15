@@ -179,13 +179,15 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     backend.pendingPayloads = it.state::payloadsForSlot
                 }
             },
-            { zone -> floatingEditor.edit(zone) }
+            { zone -> floatingEditor.edit(zone) },
+            ::moveFloatingZone
         )
     }
     private val floatingEditor: FloatingControlsEditor by lazy {
         FloatingControlsEditor(
             this, canvas, { controls }, { controllerProfile.page(displayedPageId)!! },
             { activeLayoutOrientation }, ::replaceFloatingZones,
+            ::syncDisplayedPageIntoProfile,
             { syncDisplayedPageIntoProfile(); layoutManager.showSaveDialog() }
         )
     }
@@ -196,6 +198,20 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             if (it.id == displayedPageId) it.copy(floatingZones = zones) else it
         })
         renderPage(displayedPageId, safeToDetach = true)
+    }
+
+    /** Commit a completed Edit drag without removing the view that owns the gesture. */
+    private fun moveFloatingZone(zoneId: String, rectangle: ControlGeometry): Boolean {
+        if (!GlobalSettings.editMode || orientationRenderPending) return false
+        if (controllerProfile.page(displayedPageId)?.floatingZones?.none { it.id == zoneId } != false) return false
+        syncDisplayedPageIntoProfile()
+        controllerProfile = controllerProfile.copy(pages = controllerProfile.pages.map { page ->
+            if (page.id != displayedPageId) page else page.copy(floatingZones = page.floatingZones.map { zone ->
+                if (zone.id != zoneId) zone else zone.withGeometry(activeLayoutOrientation,
+                    FloatingZoneGeometry(canvas.width.toFloat(),canvas.height.toFloat(),rectangle))
+            })
+        })
+        return true
     }
 
     fun floatingAction(action: FloatingLocalAction, targetId: String) = floatingControls.action(action, targetId)
@@ -2174,7 +2190,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun releaseOutputs(showFeedback: Boolean) {
-        floatingControls.clear()
+        floatingControls.clear(removeEditorViews = false)
         if (showFeedback) triggerReleaseAllHaptic()
         ReleaseAllCoordinator.releaseAll { status ->
             if (!showFeedback) return@releaseAll

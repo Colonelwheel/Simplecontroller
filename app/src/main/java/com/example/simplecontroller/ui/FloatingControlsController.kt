@@ -1,9 +1,6 @@
 package com.example.simplecontroller.ui
 
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Button
@@ -24,7 +21,8 @@ class FloatingControlsController(
     private val orientation: () -> LayoutOrientation,
     private val createControl: (Control) -> ControlView,
     private val createRing: (FloatingZone) -> FloatingRingView,
-    private val editZone: (FloatingZone) -> Unit
+    private val editZone: (FloatingZone) -> Unit,
+    private val moveZone: (String, ControlGeometry) -> Boolean
 ) {
     private data class Instance(
         val zone: FloatingZone, val views: List<View>, val finishView: View?,
@@ -41,11 +39,32 @@ class FloatingControlsController(
     private var consumed = false
     private val density get() = context.resources.displayMetrics.density
 
+    init {
+        canvas.addOnLayoutChangeListener { _,left,top,right,bottom,oldLeft,oldTop,oldRight,oldBottom ->
+            if (GlobalSettings.editMode && editorViews.isNotEmpty() &&
+                (right-left != oldRight-oldLeft || bottom-top != oldBottom-oldTop)) canvas.post {
+                if (GlobalSettings.editMode && editorViews.isNotEmpty() &&
+                    canvas.width == right-left && canvas.height == bottom-top) bindPage()
+            }
+        }
+    }
+
     fun bindPage() {
+        editorViews.filterIsInstance<FloatingZoneOutline>().forEach { it.cancelEditingGesture() }
+        editorViews.forEach(canvas::removeView)
+        editorViews.clear()
         if (!GlobalSettings.editMode) return
-        page().floatingZones.forEach { zone ->
-            val outline = ZoneOutline(context,zone.name.ifBlank { "Floating zone" },zone.enabled) { editZone(zone) }
-            addAt(outline,zoneRect(zone))
+        val boundPage = page().id
+        val boundOrientation = orientation()
+        page().floatingZones.asReversed().forEach { zone ->
+            val rectangle = zoneRect(zone)
+            val outline = FloatingZoneOutline(context,zone.name.ifBlank { "Floating zone" },zone.enabled,rectangle,
+                onEdit = { page().floatingZones.firstOrNull { it.id == zone.id }?.let(editZone) },
+                onMoved = { rectangle ->
+                    GlobalSettings.editMode && page().id == boundPage && orientation() == boundOrientation &&
+                        moveZone(zone.id,rectangle)
+                })
+            addAt(outline,rectangle)
             canvas.removeView(outline)
             canvas.addView(outline,0)
             editorViews += outline
@@ -53,17 +72,16 @@ class FloatingControlsController(
     }
     fun hiddenMemberIds(): Set<String> = if (GlobalSettings.editMode) emptySet()
         else page().floatingZones.flatMap { it.memberIds }.toSet()
-    fun clear() {
+    fun clear(removeEditorViews:Boolean=true) {
         capture=null
         instances.keys.toList().forEach(::finish)
-        editorViews.forEach(canvas::removeView);editorViews.clear()
+        editorViews.filterIsInstance<FloatingZoneOutline>().forEach { it.cancelEditingGesture() }
+        if(removeEditorViews) { editorViews.forEach(canvas::removeView);editorViews.clear() }
         consumed=false
     }
     private fun zoneRect(zone: FloatingZone): ControlGeometry {
         val source=zone.geometryFor(orientation()) ?: zone.geometryFor(orientation().opposite())!!
-        val sx=if(source.canvasWidth>0f) canvas.width/source.canvasWidth else 1f
-        val sy=if(source.canvasHeight>0f) canvas.height/source.canvasHeight else 1f
-        return source.zone.let { ControlGeometry(it.x*sx,it.y*sy,it.w*sx,it.h*sy) }
+        return source.zoneOnCanvas(canvas.width.toFloat(),canvas.height.toFloat())
     }
     private fun usable()=ControlGeometry(canvas.paddingLeft.toFloat(),canvas.paddingTop.toFloat(),
         (canvas.width-canvas.paddingLeft-canvas.paddingRight).toFloat(),
@@ -238,16 +256,5 @@ class FloatingControlsController(
         AlertDialog.Builder(context).setTitle("Finish floating control")
             .setItems(entries.map { it.zone.name.ifBlank { it.zone.id } }.toTypedArray()) { _,i -> finish(entries[i].zone.id) }
             .setNegativeButton("Cancel",null).show()
-    }
-}
-
-private class ZoneOutline(context:Context,private val label:String,private val enabled:Boolean,onEdit:()->Unit):View(context) {
-    private val paint=Paint(Paint.ANTI_ALIAS_FLAG)
-    init { isClickable=true;setOnClickListener { onEdit() };contentDescription="Edit floating zone "+label }
-    override fun onDraw(canvas:Canvas) {
-        paint.color=if(enabled) Color.rgb(70,150,220) else Color.GRAY
-        paint.style=Paint.Style.STROKE;paint.strokeWidth=3f;canvas.drawRect(2f,2f,width-2f,height-2f,paint)
-        paint.style=Paint.Style.FILL;paint.textSize=16f*resources.displayMetrics.scaledDensity
-        canvas.drawText(label,8f,24f*resources.displayMetrics.density,paint)
     }
 }
