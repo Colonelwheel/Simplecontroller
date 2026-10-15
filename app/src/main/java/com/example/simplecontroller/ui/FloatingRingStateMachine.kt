@@ -815,7 +815,14 @@ class FloatingRingStateMachine(
             if (dx >= 0f) StickDirection.RIGHT else StickDirection.LEFT
         } else if (dy >= 0f) StickDirection.DOWN else StickDirection.UP
         if (previous != null && previous != proposed) {
-            val oldAxis = if (previous == StickDirection.LEFT || previous == StickDirection.RIGHT) abs(dx) else abs(dy)
+            // Signed projection allows reversal on the same axis while keeping the 12 dp
+            // margin between neighboring directional sectors.
+            val oldAxis = when (previous) {
+                StickDirection.LEFT -> -dx
+                StickDirection.RIGHT -> dx
+                StickDirection.UP -> -dy
+                StickDirection.DOWN -> dy
+            }
             val newAxis = if (proposed == StickDirection.LEFT || proposed == StickDirection.RIGHT) abs(dx) else abs(dy)
             if (newAxis < oldAxis + 12f * geometry.density) return previous
         }

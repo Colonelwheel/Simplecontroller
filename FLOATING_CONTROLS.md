@@ -10,6 +10,8 @@ In Edit, use Add -> Floating ring or Floating Button / group from selection. Hol
 
 For a group, draw a rectangle and lift. The preview initially selects fully contained ungrouped Buttons; each checkbox adjusts membership with one tap. Configure the zone and select its initial member, or explicitly select Reveal only. A single Button starts on its sole member. Ordinary Button properties retain their existing editor, payload, Hold, Turbo, Auto-Tap, Button Aim and directional validation.
 
+After choosing rectangle selection, the phone's Back button cancels drawing, including before the first touch, and keeps the editor open. Cancellation opens no member preview and changes no controls. Selection completes once; overlay removal waits until touch dispatch finishes, so Android's cleanup cancellation cannot remove it twice. Pause, page/orientation changes, and leaving Edit cancel unfinished or queued selection; stale canvas-size results are discarded.
+
 Conversion changes the working layout and blocks pause autosave until an explicit Save. The prompt offers Save a copy so the previous saved profile stays available. Save under a new name to preserve it. Zone resizing changes activation geometry only. In Edit, member movement updates the group's relative arrangement while its restoration geometry remains unchanged. Ungroup restores both original orientation arrangements while retaining the latest Button settings.
 
 Zone outlines are visible in Edit and dormant zones are invisible in Play. Edit a zone to change its rectangle, enabled state, saved starting role, ring settings, group Swipe policy, stacking order, duplication or ungrouping. A duplicate receives detached settings and remapped member/zone/knob references.
@@ -40,6 +42,8 @@ Each of up to three aim knobs chooses None, Hold, Tap, Release-shot or Repeat. A
 
 Boost drag stages are cumulative; direct taps activate only the selected stage. Each stage selects Tap, Hold or Repeat. Hold latch after threshold exit and Repeat continuation after exit are separate from lift retention. Threshold hysteresis avoids MOVE-stream retriggering. Defaults are 120/160 dp thresholds, 35 ms press and 35 ms gap, zero Boost-2 delay, exit cancellation enabled, and latch/continuation/retention disabled. Direct-tap areas have finite saved inner/outer bounds and start disabled.
 
+Boost direction changes recognize Up/Down and Left/Right reversals within a gesture and after lift. Neighboring direction sectors keep their 12 dp margin. Blank opposite-direction bindings cannot reuse a previous direction's payload; an already started Tap still completes normally. Deliberately latched or retained outputs keep their existing retention semantics.
+
 Return-fire is off by default. When enabled, only a qualifying same-pointer boost visit followed by inner return starts the selected delay. Aim resumes immediately. Exit cancellation defaults on: leaving cancels and a newly qualified return starts a complete new delay. With it off, the original deadline continues without duplicate/restarted work; this does not enable outside aiming or make an otherwise canceled release-shot eligible.
 
 Boost-2 entry delay is separate from return-fire delay. It freezes the selected payload/action. UP before an unexpired deadline cancels the action completely, including with future retention enabled. A delayed Release-shot arms at its deadline and fires only on an eligible later lift; CANCEL and Finish never fire it. There is at most one waiting finite shot with a real release gap. Conflicting fire sources are rejected or indicated rather than stealing owners.
@@ -54,9 +58,13 @@ Mouse suppression is opt-in. Engagement claims suppression even while stationary
 
 ## Saved formats and reusable profiles
 
-Floating configuration or stored suppression/scoped actions require nested controller format 10, including inactive configuration. Legacy profiles retain their existing conditional formats. Transfer envelope 1 still checks nested formats before decoding. A new named boost library requires backup envelope 2 independently of controller format; historical backup 1 remains readable.
+Floating configuration or stored suppression/scoped actions require nested controller format 10, including inactive configuration. Legacy profiles retain their existing conditional formats. Transfer envelope 1 still checks nested formats before decoding. A named boost library requires backup envelope 2 independently of controller format; a full-ring preset library requires backup envelope 3. Historical backup 1 and 2 remain readable.
 
 Save a named boost profile as a frozen snapshot. Apply boost settings only preserves layers, placement, movement, zone geometry and all normal/fine aiming tuning. An optional saved ring aiming/actions preset has its own explicit apply action and validates knob-slot mapping before any change. Editing/deleting a reusable profile does not alter previously applied controls.
+
+To move a complete tested ring into another controller profile, open its zone settings and choose Save full ring / activation zone preset. This captures the current draft's name, enabled switches, both saved activation rectangles, ring dimensions, movement, normal/fine aiming, knob positions and actions, ADS/fire, boosts, and starting settings. It saves configuration only, with no live position, held output or timers. Grouped Buttons are excluded from this library.
+
+In the target profile, hold Edit, choose Floating controls -> Saved full ring presets, select the preset, and choose Add a new ring to this profile. Review the zone editor and Save to add it. Each added ring has a new zone ID and independent settings; existing zones and controls remain in place. Saved canvas dimensions retain the usual proportional activation-zone placement when displayed on a different canvas. Rename/delete affect the reusable preset only. All-profile backup/restore includes this library and adds imported presets without replacing existing ones.
 
 Summoned position/visibility, pointers, timers, suppression, ownership and armed shots are never serialized. Pause, page/profile/orientation/transport/player change, disconnect, removal and existing hard cleanup end affected sessions.
 
@@ -87,3 +95,9 @@ Phone logs identified NetworkOnMainThreadException in the heartbeat, which close
 Both Android variants passed 315 JVM tests, APK/AAB packaging, and full lint with zero errors (201 Sideload warnings, 199 Play warnings). Three local UDP regressions verify worker-thread dispatch with the unchanged PING payload, no send on an obsolete route, and failure reporting only for a current socket. These are JVM socket checks, not phone touch or gameplay tests.
 
 The authorized in-place ADB update verified matching signing certificates and installed APK bytes. All 118 saved files retained identical names and SHA-256 hashes against the fresh pre-update snapshot. The app was not launched for touch/game testing; no receiver source or EXE change was needed.
+
+## Selection, direction and full-ring preset verification - October 15, 2026
+
+Both Android variants passed 338 JVM tests, APK/AAB packaging, and full lint with zero errors (201 Sideload warnings, 199 Play warnings). The 23 added tests cover eight boost direction/retention cases, five selection-completion cases and ten complete preset/backup cases. Examples include Up-to-Down reversal across lift without a duplicate Up Tap, preserved 12 dp neighboring-sector hysteresis, reentrant removal cancellation completing once, Back before drawing opening no preview, and a full preset retaining disabled settings and both orientation rectangles through serialization. Selection checks use a synthetic callback queue; they do not exercise Android's native view dispatch or Back button on hardware.
+
+The authorized signing-compatible in-place ADB update verified the installed APK against the built APK. All 118 saved files retained identical names and SHA-256 hashes against a fresh pre-update snapshot. Phone drawing, native Back, full-preset dialogs and gameplay were not automatically exercised. Shared-RT ownership behavior, receiver source and the receiver EXE remain unchanged.

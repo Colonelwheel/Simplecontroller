@@ -183,13 +183,17 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             ::moveFloatingZone
         )
     }
-    private val floatingEditor: FloatingControlsEditor by lazy {
+    private val floatingEditorDelegate = lazy {
         FloatingControlsEditor(
             this, canvas, { controls }, { controllerProfile.page(displayedPageId)!! },
             { activeLayoutOrientation }, ::replaceFloatingZones,
             ::syncDisplayedPageIntoProfile,
             { syncDisplayedPageIntoProfile(); layoutManager.showSaveDialog() }
         )
+    }
+    private val floatingEditor: FloatingControlsEditor by floatingEditorDelegate
+    private fun cancelFloatingSelection() {
+        if(floatingEditorDelegate.isInitialized()) floatingEditor.cancelSelection()
     }
 
     private fun replaceFloatingZones(zones: List<FloatingZone>) {
@@ -1441,7 +1445,8 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                             dialog.dismiss()
                             val importedReusable = result.touchAimCalibrationCount +
                                 result.touchAimManualProfileCount + result.buttonAimProfileCount +
-                                result.stickDirectionalProfileCount + result.floatingBoostProfileCount
+                                result.stickDirectionalProfileCount + result.floatingBoostProfileCount +
+                                result.floatingRingPresetCount
                             Toast.makeText(
                                 this@MainActivity,
                                 "Imported ${result.controllerProfileCount} controller and " +
@@ -1489,6 +1494,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
      * Clear all control views
      */
     override fun clearControlViews() {
+        cancelFloatingSelection()
         floatingControls.clear()
         cancelTouchAimCalibration("Calibration stopped because the layout changed.")
         canvas.children.filter { it.tag == "control" }.toList()
@@ -1553,6 +1559,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun clearControlViewsSafely() {
+        cancelFloatingSelection()
         floatingControls.clear()
         cancelTouchAimCalibration("Calibration stopped because the page changed.")
         canvas.children.filterIsInstance<ControlView>().toList().forEach { view ->
@@ -2190,6 +2197,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun releaseOutputs(showFeedback: Boolean) {
+        cancelFloatingSelection()
         floatingControls.clear(removeEditorViews = false)
         if (showFeedback) triggerReleaseAllHaptic()
         ReleaseAllCoordinator.releaseAll { status ->

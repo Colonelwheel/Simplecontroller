@@ -485,6 +485,116 @@ class FloatingRingStateMachineTest {
         assertEquals(1, f.backend.events.count { it == "boost1:X360B" })
     }
 
+    private fun directionalBoost(action: RingAction = RingAction.HOLD) = FloatingRingConfig(
+        boost1 = RingBoostSettings(enabled = true, action = action,
+            directionalPayloads = DirectionalCommands(
+                up = "X360A", down = "X360B", left = "X360X", right = "X360Y"))
+    )
+
+    @Test fun verticalBoostReversal_changesBothWaysWithinOneGesture() {
+        val f = Fixture(directionalBoost())
+        assertTrue(f.down())
+        f.move(125f); assertEquals("X360A", f.backend.held["boost1"])
+        f.move(-125f); assertEquals("X360B", f.backend.held["boost1"])
+        f.move(125f); assertEquals("X360A", f.backend.held["boost1"])
+    }
+
+    @Test fun horizontalBoostReversal_changesBothWaysWithinOneGesture() {
+        val f = Fixture(directionalBoost())
+        assertTrue(f.down())
+        f.state.sample(7, f.cx - 125f, f.cy, f.clock.now)
+        assertEquals("X360X", f.backend.held["boost1"])
+        f.state.sample(7, f.cx + 125f, f.cy, f.clock.now)
+        assertEquals("X360Y", f.backend.held["boost1"])
+        f.state.sample(7, f.cx - 125f, f.cy, f.clock.now)
+        assertEquals("X360X", f.backend.held["boost1"])
+    }
+
+    @Test fun verticalBoostReversal_changesBothWaysAcrossLifts() {
+        val f = Fixture(directionalBoost())
+        assertTrue(f.down()); f.move(125f); f.up(125f)
+        assertFalse("boost1" in f.backend.held)
+        assertTrue(f.down()); f.move(-125f)
+        assertEquals("X360B", f.backend.held["boost1"])
+        f.up(-125f)
+        assertFalse("boost1" in f.backend.held)
+        assertTrue(f.down()); f.move(125f)
+        assertEquals("X360A", f.backend.held["boost1"])
+    }
+
+    @Test fun horizontalBoostReversal_changesBothWaysAcrossLifts() {
+        val f = Fixture(directionalBoost())
+        assertTrue(f.down())
+        f.state.sample(7, f.cx - 125f, f.cy, f.clock.now)
+        f.state.up(7, f.cx - 125f, f.cy, f.clock.now)
+        assertFalse("boost1" in f.backend.held)
+        assertTrue(f.down())
+        f.state.sample(7, f.cx + 125f, f.cy, f.clock.now)
+        assertEquals("X360Y", f.backend.held["boost1"])
+        f.state.up(7, f.cx + 125f, f.cy, f.clock.now)
+        assertFalse("boost1" in f.backend.held)
+        assertTrue(f.down())
+        f.state.sample(7, f.cx - 125f, f.cy, f.clock.now)
+        assertEquals("X360X", f.backend.held["boost1"])
+    }
+
+    @Test fun oppositeBlankTapDirection_doesNotQueueAnotherPriorDirectionPulse() {
+        val f = Fixture(FloatingRingConfig(boost1 = RingBoostSettings(enabled = true,
+            action = RingAction.TAP, pulsePressMs = 20, pulseGapMs = 80,
+            directionalPayloads = DirectionalCommands(up = "X360A"))))
+        assertTrue(f.down()); f.move(125f)
+        assertEquals("X360A", f.backend.held["boost1"])
+        f.move(0f); f.move(-125f)
+        // The original Tap completes; a blank Down binding must not queue another Up Tap.
+        f.clock.advance(19); assertEquals("X360A", f.backend.held["boost1"])
+        f.clock.advance(1); assertFalse("boost1" in f.backend.held)
+        f.clock.advance(1000)
+        assertEquals(1, f.backend.events.count { it == "boost1:X360A" })
+        assertFalse("boost1" in f.backend.held)
+    }
+
+    @Test fun oppositeBlankTapDirection_afterLiftDoesNotReusePreviousPayload() {
+        val f = Fixture(FloatingRingConfig(boost1 = RingBoostSettings(enabled = true,
+            action = RingAction.TAP, directionalPayloads = DirectionalCommands(up = "X360A"))))
+        assertTrue(f.down()); f.move(125f); f.up(125f)
+        f.clock.advance(1000)
+        assertTrue(f.down()); f.move(-125f); f.up(-125f)
+        f.clock.advance(1000)
+        assertEquals(1, f.backend.events.count { it == "boost1:X360A" })
+        assertFalse("boost1" in f.backend.held)
+    }
+
+    @Test fun neighboringBoostDirections_keepTwelveDpHysteresisInBothDirections() {
+        val f = Fixture(directionalBoost())
+        assertTrue(f.down())
+        f.state.sample(7, f.cx + 125f, f.cy, f.clock.now)
+        assertEquals("X360Y", f.backend.held["boost1"])
+        f.state.sample(7, f.cx + 100f, f.cy - 111f, f.clock.now)
+        assertEquals("X360Y", f.backend.held["boost1"])
+        f.state.sample(7, f.cx + 100f, f.cy - 112f, f.clock.now)
+        assertEquals("X360A", f.backend.held["boost1"])
+        f.state.sample(7, f.cx + 123f, f.cy - 112f, f.clock.now)
+        assertEquals("X360A", f.backend.held["boost1"])
+        f.state.sample(7, f.cx + 124f, f.cy - 112f, f.clock.now)
+        assertEquals("X360Y", f.backend.held["boost1"])
+    }
+
+    @Test fun oppositeMovement_preservesDeliberateLatchedAndRetainedBoostPayloads() {
+        listOf(false, true).forEach { latch ->
+            val base = directionalBoost()
+            val f = Fixture(base.copy(boost1 = base.boost1.copy(latchOnExit = latch, retainOnLift = true)))
+            assertTrue(f.down()); f.move(125f)
+            if (latch) {
+                f.move(-125f)
+                assertEquals("X360A", f.backend.held["boost1"])
+            }
+            f.up(if (latch) -125f else 125f)
+            assertTrue(f.down()); f.move(-125f)
+            assertEquals("latch=$latch", "X360A", f.backend.held["boost1"])
+            assertTrue(f.backend.events.none { it == "boost1:X360B" })
+        }
+    }
+
     @Test fun endedFineAdsClaim_doesNotMakeLaterBoostEntryFineBeforeItsNewReturn() {
         val base = combat()
         val cfg = base.copy(aim = base.aim.copy(fine = RingFineAimSettings(enabled = true)),

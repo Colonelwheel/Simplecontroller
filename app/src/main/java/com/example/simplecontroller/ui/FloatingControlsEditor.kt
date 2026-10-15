@@ -8,12 +8,14 @@ import android.text.InputType
 import android.view.MotionEvent
 import android.view.View
 import android.widget.*
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.children
 import androidx.core.widget.doAfterTextChanged
 import com.example.simplecontroller.MainActivity
 import com.example.simplecontroller.model.*
 import com.example.simplecontroller.io.FloatingBoostProfileStore
+import com.example.simplecontroller.io.FloatingRingPresetStore
 import com.example.simplecontroller.io.detachedControllerPageCopy
 import com.example.simplecontroller.io.floatingLocalActionError
 import java.util.UUID
@@ -30,14 +32,20 @@ class FloatingControlsEditor(
     private val syncPage:()->Unit,
     private val saveProfileCopy:()->Unit
 ) {
+    private var selection: FloatingSelectionSession<ControlGeometry>? = null
+    private var selectionBack: OnBackPressedCallback? = null
+    private var selectionGeneration = 0L
     private fun id()=UUID.randomUUID().toString()
     private fun message(text:String)=Toast.makeText(context,text,Toast.LENGTH_LONG).show()
     private fun geometry(c:Control)=ControlGeometry(c.x,c.y,c.w,c.h)
     fun showManager() {
         val zones=page().floatingZones
-        val labels=listOf("Add floating ring","Create floating Button / group from rectangle")+zones.map { "Edit "+it.name.ifBlank { it.id } }
+        val labels=listOf("Add floating ring","Create floating Button / group from rectangle","Saved full ring presets")+
+            zones.map { "Edit "+it.name.ifBlank { it.id } }
         AlertDialog.Builder(context).setTitle("Floating controls")
-            .setItems(labels.toTypedArray()) { _,i -> when(i) { 0->addRing();1->selectButtons();else->edit(zones[i-2]) } }
+            .setItems(labels.toTypedArray()) { _,i -> when(i) {
+                0->addRing();1->selectButtons();2->ringPresets();else->edit(zones[i-3])
+            } }
             .setNegativeButton("Cancel",null).show()
     }
     fun addRing() {
@@ -49,14 +57,49 @@ class FloatingControlsEditor(
     }
     fun selectButtons() {
         if(!GlobalSettings.editMode) return
-        val overlay=RectangleSelection(context) { rect ->
-            val selection=canvas.children.filterIsInstance<RectangleSelection>().firstOrNull()
-            val canvasRect=rect?.copy(x=rect.x+(selection?.x ?: 0f),y=rect.y+(selection?.y ?: 0f))
-            canvas.children.filterIsInstance<RectangleSelection>().toList().forEach(canvas::removeView)
-            if(rect==null) return@RectangleSelection
-            previewMembers(canvasRect!!)
+        cancelSelection()
+        val generation=selectionGeneration
+        val sourcePage=page().id
+        val sourceOrientation=orientation()
+        val sourceCanvas=listOf(canvas.width,canvas.height,canvas.paddingLeft,canvas.paddingTop,
+            canvas.paddingRight,canvas.paddingBottom)
+        val activity=context as? MainActivity
+        lateinit var overlay:RectangleSelection
+        lateinit var completion:FloatingSelectionSession<ControlGeometry>
+        val back=object:OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                completion.cancel()
+                remove()
+            }
         }
+        completion=FloatingSelectionSession(
+            post={ task->canvas.post { task() } },
+            removeOverlay={
+                if(overlay.parent===canvas) canvas.removeView(overlay)
+                back.remove()
+                if(selection===completion) { selection=null;selectionBack=null }
+            },
+            isCurrent={
+                generation==selectionGeneration && GlobalSettings.editMode && canvas.isAttachedToWindow &&
+                    activity?.isFinishing!=true && activity?.isDestroyed!=true &&
+                    page().id==sourcePage && orientation()==sourceOrientation &&
+                    sourceCanvas==listOf(canvas.width,canvas.height,canvas.paddingLeft,canvas.paddingTop,
+                        canvas.paddingRight,canvas.paddingBottom)
+            },
+            preview={ rect->previewMembers(rect.copy(x=rect.x+overlay.x,y=rect.y+overlay.y)) }
+        )
+        overlay=RectangleSelection(context,completion)
+        selection=completion
+        selectionBack=back
+        activity?.onBackPressedDispatcher?.addCallback(activity,back)
         canvas.addView(overlay,FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+    fun cancelSelection() {
+        selectionGeneration++
+        selectionBack?.remove()
+        selectionBack=null
+        selection?.cancel()
+        selection=null
     }
     private fun previewMembers(rect:ControlGeometry) {
         val used=page().floatingZones.flatMap { it.memberIds }.toSet()
@@ -104,6 +147,8 @@ class FloatingControlsEditor(
         val h=f.dimension("Zone height (px)",rectangle.h,canvas.height)
         var start:()->String={ source.startMemberId }
         var swipe:()->Boolean={source.groupSwipe}
+        fun currentDraft()=draft.copy(name=name(),enabled=enabled(),startMemberId=start(),groupSwipe=swipe())
+            .withGeometry(orientation(),FloatingZoneGeometry(canvas.width.toFloat(),canvas.height.toFloat(),ControlGeometry(x(),y(),w(),h())))
         if(source.kind!=FloatingZoneKind.RING) {
             val ids=source.memberIds
             start=f.choice("Initial Button (Reveal only produces no input)",
@@ -128,6 +173,11 @@ class FloatingControlsEditor(
                     .setPositiveButton("Done",null).show()
             }
             f.button("Save / apply named boost profiles") { boostProfiles(draft.ring!!) { draft=draft.copy(ring=it) } }
+            f.button("Save full ring / activation zone preset") {
+                try { saveRingPreset(currentDraft()) }
+                catch(error:IllegalArgumentException) { message(error.message ?: "Invalid zone setting.") }
+            }
+            f.note("A full ring preset includes both saved activation rectangles and all ring settings. Add it to another profile from Floating controls -> Saved full ring presets.")
             f.note("Boost boundaries are invisible in Play. Edit preview marks sectors beyond the canvas as unreachable. Disabled layers keep their settings.")
         }
         val existing=page().floatingZones.any { it.id==source.id }
@@ -141,8 +191,7 @@ class FloatingControlsEditor(
             }
         }
         dialog("Floating zone",f) {
-            val updated=draft.copy(name=name(),enabled=enabled(),startMemberId=start(),groupSwipe=swipe())
-                .withGeometry(orientation(),FloatingZoneGeometry(canvas.width.toFloat(),canvas.height.toFloat(),ControlGeometry(x(),y(),w(),h())))
+            val updated=currentDraft()
             val zones=if(existing) page().floatingZones.map { if(it.id==source.id) updated else it }
                 else page().floatingZones+updated
             page().copy(controls=controls(),floatingZones=zones).floatingValidationError()?.let { return@dialog it }
@@ -153,6 +202,46 @@ class FloatingControlsEditor(
                 .setPositiveButton("Save a copy") { _,_->saveProfileCopy() }.setNegativeButton("Keep editing",null).show()
             null
         }
+    }
+    private fun saveRingPreset(zone:FloatingZone) {
+        val f=Form(context)
+        val name=f.text("Preset name",zone.name)
+        f.note("Saves this ring's movement, aiming, firing, boosts, starting settings, enabled switches and both saved activation rectangles.")
+        dialog("Save full ring preset",f) {
+            val preset=zone.captureRingPreset(id(),name(),System.currentTimeMillis())
+                ?: return@dialog "The ring or zone settings are invalid."
+            val result=FloatingRingPresetStore.save(context,preset)
+            if(result.succeeded) null else result.error ?: "Could not save the ring preset."
+        }
+    }
+    private fun ringPresets() {
+        val presets=FloatingRingPresetStore.list(context)
+        if(presets.isEmpty()) {
+            message("No full ring presets are saved. Open a floating ring's settings to save one.")
+            return
+        }
+        AlertDialog.Builder(context).setTitle("Saved full ring presets")
+            .setItems(presets.map { it.name }.toTypedArray()) { _,index->
+                val preset=presets[index]
+                AlertDialog.Builder(context).setTitle(preset.name)
+                    .setItems(arrayOf("Add a new ring to this profile","Rename preset","Delete preset")) { _,action->
+                        when(action) {
+                            0->preset.instantiate()?.let { edit(it) }
+                                ?: message("This ring preset is invalid; the profile was left unchanged.")
+                            1->{ val f=Form(context);val name=f.text("Preset name",preset.name)
+                                dialog("Rename full ring preset",f) {
+                                    val result=FloatingRingPresetStore.rename(context,preset,name(),System.currentTimeMillis())
+                                    if(result.succeeded) null else result.error ?: "Could not rename the preset."
+                                }
+                            }
+                            2->AlertDialog.Builder(context).setTitle("Delete this full ring preset?")
+                                .setMessage("Rings already added to controller profiles keep their own settings.")
+                                .setPositiveButton("Delete") { _,_->
+                                    if(!FloatingRingPresetStore.delete(context,preset.id)) message("Could not delete the preset.")
+                                }.setNegativeButton("Cancel",null).show()
+                        }
+                    }.setNegativeButton("Cancel",null).show()
+            }.setNegativeButton("Cancel",null).show()
     }
     private fun ungroup(zone:FloatingZone) {
         val saved=zone.restorationGeometryFor(orientation())
@@ -420,7 +509,7 @@ private fun dialog(title:String,f:Form,save:()->String?) {
         }
     };d.show()
 }
-private class RectangleSelection(context:Context,private val finish:(ControlGeometry?)->Unit):View(context) {
+private class RectangleSelection(context:Context,private val completion:FloatingSelectionSession<ControlGeometry>):View(context) {
     private val paint=Paint(Paint.ANTI_ALIAS_FLAG);private var x0=0f;private var y0=0f;private var x1=0f;private var y1=0f
     init { isClickable=true;contentDescription="Draw a rectangle around Buttons. Release to preview members." }
     override fun onDraw(canvas:Canvas) {
@@ -430,11 +519,12 @@ private class RectangleSelection(context:Context,private val finish:(ControlGeom
         canvas.drawText("Draw around Buttons; lift to preview",16f,40f*resources.displayMetrics.density,paint)
     }
     override fun onTouchEvent(e:MotionEvent):Boolean {
+        if(completion.completed) return true
         when(e.actionMasked) {
             MotionEvent.ACTION_DOWN->{x0=e.x;y0=e.y;x1=x0;y1=y0}
             MotionEvent.ACTION_MOVE->{x1=e.x;y1=e.y}
-            MotionEvent.ACTION_UP->{x1=e.x;y1=e.y;finish(ControlGeometry(min(x0,x1),min(y0,y1),abs(x1-x0).coerceAtLeast(1f),abs(y1-y0).coerceAtLeast(1f)))}
-            MotionEvent.ACTION_CANCEL->finish(null)
+            MotionEvent.ACTION_UP->{x1=e.x;y1=e.y;completion.complete(ControlGeometry(min(x0,x1),min(y0,y1),abs(x1-x0).coerceAtLeast(1f),abs(y1-y0).coerceAtLeast(1f)))}
+            MotionEvent.ACTION_CANCEL->completion.complete(null)
         };invalidate();return true
     }
 }

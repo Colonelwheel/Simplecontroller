@@ -27,7 +27,7 @@ data class ProfileStoreBackupSnapshot<T>(
     val unreadableFileCount: Int
 )
 
-private class AtomicNamedProfileStore<T>(
+internal class AtomicNamedProfileStore<T>(
     private val tag: String,
     private val prefix: String,
     private val serializer: KSerializer<T>,

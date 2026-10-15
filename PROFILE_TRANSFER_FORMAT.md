@@ -74,7 +74,8 @@ The separate all-profile backup contains:
 - saved manual TouchAim profiles;
 - saved Button Aim profiles;
 - saved Directional/WASD and Stick+ profiles;
-- named floating boost profiles and optional ring aiming/action snapshots.
+- named floating boost profiles and optional ring aiming/action snapshots;
+- complete floating-ring zone presets, including both saved activation rectangles and all ring settings.
 
 Restore adds profiles without replacing existing ones. Controller-profile name collisions receive
 an `Imported` suffix. Reusable profiles receive new unique IDs and names when needed, and imported
@@ -87,7 +88,7 @@ transport settings, theme, the current-profile preference, and other app/device 
 ## Current constants and implementation
 
 - Transfer version: `1`
-- Maximum backup version: `2`; writers use `2` when the new boost library is present, otherwise `1`. Historical backup 1 remains readable; backup 1 containing the new library is rejected.
+- Maximum backup version: `3`; writers use `3` when the full-ring preset library is present, `2` for boost profiles without full-ring presets, otherwise `1`. Historical backups 1 and 2 remain readable. Nonempty boost libraries require at least version 2; nonempty full-ring preset libraries require version 3. Future envelope and nested preset versions are rejected before decoding.
 - Maximum nested controller-profile format: `10` (formats `2` through `9` remain importable)
 - Writers use `10` when floating/scoped configuration is stored, even disabled; otherwise
   `9` when a Button stores either boundary cancellation/re-arming option as true;

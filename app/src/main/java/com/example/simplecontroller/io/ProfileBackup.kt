@@ -3,6 +3,7 @@ package com.example.simplecontroller.io
 import android.content.Context
 import com.example.simplecontroller.model.ButtonAimProfile
 import com.example.simplecontroller.model.FloatingBoostProfile
+import com.example.simplecontroller.model.FloatingRingPreset
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.ControllerPage
 import com.example.simplecontroller.model.ControllerProfile
@@ -23,7 +24,8 @@ import java.util.UUID
 
 const val CONTROLLER_PROFILES_BACKUP_FILE_TYPE = "simplecontroller-profiles-backup"
 const val LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION = 1
-const val CONTROLLER_PROFILES_BACKUP_VERSION = 2
+const val FLOATING_BOOST_PROFILES_BACKUP_VERSION = 2
+const val CONTROLLER_PROFILES_BACKUP_VERSION = 3
 const val CONTROLLER_PROFILES_BACKUP_EXTENSION = ".simplecontroller-profiles-backup.json"
 
 @Serializable
@@ -42,12 +44,16 @@ data class ControllerProfilesBackup(
     val touchAimManualProfiles: List<TouchAimManualProfile> = emptyList(),
     val buttonAimProfiles: List<ButtonAimProfile> = emptyList(),
     val stickDirectionalProfiles: List<StickDirectionalProfile> = emptyList(),
-    val floatingBoostProfiles: List<FloatingBoostProfile> = emptyList()
+    val floatingBoostProfiles: List<FloatingBoostProfile> = emptyList(),
+    val floatingRingPresets: List<FloatingRingPreset> = emptyList()
 )
 
 /** New libraries need an envelope gate even when every nested controller uses legacy settings. */
-fun ControllerProfilesBackup.requiredBackupVersion(): Int =
-    if (floatingBoostProfiles.isNotEmpty()) CONTROLLER_PROFILES_BACKUP_VERSION else LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION
+fun ControllerProfilesBackup.requiredBackupVersion(): Int = when {
+    floatingRingPresets.isNotEmpty() -> CONTROLLER_PROFILES_BACKUP_VERSION
+    floatingBoostProfiles.isNotEmpty() -> FLOATING_BOOST_PROFILES_BACKUP_VERSION
+    else -> LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION
+}
 
 data class ControllerProfilesBackupLoadResult(
     val backup: ControllerProfilesBackup,
@@ -68,7 +74,8 @@ data class ControllerProfilesBackupImportResult(
     val buttonAimProfileCount: Int,
     val stickDirectionalProfileCount: Int,
     val warnings: List<String>,
-    val floatingBoostProfileCount: Int = 0
+    val floatingBoostProfileCount: Int = 0,
+    val floatingRingPresetCount: Int = 0
 )
 
 private val backupJson = Json {
@@ -115,16 +122,22 @@ fun createControllerProfilesBackup(
         "Stick directional"
     )
     val boostProfiles = FloatingBoostProfileStore.backupSnapshot(context).requireFullyReadable("Floating boost")
+    val ringPresets = FloatingRingPresetStore.backupSnapshot(context).requireFullyReadable("Floating ring")
 
     val backup = ControllerProfilesBackup(
-        backupVersion = if (boostProfiles.isNotEmpty()) CONTROLLER_PROFILES_BACKUP_VERSION else LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION,
+        backupVersion = when {
+            ringPresets.isNotEmpty() -> CONTROLLER_PROFILES_BACKUP_VERSION
+            boostProfiles.isNotEmpty() -> FLOATING_BOOST_PROFILES_BACKUP_VERSION
+            else -> LEGACY_CONTROLLER_PROFILES_BACKUP_VERSION
+        },
         activeControllerProfileName = activeProfileName,
         controllerProfiles = profiles,
         touchAimCalibrations = calibrations,
         touchAimManualProfiles = manualProfiles,
         buttonAimProfiles = buttonProfiles,
         stickDirectionalProfiles = stickProfiles,
-        floatingBoostProfiles = boostProfiles
+        floatingBoostProfiles = boostProfiles,
+        floatingRingPresets = ringPresets
     )
     validateControllerProfilesBackup(backup).backup
 }
@@ -189,6 +202,9 @@ fun decodeControllerProfilesBackup(text: String): ControllerProfilesBackupLoadRe
     require(backupVersion >= 2 || (objectValue["floatingBoostProfiles"] as? JsonArray).orEmpty().isEmpty()) {
         "Floating boost profiles require backup version 2."
     }
+    require(backupVersion >= 3 || (objectValue["floatingRingPresets"] as? JsonArray).orEmpty().isEmpty()) {
+        "Floating ring presets require backup version 3."
+    }
 
     requireNestedVersions(objectValue)
     val decoded = backupJson.decodeFromString<ControllerProfilesBackup>(normalizedText)
@@ -219,7 +235,8 @@ private fun requireNestedVersions(objectValue: JsonObject) {
         Triple("touchAimManualProfiles", "Manual TouchAim profile", TouchAimManualProfile.CURRENT_SCHEMA_VERSION),
         Triple("buttonAimProfiles", "Button Aim profile", ButtonAimProfile.CURRENT_SCHEMA_VERSION),
         Triple("stickDirectionalProfiles", "Stick directional profile", StickDirectionalProfile.CURRENT_SCHEMA_VERSION),
-        Triple("floatingBoostProfiles", "Floating boost profile", FloatingBoostProfile.CURRENT_SCHEMA_VERSION)
+        Triple("floatingBoostProfiles", "Floating boost profile", FloatingBoostProfile.CURRENT_SCHEMA_VERSION),
+        Triple("floatingRingPresets", "Floating ring preset", FloatingRingPreset.CURRENT_SCHEMA_VERSION)
     ).forEach { (key, label, current) ->
         entries(key).forEachIndexed { index, item ->
             val itemObject = item as? JsonObject
@@ -249,6 +266,9 @@ fun validateControllerProfilesBackup(
     }
     require(decoded.floatingBoostProfiles.isEmpty() || decoded.backupVersion >= 2) {
         "Floating boost profiles require backup version 2."
+    }
+    require(decoded.floatingRingPresets.isEmpty() || decoded.backupVersion >= 3) {
+        "Floating ring presets require backup version 3."
     }
     require(decoded.controllerProfiles.isNotEmpty()) {
         "An all-profiles backup must contain at least one controller profile."
@@ -286,6 +306,9 @@ fun validateControllerProfilesBackup(
     validateReusableProfiles(decoded.floatingBoostProfiles, "Floating boost profile") {
         it.validationError()?.let { error -> throw IllegalArgumentException(error) }
     }
+    validateReusableProfiles(decoded.floatingRingPresets, "Floating ring preset") {
+        it.validationError()?.let { error -> throw IllegalArgumentException(error) }
+    }
 
     return ControllerProfilesBackupLoadResult(
         decoded.copy(
@@ -320,6 +343,7 @@ private fun profileId(profile: Any): String = when (profile) {
     is ButtonAimProfile -> profile.id
     is StickDirectionalProfile -> profile.id
     is FloatingBoostProfile -> profile.id
+    is FloatingRingPreset -> profile.id
     else -> error("Unsupported reusable profile type.")
 }
 
@@ -329,6 +353,7 @@ private fun profileName(profile: Any): String = when (profile) {
     is ButtonAimProfile -> profile.name
     is StickDirectionalProfile -> profile.name
     is FloatingBoostProfile -> profile.name
+    is FloatingRingPreset -> profile.name
     else -> error("Unsupported reusable profile type.")
 }
 
@@ -353,6 +378,7 @@ fun importControllerProfilesBackup(
     val existingButton = ButtonAimProfileStore.list(context)
     val existingStick = StickDirectionalProfileStore.list(context)
     val existingBoost = FloatingBoostProfileStore.list(context)
+    val existingRings = FloatingRingPresetStore.list(context)
 
     fun freshId(reserved: MutableSet<String>): String {
         while (true) {
@@ -408,6 +434,13 @@ fun importControllerProfilesBackup(
         boostNames += name
         source.copy(id = freshId(boostIds), name = name)
     }
+    val ringNames = existingRings.mapTo(mutableListOf()) { it.name }
+    val ringIds = existingRings.mapTo(mutableSetOf()) { it.id.lowercase(Locale.ROOT) }
+    val ringPresets = backup.floatingRingPresets.map { source ->
+        val name = uniqueImportedProfileName(source.name, ringNames)
+        ringNames += name
+        source.copy(id = freshId(ringIds), name = name)
+    }
 
     val createdControllerNames = mutableListOf<String>()
     val createdCalibrationIds = mutableListOf<String>()
@@ -415,6 +448,7 @@ fun importControllerProfilesBackup(
     val createdButtonIds = mutableListOf<String>()
     val createdStickIds = mutableListOf<String>()
     val createdBoostIds = mutableListOf<String>()
+    val createdRingIds = mutableListOf<String>()
     try {
         calibrations.forEach { profile ->
             require(TouchAimCalibrationStore.save(context, profile).succeeded) {
@@ -446,6 +480,12 @@ fun importControllerProfilesBackup(
             }
             createdBoostIds += profile.id
         }
+        ringPresets.forEach { preset ->
+            require(FloatingRingPresetStore.save(context, preset).succeeded) {
+                "Could not save imported floating ring preset '${preset.name}'."
+            }
+            createdRingIds += preset.id
+        }
         controllers.forEach { named ->
             saveControllerProfile(context, named.name, named.profile).getOrThrow()
             createdControllerNames += named.name
@@ -473,6 +513,9 @@ fun importControllerProfilesBackup(
         require(boostProfiles.all { expected ->
             FloatingBoostProfileStore.list(context).any { it == expected }
         }) { "An imported floating boost profile could not be verified." }
+        require(ringPresets.all { expected ->
+            FloatingRingPresetStore.list(context).any { it == expected }
+        }) { "An imported floating ring preset could not be verified." }
 
         val activeName = requireNotNull(
             importedControllerNames[backup.activeControllerProfileName.lowercase(Locale.ROOT)]
@@ -491,7 +534,8 @@ fun importControllerProfilesBackup(
             buttonAimProfileCount = buttonProfiles.size,
             stickDirectionalProfileCount = stickProfiles.size,
             warnings = loaded.warnings,
-            floatingBoostProfileCount = boostProfiles.size
+            floatingBoostProfileCount = boostProfiles.size,
+            floatingRingPresetCount = ringPresets.size
         )
     } catch (failure: Throwable) {
         var rollbackComplete = true
@@ -512,6 +556,9 @@ fun importControllerProfilesBackup(
         }
         createdBoostIds.asReversed().forEach {
             rollbackComplete = FloatingBoostProfileStore.delete(context, it) && rollbackComplete
+        }
+        createdRingIds.asReversed().forEach {
+            rollbackComplete = FloatingRingPresetStore.delete(context, it) && rollbackComplete
         }
         if (!rollbackComplete) {
             throw IllegalStateException(
