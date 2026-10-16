@@ -1,0 +1,15 @@
+.venv/
+.scratch/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+models/
+*.task
+*.log
+private/
+deliveries/*/build/
+deliveries/*/pyinstaller-cache/
+deliveries/*/cache/
+deliveries/*/temp/
+integrations/receiver/.test-artifacts/

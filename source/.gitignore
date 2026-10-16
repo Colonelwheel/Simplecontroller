@@ -1,0 +1,14 @@
+# Local build output and developer configuration.
+**/build/
+**/dist/
+**/.gradle/
+**/.kotlin/
+**/.idea/
+**/__pycache__/
+**/.venv/
+**/local.properties
+**/*.pyc
+**/*.log
+**/*.keystore
+**/*.jks
+**/signing.properties

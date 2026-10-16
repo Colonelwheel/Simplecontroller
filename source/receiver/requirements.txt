@@ -1,0 +1,6 @@
+# Versions used to package the supplied Windows receiver.
+vgamepad==0.1.0
+keyboard==0.13.5
+mouse==0.7.1
+PyAutoGUI==0.9.54
+pyinstaller==6.22.2
