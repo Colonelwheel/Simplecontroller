@@ -31,13 +31,13 @@ class FloatingRingEditorPreview(
         val measuredWidth = resolveSize(desiredWidth, widthMeasureSpec)
         val canvasHeight = if (usableWidthPx > 0f) measuredWidth * usableHeightPx / usableWidthPx else measuredWidth.toFloat()
         setMeasuredDimension(measuredWidth,
-            resolveSize((canvasHeight + 146f * density).toInt(), heightMeasureSpec))
+            resolveSize((canvasHeight + (if (config.compactAimBoosts) 200f else 146f) * density).toInt(), heightMeasureSpec))
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val padding = 12f * density
-        val feedbackHeight = 136f * density
+        val feedbackHeight = (if (config.compactAimBoosts) 190f else 136f) * density
         if (usableWidthPx <= 0f || usableHeightPx <= 0f) {
             label(canvas, "Canvas is not measured yet.", padding, padding * 2f)
             return
@@ -74,11 +74,16 @@ class FloatingRingEditorPreview(
         listOf(RingBoostStage.ONE, RingBoostStage.TWO).forEach { stage ->
             val settings = config.boost(stage)
             val color = if (stage == RingBoostStage.ONE) Color.rgb(240, 194, 87) else Color.rgb(226, 119, 153)
-            circle(canvas, cx, cy, settings.distanceDp * density, settings.enabled, color, scale)
+            circle(canvas, cx, cy, geometry.boostDistance(stage, adjacentMovement = true), settings.enabled, color, scale)
             circle(canvas, cx, cy, settings.directInnerDistanceDp * density,
                 settings.enabled && settings.directTapEnabled, color, scale)
             circle(canvas, cx, cy, settings.directOuterDistanceDp * density,
                 settings.enabled && settings.directTapEnabled, color, scale)
+            if (config.compactAimBoosts) {
+                circle(canvas, cx, cy, geometry.boostDistance(stage, compactAim = true),
+                    settings.enabled && config.aim.enabled && config.aim.participateInBoosts,
+                    color, scale, compactReference = true)
+            }
         }
         paint.pathEffect = null
         paint.color = Color.WHITE
@@ -97,10 +102,11 @@ class FloatingRingEditorPreview(
         val canvasRect = RingRect(0f, 0f, usableWidthPx, usableHeightPx)
         listOf(RingBoostStage.ONE, RingBoostStage.TWO).forEachIndexed { index, stage ->
             val settings = config.boost(stage)
-            val unreachable = geometry.unreachableDirections(stage, origin, canvasRect)
+            val unreachable = geometry.unreachableDirections(stage, origin, canvasRect, adjacentMovement = true)
             val blocked = if (unreachable.isEmpty()) "all four threshold directions reachable" else
                 "unreachable: ${unreachable.joinToString()}"
-            label(canvas, "Boost ${index + 1} ${enabled(settings.enabled)} · $blocked", padding,
+            val reference = if (config.adjacentMovementBoosts) "Move B${index + 1}" else "Boost ${index + 1}"
+            label(canvas, "$reference ${enabled(settings.enabled)} · $blocked", padding,
                 feedbackY + (36f + index * 18f) * density)
         }
         label(canvas, "Dashed = disabled · small circles = knob targets", padding,
@@ -109,13 +115,30 @@ class FloatingRingEditorPreview(
             feedbackY + 90f * density)
         label(canvas, "Existing controls may further limit placement.", padding,
             feedbackY + 108f * density)
+        if (config.compactAimBoosts) {
+            val participates = config.aim.enabled && config.aim.participateInBoosts
+            label(canvas, "Dotted = compact Aim · participation ${enabled(participates)}", padding,
+                feedbackY + 126f * density)
+            listOf(RingBoostStage.ONE, RingBoostStage.TWO).forEachIndexed { index, stage ->
+                val unreachable = geometry.unreachableDirections(stage, origin, canvasRect, compactAim = true)
+                val blocked = if (unreachable.isEmpty()) "all four directions reachable" else
+                    "unreachable: ${unreachable.joinToString()}"
+                label(canvas, "Aim B${index + 1} ${enabled(participates && config.boost(stage).enabled)} · $blocked", padding,
+                    feedbackY + (144f + index * 18f) * density)
+            }
+        }
     }
 
-    private fun circle(canvas: Canvas, x: Float, y: Float, radius: Float, enabled: Boolean, color: Int, scale: Float) {
+    private fun circle(canvas: Canvas, x: Float, y: Float, radius: Float, enabled: Boolean, color: Int, scale: Float,
+                       compactReference: Boolean = false) {
         paint.style = Paint.Style.STROKE
         paint.color = color
         paint.strokeWidth = 1.5f * density / scale
-        paint.pathEffect = if (enabled) null else DashPathEffect(floatArrayOf(5f * density / scale, 4f * density / scale), 0f)
+        paint.pathEffect = when {
+            compactReference -> DashPathEffect(floatArrayOf(2f * density / scale, 3f * density / scale), 0f)
+            enabled -> null
+            else -> DashPathEffect(floatArrayOf(5f * density / scale, 4f * density / scale), 0f)
+        }
         canvas.drawCircle(x, y, radius, paint)
     }
 

@@ -144,6 +144,8 @@ class FloatingControlsEditor(
         val f=Form(context)
         val name=f.text("Name",source.name)
         val enabled=f.flag("Activation zone enabled",source.enabled)
+        val finishIgnoresSwipes=f.flag("Finish ignores swipes",source.finishIgnoresSwipes)
+        f.note("When enabled, Finish needs a new touch. Sliding or lifting over it keeps the captured gesture's normal behavior.")
         val current=source.geometryFor(orientation()) ?: source.geometryFor(orientation().opposite())!!
         val rectangle=current.zoneOnCanvas(canvas.width.toFloat(),canvas.height.toFloat())
         f.note("Drag the outline in Edit to move the zone. Tap or hold it for these settings. Covered zones can be selected from the Floating controls menu.")
@@ -153,7 +155,8 @@ class FloatingControlsEditor(
         val h=f.dimension("Zone height (px)",rectangle.h,canvas.height)
         var start:()->String={ source.startMemberId }
         var swipe:()->Boolean={source.groupSwipe}
-        fun currentDraft()=draft.copy(name=name(),enabled=enabled(),startMemberId=start(),groupSwipe=swipe())
+        fun currentDraft()=draft.copy(name=name(),enabled=enabled(),startMemberId=start(),groupSwipe=swipe(),
+            finishIgnoresSwipes=finishIgnoresSwipes())
             .withGeometry(orientation(),FloatingZoneGeometry(canvas.width.toFloat(),canvas.height.toFloat(),ControlGeometry(x(),y(),w(),h())))
         if(source.kind!=FloatingZoneKind.RING) {
             val ids=source.memberIds
@@ -185,6 +188,7 @@ class FloatingControlsEditor(
             }
             f.note("A full ring preset includes both saved activation rectangles and all ring settings. Add it to another profile from Floating controls -> Saved full ring presets.")
             f.note("Boost boundaries are invisible in Play. Edit preview marks sectors beyond the canvas as unreachable. Disabled layers keep their settings.")
+            f.note("Edit canvas circles preview a summon at this zone's center. They are guides; Play placement follows your touch.")
         }
         val existing=page().floatingZones.any { it.id==source.id }
         if(existing) {
@@ -274,6 +278,10 @@ class FloatingControlsEditor(
         val f=Form(context)
         val inner=f.number("Inner aim radius (dp)",c.innerRadiusDp)
         val outer=f.number("Movement outer radius (dp)",c.movementRadiusDp)
+        val adjacent=f.flag("Boost 1 immediately outside Movement",c.adjacentMovementBoosts)
+        f.note("For Movement gestures that participate in boosts, Boost 1 starts just outside the Movement radius. Boost 2 keeps the saved Boost 1-to-Boost 2 band width. Direct boost areas keep their saved distances.")
+        val compact=f.flag("Compact boosts while aiming",c.compactAimBoosts)
+        f.note("Requires Aiming participates in boosts; this switch does not enable participation. During an original Aim touch, Boost 1 starts just outside inner aim and Boost 2 at the Movement radius. Movement uses its separate option above; direct boost starts keep their saved distances.")
         val role=f.choice("Summon starting role",FloatingStartRole.entries.toList(),c.startRole)
         val start=f.choice("Starting aim knob",c.knobs.map { it.id },c.startKnobId)
         val direct=f.flag("Start aiming when a direct boost enters inner area",c.directBoostToAim)
@@ -282,7 +290,8 @@ class FloatingControlsEditor(
         f.note("On inward return past the Boost 2 direct area's inner edge, enabled Boost 1 starts using its normal action and threshold settings. Boost 1 direct tap need not be enabled.")
         dialog("Ring geometry",f) {
             val v=c.copy(innerRadiusDp=inner(),movementRadiusDp=outer(),startRole=role(),startKnobId=start(),
-                directBoostToAim=direct(),directBoostAimKnobId=dest(),directBoostTwoToOne=lower())
+                directBoostToAim=direct(),directBoostAimKnobId=dest(),directBoostTwoToOne=lower(),
+                compactAimBoosts=compact(),adjacentMovementBoosts=adjacent())
             // Disabled starting selections are validated on the final zone Save.
             save(v);null
         }
@@ -356,24 +365,28 @@ class FloatingControlsEditor(
         val adsOut=f.flag("Continue ADS outside aim area",s.continueAdsOutside);val fireOut=f.flag("Continue fire outside aim area",s.continueFireOutside)
         val cancelShot=f.flag("Cancel Release-shot on aim boundary exit",s.cancelReleaseShotOnBoundaryExit)
         val rearm=f.flag("Re-arm Release-shot on return",s.rearmReleaseShotOnBoundaryReturn)
-        val ret=f.flag("Start fire on qualified return from boost",s.returnFire.enabled)
-        val stage1=f.flag("Return fire qualifies from Boost 1",RingBoostStage.ONE in s.returnFire.qualifyingStages)
-        val stage2=f.flag("Return fire qualifies from Boost 2",RingBoostStage.TWO in s.returnFire.qualifyingStages)
-        val delay=f.millis("Return fire delay (ms)",s.returnFire.delayMs)
+        val ret=f.flag("Enable qualified boost firing",s.returnFire.enabled)
+        val stage1=f.flag("Firing qualifies from Boost 1",RingBoostStage.ONE in s.returnFire.qualifyingStages)
+        val stage2=f.flag("Firing qualifies from Boost 2",RingBoostStage.TWO in s.returnFire.qualifyingStages)
+        val boostEntry=f.flag("Start fire delay when entering Boost",s.returnFire.startOnBoostEntry)
+        val delay=f.millis("Firing delay (ms)",s.returnFire.delayMs)
         val exit=f.flag("Cancel pending firing delay when leaving inner area",s.returnFire.cancelOnExit)
+        f.note("With qualified boost firing enabled, the delay normally starts on return to Aim. Starting on Boost entry lets it expire and fire before Aim when Continue fire outside aim area is on; Release-shot only arms. Cancel on exit applies after returning to Aim, not the first outward trip.")
         f.note("None with blank ADS gives pure aim. Early lift cancels unexpired delay; delayed Release-shot arms, then waits for valid lift.")
         dialog("Aim knob",f) {
             val result=k.copy(name=name(),enabled=enabled(),x=x(),y=y(),targetDiameterDp=size(),fire=s.copy(mode=mode(),
                 adsPayload=ads(),firePayload=fire(),pulsePressMs=press(),pulseGapMs=gap(),retainAdsOnLift=retainAds(),
                 retainFireOnLift=retainFire(),continueAdsOutside=adsOut(),continueFireOutside=fireOut(),
                 cancelReleaseShotOnBoundaryExit=cancelShot(),rearmReleaseShotOnBoundaryReturn=rearm(),
-                returnFire=s.returnFire.copy(enabled=ret(),qualifyingStages=stages(stage1(),stage2()),delayMs=delay(),cancelOnExit=exit())))
+                returnFire=s.returnFire.copy(enabled=ret(),qualifyingStages=stages(stage1(),stage2()),delayMs=delay(),
+                    cancelOnExit=exit(),startOnBoostEntry=boostEntry())))
             save(c.copy(knobs=c.knobs.mapIndexed { i,value->if(i==index) result else value }));null
         }
     }
     private fun editBoost(c:FloatingRingConfig,stage:RingBoostStage,save:(FloatingRingConfig)->Unit) {
         val b=c.boost(stage);val f=Form(context)
-        val enabled=f.flag("Boost enabled",b.enabled);val distance=f.number("Circular threshold distance (dp)",b.distanceDp)
+        val enabled=f.flag("Boost enabled",b.enabled);val distance=f.number("Saved circular threshold distance (dp)",b.distanceDp)
+        f.note("Movement adjacency and compact Aim options derive their active thresholds from the ring radii. This field keeps the manual saved distance; direct areas remain separate.")
         val payload=f.text("Fallback payload (blank for none)",b.payload)
         val up=f.text("Up payload",b.directionalPayloads.up);val down=f.text("Down payload",b.directionalPayloads.down)
         val left=f.text("Left payload",b.directionalPayloads.left);val right=f.text("Right payload",b.directionalPayloads.right)

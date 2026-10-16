@@ -172,7 +172,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             { zone ->
                 val backend = AndroidFloatingRingBackend(this, zone.ring!!, zone.id)
                 FloatingRingView(this, zone.ring!!, backend,
-                    { floatingControls.finish(zone.id) }).also {
+                    { floatingControls.finish(zone.id) }, finishIgnoresSwipes = zone.finishIgnoresSwipes).also {
                     backend.onOutputReplaced = it.state::outputReplaced
                     backend.onMovementReplaced = it.state::movementReplaced
                     backend.onFeedbackChanged = it.state::refreshFeedback

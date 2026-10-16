@@ -75,7 +75,8 @@ class FloatingRingStateMachine(
     private val scheduler: ButtonAimPayloadScheduler,
     private val now: () -> Long,
     private val onStateChanged: (FloatingRingStatus) -> Unit = {},
-    private val onFinish: () -> Unit = {}
+    private val onFinish: () -> Unit = {},
+    private val finishIgnoresSwipes: Boolean = false
 ) {
     private class OutputAction(val slot: String) {
         var payload = ""
@@ -116,6 +117,8 @@ class FloatingRingStateMachine(
     private var returnGeneration = 0L
     private var returnTask: ButtonAimScheduledTask? = null
     private var returnPending = false
+    private var returnAwaitingFirstAim = false
+    private var earlyFireKnob: RingAimKnob? = null
     private var aimActive = false
     private var aimSuspended = false
     private var insideAim = false
@@ -169,7 +172,8 @@ class FloatingRingStateMachine(
 
     fun payloadForSlot(slot: String): String = when (slot) {
         ADS -> ads.payload.ifBlank { knob?.fire?.adsPayload.orEmpty() }
-        FIRE -> fire.payload.ifBlank { knob?.fire?.firePayload.orEmpty() }
+        FIRE -> if (returnPending) firingSettings()?.firePayload.orEmpty()
+            else fire.payload.ifBlank { firingSettings()?.firePayload.orEmpty() }
         BOOST_ONE, BOOST_TWO -> boosts.first { it.output.slot == slot }.let {
             it.pendingPayload.ifBlank { it.output.payload }
         }
@@ -206,6 +210,7 @@ class FloatingRingStateMachine(
         gestureGeneration++
         pointerId = id
         role = startingRole
+        earlyFireKnob = null
         directBoostOneUnlocked = false
         logicalOffsetX = offsetX
         logicalOffsetY = offsetY
@@ -255,7 +260,7 @@ class FloatingRingStateMachine(
         if (finished || pointerId == -1) return
         if (id != pointerId || !x.isFinite() || !y.isFinite()) { cancel(); return }
         val insideFinish = geometry.finish.contains(x, y)
-        if (insideFinish && finishEntryEligible) { finish(); return }
+        if (!finishIgnoresSwipes && insideFinish && finishEntryEligible) { finish(); return }
         if (!insideFinish) finishEntryEligible = true
         val previousLogicalX = lastX + logicalOffsetX
         val previousLogicalY = lastY + logicalOffsetY
@@ -266,6 +271,15 @@ class FloatingRingStateMachine(
         val logicalY = y + logicalOffsetY
         val wasInsideAim = insideAim
         insideAim = geometry.insideAim(logicalX, logicalY)
+        // In entry-start mode an Aim exit may also be the next qualifying Boost entry.
+        // Cancel the old deadline before that entry can schedule its replacement.
+        val returnSettings = knob?.fire?.returnFire
+        val restartEntryOnAimExit = aimActive && wasInsideAim && !insideAim && returnSettings?.enabled == true &&
+            returnSettings.startOnBoostEntry && returnSettings.cancelOnExit && !returnAwaitingFirstAim
+        if (restartEntryOnAimExit) {
+            cancelReturn()
+            if (!fireEligible) armed = false
+        }
         if (role == FloatingStartRole.MOVEMENT) {
             sendMovement(geometry.movementVector(logicalX, logicalY), false)
         }
@@ -276,6 +290,12 @@ class FloatingRingStateMachine(
         }
         if (participatesInBoosts()) evaluateBoosts(logicalX, logicalY, direct, time,
             previousLogicalX, previousLogicalY)
+        if (restartEntryOnAimExit && !processingLift) {
+            // Compact B1's exit hysteresis may overlap Aim. A new outward Aim crossing
+            // requalifies that still-occupied band without replaying its boost payload.
+            boosts.firstOrNull { it.inside && returnSettings?.qualifyingStages?.contains(it.stage) == true }
+                ?.let { startBoostEntryFire(it.stage, time) }
+        }
         if (aimActive) {
             if (wasInsideAim && !insideAim) leaveAim(x, y, time)
             if ((!wasInsideAim && insideAim) || (direct && insideAim && visitedStages.isNotEmpty())) {
@@ -294,10 +314,10 @@ class FloatingRingStateMachine(
         sample(id, x, y, time, finalLift = true)
         if (pointerId == -1 || finished) return
         if (id != pointerId) { cancel(); return }
-        val fireSettings = knob?.fire
+        val fireSettings = firingSettings()
         cancelReturn()
         boosts.forEach(::cancelBoostDelay)
-        if (aimActive && fireSettings?.mode == RingFireMode.RELEASE_SHOT && armed && !releaseCanceled && !fireStopped) {
+        if ((aimActive || earlyFireKnob != null) && fireSettings?.mode == RingFireMode.RELEASE_SHOT && armed && !releaseCanceled && !fireStopped) {
             finitePulse(fire, fireSettings.firePayload, fireSettings.pulsePressMs, fireSettings.pulseGapMs)
         }
         armed = false
@@ -310,10 +330,11 @@ class FloatingRingStateMachine(
             backend.completeAim(config.aim.tuning.autoCenter)
             if (fireSettings != null) {
                 retainOrRelease(ads, fireSettings.retainAdsOnLift)
-                if (fireSettings.mode != RingFireMode.TAP && fireSettings.mode != RingFireMode.RELEASE_SHOT) {
-                    retainOrRelease(fire, fireSettings.retainFireOnLift)
-                }
             }
+        }
+        if ((aimActive || earlyFireKnob != null) && fireSettings != null &&
+            fireSettings.mode != RingFireMode.TAP && fireSettings.mode != RingFireMode.RELEASE_SHOT) {
+            retainOrRelease(fire, fireSettings.retainFireOnLift)
         }
         boosts.forEach { boost ->
             if (!boost.inside && !boost.latched && !boost.output.repeating && !boost.output.held) return@forEach
@@ -463,7 +484,10 @@ class FloatingRingStateMachine(
     }
 
     private fun startAim(selected: RingAimKnob, x: Float, y: Float, time: Long, directAddition: Boolean): Boolean {
-        if (knob?.id != null && knob?.id != selected.id) { stopOutput(fire); stopOutput(ads) }
+        if (knob?.id != null && knob?.id != selected.id) {
+            if (earlyFireKnob?.id != selected.id) stopOutput(fire)
+            stopOutput(ads)
+        }
         knob = selected
         val tuning = if (effectiveFine()) config.aim.tuning.copy(sensitivity = config.aim.fine.sensitivity)
             else config.aim.tuning
@@ -472,6 +496,7 @@ class FloatingRingStateMachine(
             return false
         }
         aimActive = true
+        earlyFireKnob = null
         aimSuspended = false
         if (directAddition) {
             // Entry adds only aim: establish a neutral grab without outside travel or a fresh DOWN.
@@ -497,7 +522,7 @@ class FloatingRingStateMachine(
             backend.suspendAim(pointerId, x, y, time)
             aimSuspended = true
         }
-        if (settings.returnFire.enabled && settings.returnFire.cancelOnExit) {
+        if (settings.returnFire.enabled && settings.returnFire.cancelOnExit && !returnAwaitingFirstAim) {
             cancelReturn()
             if (!fireEligible) armed = false
         }
@@ -525,6 +550,7 @@ class FloatingRingStateMachine(
             if (fireEligible) armed = settings.mode == RingFireMode.RELEASE_SHOT
         }
         if (!processingLift && !fireStopped && settings.mode != RingFireMode.NONE && settings.returnFire.enabled &&
+            !settings.returnFire.startOnBoostEntry &&
             visitedStages.any { it in settings.returnFire.qualifyingStages } && !returnPending) {
             scheduleReturn(settings.returnFire.delayMs, time)
         } else if (!processingLift && settings.returnFire.enabled && fireEligible && !returnPending && !fireStopped) {
@@ -534,21 +560,24 @@ class FloatingRingStateMachine(
         }
         // Independent ADS configured for an ordinary aim gesture can resume; direct additions never invent it.
         if (!processingLift && role == FloatingStartRole.AIM && !settings.continueAdsOutside && !adsStopped) hold(ads, settings.adsPayload)
+        returnAwaitingFirstAim = false
         visitedStages.clear()
     }
 
-    private fun scheduleReturn(delayMs: Long, eventTime: Long) {
+    private fun scheduleReturn(delayMs: Long, eventTime: Long, beforeAim: Boolean = false) {
         val generation = ++returnGeneration
         val liveGesture = gestureGeneration
         val livePointer = pointerId
         returnPending = true
+        returnAwaitingFirstAim = beforeAim
         fireEligible = false
         armed = false
         firedThisGesture = false
         val run = {
             if (returnGeneration == generation && gestureGeneration == liveGesture &&
                 pointerId == livePointer && pointerId != -1 && !finished && !fireStopped &&
-                aimActive && (insideAim || knob?.fire?.returnFire?.cancelOnExit == false)) {
+                (aimActive || earlyFireKnob != null) &&
+                (returnAwaitingFirstAim || insideAim || firingSettings()?.returnFire?.cancelOnExit == false)) {
                 returnPending = false
                 returnTask = null
                 activateFire()
@@ -565,10 +594,28 @@ class FloatingRingStateMachine(
         returnTask?.cancel()
         returnTask = null
         returnPending = false
+        returnAwaitingFirstAim = false
+    }
+
+    private fun firingSettings() = (earlyFireKnob ?: knob)?.fire
+
+    private fun startBoostEntryFire(stage: RingBoostStage, eventTime: Long) {
+        val selected = when (role) {
+            FloatingStartRole.AIM -> knob
+            FloatingStartRole.BOOST_ONE, FloatingStartRole.BOOST_TWO ->
+                if (config.directBoostToAim) config.knob(config.directBoostAimKnobId)?.takeIf { it.enabled } else null
+            else -> null
+        } ?: return
+        val settings = selected.fire
+        if (!settings.returnFire.enabled || !settings.returnFire.startOnBoostEntry ||
+            stage !in settings.returnFire.qualifyingStages || settings.mode == RingFireMode.NONE ||
+            returnPending || (fireEligible && returnAwaitingFirstAim) || fireStopped) return
+        if (!aimActive) earlyFireKnob = selected
+        scheduleReturn(settings.returnFire.delayMs, eventTime, beforeAim = true)
     }
 
     private fun activateFire() {
-        val settings = knob?.fire ?: return
+        val settings = firingSettings() ?: return
         if (fireStopped || pointerId == -1 || finished) return
         fireEligible = true
         if (!insideAim && !settings.continueFireOutside && settings.mode != RingFireMode.RELEASE_SHOT) return
@@ -597,6 +644,8 @@ class FloatingRingStateMachine(
     ) {
         val selectedDirect = if (role == FloatingStartRole.BOOST_ONE) RingBoostStage.ONE else RingBoostStage.TWO
         val distance = geometry.distance(x, y)
+        val compactAim = role == FloatingStartRole.AIM && config.compactAimBoosts
+        val adjacentMovement = role == FloatingStartRole.MOVEMENT && config.adjacentMovementBoosts
         val returnBoundary = config.boost2.directInnerDistanceDp * geometry.density
         val returningToBoostOne = role == FloatingStartRole.BOOST_TWO && config.directBoostTwoToOne &&
             config.boost1.enabled && !directBoostOneUnlocked &&
@@ -610,8 +659,8 @@ class FloatingRingStateMachine(
             if (direct && boost.stage != selectedDirect && !returningStageOne) return@forEach
             val settings = config.boost(boost.stage)
             val stillInside = if (direct && !returningStageOne) geometry.directHit(boost.stage, x, y)
-                else settings.enabled && distance >= (settings.distanceDp -
-                    if (boost.inside) settings.hysteresisDp else 0f) * geometry.density
+                else settings.enabled && distance >= geometry.boostDistance(boost.stage, compactAim, adjacentMovement) -
+                    if (boost.inside) geometry.boostHysteresis(boost.stage, compactAim, adjacentMovement) else 0f
             if (boost.inside && !stillInside) { boost.inside = false; exitBoost(boost) }
         }
         boosts.forEach { boost ->
@@ -619,8 +668,10 @@ class FloatingRingStateMachine(
             if (direct && boost.stage != selectedDirect && !returningStageOne) return@forEach
             val settings = config.boost(boost.stage)
             val crossedStageOne = returningStageOne && returningToBoostOne
+            val threshold = geometry.boostDistance(boost.stage, compactAim, adjacentMovement)
             val enters = if (direct && !returningStageOne) geometry.directHit(boost.stage, x, y)
-                else settings.enabled && distance >= settings.distanceDp * geometry.density
+                else settings.enabled && if ((compactAim || adjacentMovement) && boost.stage == RingBoostStage.ONE)
+                    distance > threshold else distance >= threshold
             // A fast inward sample can skip the entire lower band. Visit it once using the
             // incoming direction, then apply its normal exit/latch rules at the current point.
             val direction = if (crossedStageOne && !enters) direction(previousX, previousY, boost.direction)
@@ -628,7 +679,7 @@ class FloatingRingStateMachine(
             if (!boost.inside && (enters || crossedStageOne)) {
                 boost.inside = true
                 enterBoost(boost, direction, eventTime)
-                if (distance < (settings.distanceDp - settings.hysteresisDp) * geometry.density) {
+                if (distance < threshold - geometry.boostHysteresis(boost.stage, compactAim, adjacentMovement)) {
                     boost.inside = false
                     exitBoost(boost)
                 }
@@ -645,6 +696,7 @@ class FloatingRingStateMachine(
         visitedStages.add(boost.stage)
         boost.direction = direction
         if (processingLift) return
+        startBoostEntryFire(boost.stage, eventTime)
         if (boost.pending || boost.latched || boost.output.retained || boost.output.slot in overridden) return
         val payload = settings.payloadFor(direction)
         if (payload.isBlank()) return
@@ -871,6 +923,7 @@ class FloatingRingStateMachine(
     private fun endPointer() {
         pointerId = -1
         role = null
+        earlyFireKnob = null
         directBoostOneUnlocked = false
         aimActive = false
         aimSuspended = false

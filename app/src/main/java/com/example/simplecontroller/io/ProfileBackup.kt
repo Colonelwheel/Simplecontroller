@@ -229,6 +229,7 @@ private fun requireNestedVersions(objectValue: JsonObject) {
             profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2,
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
         )
+        requireFloatingOptionsFormat(profile, profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2)
     }
     listOf(
         Triple("touchAimCalibrations", "TouchAim calibration", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION),
@@ -246,6 +247,14 @@ private fun requireNestedVersions(objectValue: JsonObject) {
                 itemObject["schemaVersion"]?.jsonPrimitive?.intOrNull ?: current,
                 current
             )
+            if (key == "floatingRingPresets") {
+                requireFloatingRingPresetOptionsSchema(
+                    itemObject,
+                    itemObject["schemaVersion"]?.jsonPrimitive?.intOrNull ?: FloatingRingPreset.LEGACY_SCHEMA_VERSION
+                )
+            } else if (key == "floatingBoostProfiles") {
+                requireSupportedFloatingBoostSchema(itemObject)
+            }
         }
     }
 }

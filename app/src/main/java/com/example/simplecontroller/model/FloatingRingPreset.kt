@@ -9,7 +9,7 @@ import kotlinx.serialization.json.Json
 /** A complete saved ring zone. Live placement, pointers and output sessions are not model data. */
 @Serializable
 data class FloatingRingPreset(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -17,7 +17,8 @@ data class FloatingRingPreset(
     val zone: FloatingZone
 ) {
     fun validationError(): String? {
-        if (schemaVersion != CURRENT_SCHEMA_VERSION) return "This ring preset version is not supported."
+        if (schemaVersion !in LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION) return "This ring preset version is not supported."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved ring options require ring preset version $CURRENT_SCHEMA_VERSION."
         if (runCatching { UUID.fromString(id).toString() }.getOrNull() != id) return "Invalid ring preset identifier."
         if (name.trim().length !in 1..80) return "Choose a ring preset name from 1 to 80 characters."
         if (createdAtEpochMs < 0L || updatedAtEpochMs < createdAtEpochMs) return "Invalid ring preset timestamps."
@@ -33,13 +34,22 @@ data class FloatingRingPreset(
         return detachedFloatingRingZone(zone).copy(id = newZoneId, name = zoneName ?: zone.name)
     }
 
-    companion object { const val CURRENT_SCHEMA_VERSION = 1 }
+    fun requiredSchemaVersion(): Int = if (zone.hasExtendedFloatingConfiguration()) {
+        CURRENT_SCHEMA_VERSION
+    } else LEGACY_SCHEMA_VERSION
+
+    companion object {
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
+    }
 }
 
 /** Capture configuration, including inactive switches and both saved orientation geometries. */
 fun FloatingZone.captureRingPreset(id: String, name: String, nowMs: Long): FloatingRingPreset? {
     if (ringPresetValidationError() != null) return null
     return FloatingRingPreset(
+        schemaVersion = if (hasExtendedFloatingConfiguration()) FloatingRingPreset.CURRENT_SCHEMA_VERSION
+            else FloatingRingPreset.LEGACY_SCHEMA_VERSION,
         id = id,
         name = name.trim(),
         createdAtEpochMs = nowMs,

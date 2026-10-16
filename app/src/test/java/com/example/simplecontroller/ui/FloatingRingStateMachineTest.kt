@@ -73,7 +73,7 @@ class FloatingRingStateMachineTest {
         override fun mouseSuppression(active: Boolean) { suppression = active }
         override fun closeScope() { closes++ }
     }
-    private class Fixture(val config: FloatingRingConfig) {
+    private class Fixture(val config: FloatingRingConfig, finishIgnoresSwipes: Boolean = false) {
         val clock = Clock()
         val backend = Backend()
         val geometry = FloatingRingGeometry(config)
@@ -81,7 +81,7 @@ class FloatingRingStateMachineTest {
         val published = mutableListOf<FloatingRingStatus>()
         val state = FloatingRingStateMachine(config, geometry, backend, clock, { clock.now },
             onStateChanged = { published.add(it) },
-            onFinish = { finishes++ })
+            onFinish = { finishes++ }, finishIgnoresSwipes = finishIgnoresSwipes)
         val cx get() = geometry.center.x
         val cy get() = geometry.center.y
         fun down(role: FloatingStartRole = config.startRole, knobId: String = config.startKnobId) =
@@ -107,6 +107,12 @@ class FloatingRingStateMachineTest {
         boost2 = RingBoostSettings(enabled = true, distanceDp = 160f,
             directInnerDistanceDp = 160f, directOuterDistanceDp = 184f, payload = "X360A")
     )
+
+    private fun entryFire(mode: RingFireMode = RingFireMode.HOLD, outside: Boolean = true): FloatingRingConfig {
+        val base = combat(mode)
+        return base.copy(knobs = base.knobs.map { it.copy(fire = it.fire.copy(
+            continueFireOutside = outside, returnFire = it.fire.returnFire.copy(startOnBoostEntry = true))) })
+    }
 
     @Test fun pureAim_hasNoAutomaticAdsOrFire() {
         val f = Fixture(FloatingRingConfig(startRole = FloatingStartRole.AIM))
@@ -148,6 +154,54 @@ class FloatingRingStateMachineTest {
         f.move(0f); assertEquals("LT:1.0", f.backend.held["boost1"])
     }
 
+    @Test fun compactAimBoosts_borrowMovementBandAndRestoreMovementAfterLift() {
+        val f = Fixture(combat().copy(compactAimBoosts = true))
+        f.down(); f.move(47f)
+        assertTrue(f.backend.held.isEmpty())
+        f.move(48f)
+        assertTrue("The Aim boundary itself is still Aim", f.backend.held.isEmpty())
+        f.move(49f)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertFalse("boost2" in f.backend.held)
+        f.move(89f)
+        assertEquals("X360A", f.backend.held["boost2"])
+        assertEquals(RingPoint(0f, 0f), f.backend.movement)
+        assertEquals(FloatingStartRole.AIM, f.state.status.role)
+        f.up(89f)
+        assertNull(f.state.status.role)
+        f.down(FloatingStartRole.MOVEMENT); f.move(44f)
+        assertEquals(-.5f, f.backend.movement.y, .00001f)
+        f.move(89f)
+        assertFalse("boost2" in f.backend.held)
+        f.move(161f)
+        assertEquals("X360A", f.backend.held["boost2"])
+    }
+
+    @Test fun compactAimBoosts_preserveParticipationSwitchAndDirectBoostRules() {
+        val base = combat().copy(compactAimBoosts = true)
+        val disabled = Fixture(base.copy(aim = base.aim.copy(participateInBoosts = false)))
+        disabled.down(); disabled.move(170f)
+        assertTrue(disabled.backend.held.isEmpty())
+        val direct = Fixture(base.copy(startRole = FloatingStartRole.BOOST_TWO,
+            boost2 = base.boost2.copy(directTapEnabled = true)))
+        direct.down(); direct.move(89f)
+        assertFalse("boost1" in direct.backend.held)
+        assertFalse("boost2" in direct.backend.held)
+        assertEquals(0, direct.backend.aimBegins)
+    }
+
+    @Test fun compactAimBoosts_largeSavedHysteresisCanStillExitAndCancelKeepsOlderLatch() {
+        val base = combat().copy(compactAimBoosts = true)
+        val f = Fixture(base.copy(boost1 = base.boost1.copy(hysteresisDp = 110f),
+            boost2 = base.boost2.copy(hysteresisDp = 150f)))
+        f.down(); f.move(89f); f.move(0f)
+        assertFalse("boost2" in f.backend.held)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.up(); f.down(); f.move(89f); f.state.cancel()
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertFalse("boost2" in f.backend.held)
+    }
+
     @Test fun returnFire_stationaryDeadlineStartsHoldWhileAimResumesImmediately() {
         val f = Fixture(combat())
         f.down(); assertEquals(0, f.firePresses())
@@ -158,6 +212,238 @@ class FloatingRingStateMachineTest {
         f.clock.advance(1); assertEquals(1, f.firePresses())
         assertEquals(aimMoves, f.backend.aimMoves)
         assertEquals("LT:1.0", f.backend.held["boost1"])
+    }
+
+    @Test fun entryFire_countsFromBoostAndDoesNotRestartAcrossStagesOrAimReturn() {
+        val base = entryFire()
+        val f = Fixture(base.copy(knobs = base.knobs.map { it.copy(fire = it.fire.copy(
+            returnFire = it.fire.returnFire.copy(qualifyingStages = RingBoostStage.entries.toSet()))) }))
+        f.down(); f.move(125f)
+        f.clock.advance(100); f.move(170f)
+        f.clock.advance(100); f.move(0f)
+        f.clock.advance(99); assertEquals(0, f.firePresses())
+        f.clock.advance(1); assertEquals(1, f.firePresses())
+        f.move(0f); f.clock.advance(500)
+        assertEquals(1, f.firePresses())
+    }
+
+    @Test fun entryFire_canExpireBeforeAimWithoutStartingFineAimOrResumingAim() {
+        val base = entryFire()
+        val f = Fixture(base.copy(aim = base.aim.copy(fine = RingFineAimSettings(enabled = true))))
+        f.down(); f.move(125f)
+        f.clock.advance(300)
+        assertEquals(1, f.firePresses())
+        assertTrue(f.backend.paused)
+        assertFalse(f.state.status.fine)
+        assertFalse(f.state.status.pending)
+        f.move(0f)
+        assertEquals(1, f.firePresses())
+        assertFalse(f.backend.paused)
+        assertTrue(f.state.status.fine)
+    }
+
+    @Test fun entryFire_outsideDisabledRemembersDeadlineUntilAimWithoutAnotherDelay() {
+        val f = Fixture(entryFire(outside = false))
+        f.down(); f.move(125f); f.clock.advance(300)
+        assertEquals(0, f.firePresses())
+        assertFalse(f.state.status.pending)
+        f.move(0f)
+        assertEquals(1, f.firePresses())
+    }
+
+    @Test fun entryFire_liftCancelFinishAndStopInvalidateEveryUnexpiredMode() {
+        listOf(RingFireMode.HOLD, RingFireMode.TAP, RingFireMode.REPEAT, RingFireMode.RELEASE_SHOT).forEach { mode ->
+            listOf("lift", "cancel", "finish", "stop").forEach { action ->
+                val f = Fixture(entryFire(mode))
+                f.down(); f.move(125f); f.clock.advance(100)
+                when (action) {
+                    "lift" -> f.up(125f)
+                    "cancel" -> f.state.cancel()
+                    "finish" -> f.state.finish()
+                    else -> f.state.stopFiring()
+                }
+                f.clock.advance(1000); f.clock.runCanceled()
+                assertEquals("mode=$mode action=$action", 0, f.firePresses())
+                assertFalse(f.state.status.armed)
+            }
+        }
+    }
+
+    @Test fun entryFire_cancelOnExitAfterReturnRestartsAtNextBoostEntry() {
+        listOf(0f, 47f).forEach { returnDistance ->
+            val f = Fixture(entryFire().copy(compactAimBoosts = true))
+            f.down(); f.move(49f); f.clock.advance(100); f.move(returnDistance)
+            f.clock.advance(50); f.move(49f)
+            assertTrue("return=$returnDistance", f.state.status.pending)
+            f.clock.advance(299); assertEquals(0, f.firePresses())
+            f.clock.advance(1); assertEquals(1, f.firePresses())
+        }
+    }
+
+    @Test fun entryFire_overdueHistoricalEntryCanBeCanceledBeforeItsPostedDeadline() {
+        val f = Fixture(entryFire())
+        f.down(); f.clock.now = 500L
+        f.state.sample(7, f.cx, f.cy - 125f, 100L)
+        assertEquals(0, f.firePresses())
+        f.state.up(7, f.cx, f.cy, 500L)
+        f.clock.advance(0); f.clock.runCanceled()
+        assertEquals(0, f.firePresses())
+    }
+
+    @Test fun entryFire_directAimUsesDestinationBeforeAimWithoutInventingAdsAndCleansUpOnLift() {
+        listOf(false, true).forEach { retain ->
+            val base = entryFire()
+            val f = Fixture(base.copy(startRole = FloatingStartRole.BOOST_ONE, directBoostToAim = true,
+                aim = base.aim.copy(suppressCameraFollow = true),
+                boost1 = base.boost1.copy(directTapEnabled = true),
+                knobs = base.knobs.map { it.copy(fire = it.fire.copy(adsPayload = "X360LB", retainFireOnLift = retain)) }))
+            val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+            assertTrue(f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE))
+            f.clock.advance(300)
+            assertEquals(1, f.firePresses())
+            assertEquals(0, f.backend.aimBegins)
+            assertFalse(f.backend.suppression)
+            assertFalse("ads" in f.backend.held)
+            f.state.up(7, anchor.x, anchor.y, f.clock.now)
+            assertEquals("retain=$retain", retain, "fire" in f.backend.held)
+            f.state.finish()
+            assertFalse("fire" in f.backend.held)
+        }
+    }
+
+    @Test fun entryFire_directReturnKeepsItsOutputWhenThePreviousKnobWasDifferent() {
+        val base = entryFire()
+        val destination = base.knobs.single().copy(id = "destination")
+        val f = Fixture(base.copy(knobs = base.knobs + destination, directBoostToAim = true,
+            directBoostAimKnobId = destination.id, boost1 = base.boost1.copy(directTapEnabled = true)))
+        f.down(); f.up()
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+        f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE)
+        f.clock.advance(300)
+        assertEquals(1, f.firePresses())
+        f.move(0f)
+        assertEquals(1, f.firePresses())
+        assertEquals("RT:1.0", f.backend.held["fire"])
+        assertEquals(2, f.backend.aimBegins)
+    }
+
+    @Test fun entryFire_pendingDirectFeedbackUsesItsDestinationBinding() {
+        val base = entryFire()
+        val destination = base.knobs.single().copy(id = "destination",
+            fire = base.knobs.single().fire.copy(firePayload = "X360Y"))
+        val f = Fixture(base.copy(knobs = base.knobs + destination, directBoostToAim = true,
+            directBoostAimKnobId = destination.id, boost1 = base.boost1.copy(directTapEnabled = true)))
+        f.down(); f.move(125f); f.clock.advance(300); f.up()
+        assertEquals(1, f.firePresses())
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+        f.state.down(7, anchor.x, anchor.y, f.clock.now, FloatingStartRole.BOOST_ONE)
+        assertTrue(f.state.status.pending)
+        assertEquals("X360Y", f.state.payloadForSlot(FloatingRingStateMachine.FIRE))
+        f.clock.advance(300)
+        assertEquals("X360Y", f.backend.held["fire"])
+    }
+
+    @Test fun entryFire_directTwoToOneStartsOnlyAtQualifierAndKeepsFirstDeadline() {
+        listOf(setOf(RingBoostStage.ONE), RingBoostStage.entries.toSet()).forEach { qualifiers ->
+            val base = entryFire()
+            val f = Fixture(base.copy(startRole = FloatingStartRole.BOOST_TWO, compactAimBoosts = true,
+                directBoostToAim = true, directBoostTwoToOne = true,
+                boost2 = base.boost2.copy(directTapEnabled = true),
+                knobs = base.knobs.map { it.copy(fire = it.fire.copy(
+                    returnFire = it.fire.returnFire.copy(qualifyingStages = qualifiers))) }))
+            val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_TWO)
+            f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_TWO)
+            assertEquals(RingBoostStage.TWO in qualifiers, f.state.status.pending)
+            f.clock.advance(100); f.move(140f)
+            assertTrue(f.state.status.pending)
+            f.clock.advance(100); f.move(0f)
+            val remaining = if (RingBoostStage.TWO in qualifiers) 100L else 200L
+            f.clock.advance(remaining - 1); assertEquals(0, f.firePresses())
+            f.clock.advance(1); assertEquals(1, f.firePresses())
+        }
+    }
+
+    @Test fun entryFire_directRepeatLiftOutsideEndsOutputAndCanceledCallbacks() {
+        val base = entryFire(RingFireMode.REPEAT)
+        val f = Fixture(base.copy(startRole = FloatingStartRole.BOOST_ONE, directBoostToAim = true,
+            boost1 = base.boost1.copy(directTapEnabled = true)))
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+        f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE)
+        f.clock.advance(300)
+        assertTrue(f.state.status.repeating)
+        f.state.up(7, anchor.x, anchor.y, f.clock.now)
+        val presses = f.firePresses()
+        f.clock.advance(1000); f.clock.runCanceled()
+        assertFalse(f.state.status.repeating)
+        assertFalse("fire" in f.backend.held)
+        assertEquals(presses, f.firePresses())
+        assertEquals(0, f.backend.aimBegins)
+    }
+
+    @Test fun entryFire_boundaryCanceledReleaseShotWaitsForEligibleReturn() {
+        val base = entryFire(RingFireMode.RELEASE_SHOT)
+        val f = Fixture(base.copy(knobs = base.knobs.map { it.copy(fire = it.fire.copy(
+            cancelReleaseShotOnBoundaryExit = true, rearmReleaseShotOnBoundaryReturn = true)) }))
+        f.down(); f.move(125f); f.clock.advance(300)
+        assertFalse(f.state.status.armed)
+        assertEquals(0, f.firePresses())
+        f.move(0f); assertTrue(f.state.status.armed)
+        f.up(); assertEquals(1, f.firePresses())
+    }
+
+    @Test fun entryFire_neverUsesStaleAimSettingsForMovementOrCommandOnlyDirectBoost() {
+        listOf(FloatingStartRole.MOVEMENT, FloatingStartRole.BOOST_ONE).forEach { role ->
+            val base = entryFire()
+            val f = Fixture(base.copy(boost1 = base.boost1.copy(directTapEnabled = true)))
+            f.down(); f.up()
+            f.down(role); f.move(125f); f.clock.advance(1000)
+            assertEquals("role=$role", 0, f.firePresses())
+            assertFalse(f.state.status.pending)
+        }
+    }
+
+    @Test fun entryFire_releaseShotArmsBeforeAimButOnlyEligibleLiftFires() {
+        val f = Fixture(entryFire(RingFireMode.RELEASE_SHOT))
+        f.down(); f.move(125f); f.clock.advance(300)
+        assertTrue(f.state.status.armed)
+        assertEquals(0, f.firePresses())
+        f.up(125f)
+        assertEquals(1, f.firePresses())
+    }
+
+    @Test fun entryFire_completedTapCanStartAnotherQualifiedCycleAfterAimReturn() {
+        val f = Fixture(entryFire(RingFireMode.TAP))
+        f.down(); f.move(125f); f.clock.advance(300)
+        assertEquals(1, f.firePresses())
+        f.clock.advance(100); f.move(0f); f.move(125f)
+        f.clock.advance(299); assertEquals(1, f.firePresses())
+        f.clock.advance(1); assertEquals(2, f.firePresses())
+    }
+
+    @Test fun adjacentMovementBoosts_beginOutsideMovementAndKeepSavedBoostBandWidth() {
+        val f = Fixture(combat().copy(adjacentMovementBoosts = true))
+        f.down(FloatingStartRole.MOVEMENT); f.move(88f)
+        assertFalse("boost1" in f.backend.held)
+        assertEquals(-1f, f.backend.movement.y, 0f)
+        f.move(89f)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.move(127f); assertFalse("boost2" in f.backend.held)
+        f.move(128f); assertEquals("X360A", f.backend.held["boost2"])
+        assertEquals(0, f.backend.aimBegins)
+    }
+
+    @Test fun compactAimBoosts_edgeFitUsesLogicalBoundaryAndLargeNonlatchedHysteresisExits() {
+        val base = combat().copy(compactAimBoosts = true)
+        val f = Fixture(base.copy(boost1 = base.boost1.copy(latchOnExit = false, retainOnLift = false, hysteresisDp = 110f)))
+        val x = 5f; val y = 70f
+        f.state.down(7, x, y, 0L, FloatingStartRole.AIM,
+            offsetX = f.cx - x, offsetY = f.cy - y, checkFinish = false)
+        f.state.sample(7, x + 48f, y, 1L)
+        assertFalse("boost1" in f.backend.held)
+        f.state.sample(7, x + 48.1f, y, 2L)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.state.sample(7, x, y, 3L)
+        assertFalse("boost1" in f.backend.held)
     }
 
     @Test fun earlyLift_cancelsEveryReturnFireModeWithoutFiringLater() {
@@ -773,6 +1059,41 @@ class FloatingRingStateMachineTest {
             0L, FloatingStartRole.AIM))
         assertEquals(1, f.finishes)
         assertEquals(0, f.backend.aimBegins)
+    }
+
+    @Test fun finishIgnoresSwipes_allCapturedRolesKeepHistoryAndLiftAsOrdinaryInput() {
+        FloatingStartRole.entries.forEach { role ->
+            val base = combat(returnDelay = 0L)
+            val config = base.copy(startRole = role,
+                boost1 = base.boost1.copy(directTapEnabled = true),
+                boost2 = base.boost2.copy(directTapEnabled = true))
+            val f = Fixture(config, finishIgnoresSwipes = true)
+            assertTrue("role=$role", f.down())
+            val x = f.geometry.finish.right - 2f
+            val y = f.geometry.finish.top + 2f
+            f.state.sample(7, x, y, 1L) // The View also forwards historical samples here.
+            assertEquals("role=$role", 7, f.state.status.pointerId)
+            f.state.up(7, x, y, 2L)
+            assertEquals("role=$role", 0, f.finishes)
+            assertEquals("role=$role", -1, f.state.status.pointerId)
+            assertEquals("role=$role", 0, f.backend.closes)
+        }
+    }
+
+    @Test fun finishIgnoresSwipes_preservesEligibleReleaseShotAndFreshFinish() {
+        val f = Fixture(combat(RingFireMode.RELEASE_SHOT, returnDelay = 0L), finishIgnoresSwipes = true)
+        f.down(); f.move(125f); f.move(0f)
+        assertTrue(f.state.status.armed)
+        val x = f.geometry.finish.right - 2f
+        val y = f.geometry.finish.top + 2f
+        f.state.up(7, x, y, 1L)
+        assertEquals(1, f.firePresses())
+        assertEquals(0, f.finishes)
+        assertTrue(f.state.down(8, x, y, 2L, FloatingStartRole.AIM))
+        assertEquals(1, f.finishes)
+        f.clock.advance(1000L); f.clock.runCanceled()
+        assertEquals(1, f.firePresses())
+        assertTrue(f.backend.held.isEmpty())
     }
 
     @Test fun retainedRightStickFeedback_refreshClearsAfterExternalOwnerTakeover() {

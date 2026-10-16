@@ -80,18 +80,31 @@ class FloatingControlsController(
         if (!GlobalSettings.editMode) return
         val boundPage = page().id
         val boundOrientation = orientation()
+        val previews = mutableListOf<FloatingRingEditOverlay>()
         page().floatingZones.asReversed().forEach { zone ->
             val rectangle = zoneRect(zone)
+            val preview = zone.ring?.let {
+                FloatingRingEditOverlay(context, it, zone.name, zone.enabled, rectangle, usable())
+                    .also(previews::add)
+            }
             val outline = FloatingZoneOutline(context,zone.name.ifBlank { "Floating zone" },zone.enabled,rectangle,
                 onEdit = { page().floatingZones.firstOrNull { it.id == zone.id }?.let(editZone) },
                 onMoved = { rectangle ->
                     GlobalSettings.editMode && page().id == boundPage && orientation() == boundOrientation &&
                         moveZone(zone.id,rectangle)
-                })
+                },
+                onRectangleChanged = { preview?.updateRectangle(it) })
             addAt(outline,rectangle)
             canvas.removeView(outline)
             canvas.addView(outline,0)
             editorViews += outline
+        }
+        // Decorative guides stay below every outline and existing control, with no touch targets.
+        previews.forEach { preview ->
+            addAt(preview, ControlGeometry(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat()))
+            canvas.removeView(preview)
+            canvas.addView(preview, 0)
+            editorViews += preview
         }
     }
     fun hiddenMemberIds(): Set<String> = if (GlobalSettings.editMode) emptySet()
@@ -241,7 +254,7 @@ class FloatingControlsController(
             }
             val index=event.findPointerIndex(active.pointer)
             val end=active.instance.finishView
-            if(end!=null && event.actionMasked!=MotionEvent.ACTION_CANCEL) {
+            if(end!=null && !active.instance.zone.finishIgnoresSwipes && event.actionMasked!=MotionEvent.ACTION_CANCEL) {
                 val rect=ControlGeometry(end.x,end.y,end.width.toFloat(),end.height.toFloat())
                 val crossed=(0 until event.historySize).any {
                     active.finishEntry.observe(rect.containsPoint(event.getHistoricalX(index,it),event.getHistoricalY(index,it)))

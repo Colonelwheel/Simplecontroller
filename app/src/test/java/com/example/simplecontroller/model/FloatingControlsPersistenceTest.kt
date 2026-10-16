@@ -184,7 +184,7 @@ class FloatingControlsPersistenceTest {
     @Test
     fun futureVersionsAndUnderVersionedLibraries_areRejectedBeforeUnknownShapes() {
         val futureProfile = """{"fileType":"simplecontroller-profile","transferVersion":1,"profileName":"Future",
-            "profile":{"formatVersion":11,"pages":[{"floatingZones":[{"kind":"FUTURE"}]}]}}"""
+            "profile":{"formatVersion":12,"pages":[{"floatingZones":[{"kind":"FUTURE"}]}]}}"""
         assertTrue(runCatching { decodeControllerProfileTransfer(futureProfile, "Future") }
             .exceptionOrNull()!!.message!!.contains("newer"))
         val futureLibrary = """{"fileType":"simplecontroller-profiles-backup","backupVersion":2,

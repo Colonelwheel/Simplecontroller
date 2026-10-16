@@ -47,7 +47,9 @@ data class FloatingZone(
     val portraitRestorationGeometry: Map<String, ControlGeometry> = emptyMap(),
     val landscapeRestorationGeometry: Map<String, ControlGeometry> = emptyMap(),
     val groupSwipe: Boolean = false,
-    val ring: FloatingRingConfig? = null
+    val ring: FloatingRingConfig? = null,
+    /** Finish remains directly tappable; this only rejects entry from another captured target. */
+    val finishIgnoresSwipes: Boolean = false
 ) {
     fun geometryFor(orientation: LayoutOrientation): FloatingZoneGeometry? = when (orientation) {
         LayoutOrientation.PORTRAIT -> portraitGeometry
@@ -123,7 +125,9 @@ data class RingReturnFireSettings(
     val enabled: Boolean = false,
     val qualifyingStages: Set<RingBoostStage> = setOf(RingBoostStage.ONE),
     val delayMs: Long = 0L,
-    val cancelOnExit: Boolean = true
+    val cancelOnExit: Boolean = true,
+    /** AIM gestures may count from qualifying boost entry and become due before returning inside. */
+    val startOnBoostEntry: Boolean = false
 )
 
 @Serializable
@@ -193,7 +197,11 @@ data class FloatingRingConfig(
     val startKnobId: String = "aim_1",
     val directBoostToAim: Boolean = false,
     val directBoostAimKnobId: String = "aim_1",
-    val directBoostTwoToOne: Boolean = false
+    val directBoostTwoToOne: Boolean = false,
+    /** AIM captures may use adjacent boost bands without changing saved movement/boost radii. */
+    val compactAimBoosts: Boolean = false,
+    /** MOVEMENT captures may start boost bands immediately outside the saved movement radius. */
+    val adjacentMovementBoosts: Boolean = false
 ) {
     fun boost(stage: RingBoostStage): RingBoostSettings = when (stage) {
         RingBoostStage.ONE -> boost1
@@ -352,7 +360,7 @@ data class RingAimActionPreset(
 
 @Serializable
 data class FloatingBoostProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -362,7 +370,8 @@ data class FloatingBoostProfile(
     val ringAimActions: RingAimActionPreset? = null
 ) {
     fun validationError(): String? {
-        if (schemaVersion != CURRENT_SCHEMA_VERSION) return "This boost profile version is not supported."
+        if (schemaVersion !in LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION) return "This boost profile version is not supported."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved ring actions require boost profile version $CURRENT_SCHEMA_VERSION."
         if (name.trim().length !in 1..80) return "Choose a boost profile name from 1 to 80 characters."
         boost1.validationError()?.let { return it }
         boost2.validationError()?.let { return it }
@@ -391,16 +400,30 @@ data class FloatingBoostProfile(
         ).takeIf { it.validationError() == null }
     }
 
-    companion object { const val CURRENT_SCHEMA_VERSION = 1 }
+    fun requiredSchemaVersion(): Int = if (ringAimActions?.knobActions.orEmpty().any {
+        it.returnFire.startOnBoostEntry
+    }) CURRENT_SCHEMA_VERSION else LEGACY_SCHEMA_VERSION
+
+    companion object {
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
+    }
 }
 
 fun FloatingRingConfig.captureBoostProfile(
     id: String, name: String, nowMs: Long, includeRingAimActions: Boolean = false
 ): FloatingBoostProfile? = FloatingBoostProfile(
+    schemaVersion = if (includeRingAimActions && knobs.any { it.fire.returnFire.startOnBoostEntry })
+        FloatingBoostProfile.CURRENT_SCHEMA_VERSION else FloatingBoostProfile.LEGACY_SCHEMA_VERSION,
     id = id, name = name.trim(), createdAtEpochMs = nowMs, updatedAtEpochMs = nowMs,
     boost1 = boost1, boost2 = boost2,
     ringAimActions = if (includeRingAimActions) RingAimActionPreset(aim, knobs.map { it.fire }) else null
 ).takeIf { it.validationError() == null }
+
+/** Inactive selections still need a reader that can preserve their behavior. */
+fun FloatingZone.hasExtendedFloatingConfiguration(): Boolean =
+    finishIgnoresSwipes || ring?.compactAimBoosts == true || ring?.adjacentMovementBoosts == true ||
+        ring?.knobs.orEmpty().any { it.fire.returnFire.startOnBoostEntry }
 
 fun ControllerPage.floatingValidationError(): String? {
     val controlById = controls.associateBy { it.id }

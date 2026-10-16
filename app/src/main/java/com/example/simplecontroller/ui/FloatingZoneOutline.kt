@@ -21,7 +21,8 @@ internal class FloatingZoneOutline(
     private val zoneEnabled: Boolean,
     initialRectangle: ControlGeometry,
     private val onEdit: () -> Unit,
-    private val onMoved: (ControlGeometry) -> Boolean
+    private val onMoved: (ControlGeometry) -> Boolean,
+    private val onRectangleChanged: (ControlGeometry) -> Unit = {}
 ) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
@@ -96,6 +97,7 @@ internal class FloatingZoneOutline(
 
     private fun applyRectangle(value: ControlGeometry) {
         rectangle = value
+        onRectangleChanged(value)
         val container = parent as? ViewGroup ?: return
         val margins = layoutParams as? ViewGroup.MarginLayoutParams ?: return
         margins.leftMargin = (value.x - container.paddingLeft).roundToInt()

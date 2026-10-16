@@ -16,7 +16,8 @@ class FloatingRingView(
     context: Context,
     val config: FloatingRingConfig,
     backend: FloatingRingBackend,
-    private val onFinish: () -> Unit
+    private val onFinish: () -> Unit,
+    finishIgnoresSwipes: Boolean = false
 ) : View(context) {
     val geometry = FloatingRingGeometry(config, resources.displayMetrics.density)
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -25,7 +26,8 @@ class FloatingRingView(
     val state = FloatingRingStateMachine(
         config, geometry, backend, HandlerButtonAimPayloadScheduler(), SystemClock::uptimeMillis,
         onStateChanged = { currentStatus = it; invalidate() },
-        onFinish = onFinish
+        onFinish = onFinish,
+        finishIgnoresSwipes = finishIgnoresSwipes
     )
 
     init { isClickable = true }
@@ -113,8 +115,10 @@ class FloatingRingView(
         super.onDraw(canvas)
         val cx = geometry.center.x
         val cy = geometry.center.y
+        val compactAim = config.compactAimBoosts && config.aim.participateInBoosts &&
+            currentStatus.pointerId >= 0 && currentStatus.role == FloatingStartRole.AIM
         paint.style = Paint.Style.FILL
-        if (config.movement.enabled) {
+        if (config.movement.enabled && !compactAim) {
             paint.color = Color.argb(180, 42, 69, 96)
             canvas.drawCircle(cx, cy, geometry.movementRadius, paint)
         }
@@ -131,7 +135,7 @@ class FloatingRingView(
                 canvas.drawText(knob.name.take(8), point.x, point.y + 4f * geometry.density, paint)
             }
         }
-        if (config.movement.enabled) {
+        if (config.movement.enabled && !compactAim) {
             paint.color = Color.WHITE
             canvas.drawCircle(cx + currentStatus.movementX * geometry.movementRadius,
                 cy + currentStatus.movementY * geometry.movementRadius, 7f * geometry.density, paint)

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.requiredFormatVersion
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
@@ -26,6 +27,8 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -122,6 +125,7 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
         "Profile format $encodedVersion is newer than supported format " +
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
+    requireFloatingOptionsFormat(element.jsonObject, encodedVersion)
     val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
         .copy(formatVersion = encodedVersion)
     val result = validateControllerProfile(decoded, profileName)
@@ -133,6 +137,31 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
         }
     return result.copy(warnings = (result.warnings + missingFieldWarnings).distinct())
 }
+
+/** Check new saved behavior before typed decoding, including settings on inactive zones. */
+internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
+    val hasNewOptions = (profile["pages"] as? JsonArray).orEmpty().any { page ->
+        ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty().any { zone ->
+            (zone as? JsonObject)?.let(::floatingZoneHasExtendedOptions) == true
+        }
+    }
+    require(!hasNewOptions || version >= FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION) {
+        "The saved floating options require controller profile format $FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+}
+
+internal fun floatingZoneHasExtendedOptions(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject
+    return (zone["finishIgnoresSwipes"] as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("compactAimBoosts") as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("adjacentMovementBoosts") as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("knobs") as? JsonArray).orEmpty().any { knob ->
+            ((knob as? JsonObject)?.get("fire") as? JsonObject)?.let(::ringFireHasExtendedOptions) == true
+        }
+}
+
+internal fun ringFireHasExtendedOptions(fire: JsonObject): Boolean =
+    (((fire["returnFire"] as? JsonObject)?.get("startOnBoostEntry")) as? JsonPrimitive)?.booleanOrNull == true
 
 fun encodeControllerProfile(profile: ControllerProfile): String {
     validateControllerProfileForSave(profile)?.let { throw IllegalArgumentException(it) }
@@ -206,6 +235,7 @@ fun decodeControllerProfileTransfer(
         "Profile format $profileFormatVersion is newer than supported format " +
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
+    requireFloatingOptionsFormat(encodedProfile, profileFormatVersion)
 
     val transfer = json.decodeFromJsonElement<ControllerProfileTransferFile>(element)
 

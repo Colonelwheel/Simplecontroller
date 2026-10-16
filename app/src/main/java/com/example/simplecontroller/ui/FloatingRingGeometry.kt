@@ -31,6 +31,32 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
 
     fun distance(x: Float, y: Float): Float = hypot(x - center.x, y - center.y)
     fun insideAim(x: Float, y: Float): Boolean = distance(x, y) <= innerRadius
+
+    /** Only a captured Aim gesture may borrow Movement's band; saved/direct geometry stays fixed. */
+    fun boostDistance(
+        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false
+    ): Float =
+        if (compactAim && config.compactAimBoosts) when (stage) {
+            RingBoostStage.ONE -> innerRadius
+            RingBoostStage.TWO -> movementRadius
+        } else if (adjacentMovement && config.adjacentMovementBoosts) when (stage) {
+            RingBoostStage.ONE -> movementRadius
+            RingBoostStage.TWO -> movementRadius + (config.boost2.distanceDp - config.boost1.distanceDp) * density
+        } else config.boost(stage).distanceDp * density
+
+    fun boostHysteresis(
+        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false
+    ): Float {
+        val saved = config.boost(stage).hysteresisDp * density
+        if (!(compactAim && config.compactAimBoosts) && !(adjacentMovement && config.adjacentMovementBoosts)) return saved
+        val bandWidth = when (stage) {
+            RingBoostStage.ONE -> boostDistance(stage, compactAim, adjacentMovement)
+            RingBoostStage.TWO -> boostDistance(stage, compactAim, adjacentMovement) -
+                boostDistance(RingBoostStage.ONE, compactAim, adjacentMovement)
+        }
+        // A large value valid for the original radius must not trap a compressed boost on.
+        return min(saved, bandWidth / 2f)
+    }
     fun knobCenter(knob: RingAimKnob): RingPoint =
         RingPoint(center.x + knob.x * innerRadius, center.y + knob.y * innerRadius)
 
@@ -87,10 +113,13 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
     }
 
     /** Editor feedback only: sector endpoints that cannot be reached in the usable canvas. */
-    fun unreachableDirections(stage: RingBoostStage, origin: RingPoint, canvas: RingRect): Set<String> {
+    fun unreachableDirections(
+        stage: RingBoostStage, origin: RingPoint, canvas: RingRect,
+        compactAim: Boolean = false, adjacentMovement: Boolean = false
+    ): Set<String> {
         val boost = if (stage == RingBoostStage.ONE) config.boost1 else config.boost2
         if (!boost.enabled) return emptySet()
-        val radius = boost.distanceDp * density
+        val radius = boostDistance(stage, compactAim, adjacentMovement)
         val cx = origin.x + center.x
         val cy = origin.y + center.y
         return buildSet {

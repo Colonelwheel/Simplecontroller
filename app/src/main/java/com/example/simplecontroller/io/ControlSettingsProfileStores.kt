@@ -10,6 +10,7 @@ import com.example.simplecontroller.model.TouchAimManualProfile
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -220,5 +221,12 @@ fun requireSupportedFloatingBoostSchema(value: JsonObject) {
     val version = value["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
     require(version in 1..FloatingBoostProfile.CURRENT_SCHEMA_VERSION) {
         "Boost profile version $version is newer than supported version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION} or invalid."
+    }
+    val actions = value["ringAimActions"] as? JsonObject
+    val hasNewOption = (actions?.get("knobActions") as? JsonArray).orEmpty().any { fire ->
+        (fire as? JsonObject)?.let(::ringFireHasExtendedOptions) == true
+    }
+    require(version >= FloatingBoostProfile.CURRENT_SCHEMA_VERSION || !hasNewOption) {
+        "The saved ring actions require boost profile version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION}."
     }
 }

@@ -1037,3 +1037,5 @@ change. See [Aim control options](AIM_CONTROL_OPTIONS.md) for details.
 ## Floating controls
 
 See [FLOATING_CONTROLS.md](FLOATING_CONTROLS.md). In Edit, use Add or hold Edit to create/configure zones. In Play, hold Edit for the accessible scoped Finish list. Floating features require a compatible updated Windows receiver; existing controls retain their legacy/Pico path. No installed receiver or APK is changed by a build.
+
+The working version adds optional closer Boost boundaries in Ring geometry, visible boost guides on the Edit canvas, **Finish ignores swipes** in zone settings, and **Start fire delay when entering Boost** in each aim knob's firing settings. Existing profiles keep their previous behavior until these options are enabled. The working APK is separate from the public release download until explicitly promoted.

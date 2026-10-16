@@ -10,7 +10,8 @@ const val BUTTON_AIM_GAME_MOUSE_CONTROLLER_PROFILE_FORMAT_VERSION = 7
 const val CAMERA_FOLLOW_CONTROLLER_PROFILE_FORMAT_VERSION = 8
 const val BUTTON_AIM_BOUNDARY_CANCEL_CONTROLLER_PROFILE_FORMAT_VERSION = 9
 const val FLOATING_CONTROLLER_PROFILE_FORMAT_VERSION = 10
-const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = FLOATING_CONTROLLER_PROFILE_FORMAT_VERSION
+const val FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION = 11
+const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
 
 @Serializable
 data class ControllerPage(
@@ -31,6 +32,8 @@ data class ControllerProfile(
 
 /** Keep legacy-only files readable by earlier apps; new mouse controls require an aware reader. */
 fun ControllerProfile.requiredFormatVersion(): Int = when {
+    pages.any { page -> page.floatingZones.any(FloatingZone::hasExtendedFloatingConfiguration) } ->
+        FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
     pages.any { page -> page.floatingZones.isNotEmpty() || page.controls.any {
         it.mouseSuppressCameraFollow || it.floatingLocalAction != FloatingLocalAction.NONE ||
             it.floatingActionTargetId.isNotEmpty()
