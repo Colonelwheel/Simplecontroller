@@ -6,7 +6,7 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-- [Click here for the app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/SimpleController.apk)
+- [Click here for the app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/SimpleController.apk) (Recommended to tap this link through your phone browser)
 - [Click here for the exe for your PC](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/SimpleControllerReceiver.exe)
 - [Click here for the ViGEm driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/ViGEmBus_1.22.0_x64_x86_arm64.exe)
 - [Click here for the facial input](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) — optional standalone Windows app; [setup and source](facial-input/README.md).
