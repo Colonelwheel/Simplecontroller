@@ -25,6 +25,7 @@ from .profiles import (apply_profile, list_profiles, load_profile, save_profile,
                        apply_movement_profile, list_movement_profiles,
                        load_movement_profile, save_movement_profile)
 from .movement import KEYS as KEY_CHOICES, XBOX_BUTTONS
+from .packaging_runtime import model_path_for_settings, resource_collector_launch
 
 
 class PointerComboBox(QComboBox):
@@ -1086,20 +1087,19 @@ class MainWindow(QMainWindow):
         self.motion_button.setText(("Hide" if shown else "Show") + " optional face-position movement controls")
 
     def _launch_resources(self):
-        project = Path(__file__).resolve().parents[2]
-        output = project / "private" / "resource-tests"
-        command = [sys.executable, "-B", str(project / "scripts" / "collect_resources.py"),
-                   "--delay", "30", "--warmup", "60", "--duration", "300", "--facial-pid", str(os.getpid()),
-                   "--label", self.resource_label.currentData(), "--output-root", str(output)]
+        arguments = ["--delay", "30", "--warmup", "60", "--duration", "300", "--facial-pid", str(os.getpid()),
+                     "--label", self.resource_label.currentData()]
         if self.resource_game.text().strip():
-            command.extend(("--game", self.resource_game.text().strip()))
+            arguments.extend(("--game", self.resource_game.text().strip()))
         if self.resource_presentmon.text().strip():
-            command.extend(("--presentmon", self.resource_presentmon.text().strip()))
+            arguments.extend(("--presentmon", self.resource_presentmon.text().strip()))
+        launch = resource_collector_launch(arguments, self.settings_path)
         try:
-            subprocess.Popen(command, cwd=project, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            subprocess.Popen(launch.command, cwd=launch.cwd, env=launch.environment,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              close_fds=True)
-            self.resource_status.setText(f"Queued independent collector: 30-second delay, 60-second warmup, 300-second sample. New run files under {output}. Keep comparison conditions stable; no app or camera is started or stopped.")
+            self.resource_status.setText(f"Queued independent collector: 30-second delay, 60-second warmup, 300-second sample. New run files under {launch.output_root}. Keep comparison conditions stable; no app or camera is started or stopped.")
         except OSError as exc:
             self.resource_status.setText("Collector could not start: " + str(exc))
 
@@ -1641,7 +1641,7 @@ class MainWindow(QMainWindow):
             self.save_status.setText("Apply the pending camera selection before saving settings.")
             return
         try:
-            self.settings = replace(self.settings, model_path=str(self.model_path) if self.model_path else None)
+            self.settings = replace(self.settings, model_path=model_path_for_settings(self.model_path))
             saved_path = save_settings(self.settings, self.settings_path)
             self.save_status.setText(f"Saved settings: {saved_path or self.settings_path}")
         except (OSError, ValueError) as exc:

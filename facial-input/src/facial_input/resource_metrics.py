@@ -452,7 +452,7 @@ def collect(output_root, label="custom", game="", delay=30, warmup=60, duration=
     return path
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--delay", type=float, default=30)
     parser.add_argument("--warmup", type=float, default=60)
@@ -462,7 +462,7 @@ def main():
     parser.add_argument("--facial-pid", type=int)
     parser.add_argument("--presentmon", type=Path)
     parser.add_argument("--output-root", type=Path, required=True)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     collect(**vars(args))
 
 

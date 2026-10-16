@@ -8,6 +8,13 @@ import sys
 
 
 def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["--collect-resources"]:
+        from .packaging_runtime import prepare_resource_collector
+        prepare_resource_collector()
+        from .resource_metrics import main as collect_resources
+        collect_resources(arguments[1:])
+        return 0
     parser = argparse.ArgumentParser(description="Local facial controller input using shared frames or a standalone webcam")
     parser.add_argument("--model", type=Path, help="Local MediaPipe Face Landmarker .task model")
     parser.add_argument("--feed-name", help="Explicit local shared-memory camera feed name")
@@ -18,7 +25,7 @@ def main(argv=None):
                         help="Standalone capture detail; inference still uses a bounded face crop")
     parser.add_argument("--demo", action="store_true", help="Synthetic UI demo: no camera, controller, or inference")
     parser.add_argument("--start-minimized", action="store_true")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     from PySide6.QtWidgets import QApplication, QMessageBox
     from .settings import default_settings_path, load_settings
     from .gui import MainWindow
@@ -35,10 +42,8 @@ def main(argv=None):
         if args.camera_resolution is not None:
             settings = replace(settings, camera_resolution=args.camera_resolution)
         settings.validate()
-        model_path = args.model or (Path(settings.model_path) if settings.model_path else None)
-        bundled_model = Path(__file__).resolve().parents[2] / "models" / "face_landmarker.task"
-        if model_path is None and bundled_model.is_file():
-            model_path = bundled_model
+        from .packaging_runtime import resolve_model_path
+        model_path = resolve_model_path(args.model, settings.model_path)
         window = MainWindow(settings, model_path=model_path, feed_name=args.feed_name,
                             settings_path=settings_path, demo=args.demo)
     except (OSError, ValueError) as exc:

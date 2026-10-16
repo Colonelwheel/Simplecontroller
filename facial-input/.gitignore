@@ -13,3 +13,4 @@ deliveries/*/pyinstaller-cache/
 deliveries/*/cache/
 deliveries/*/temp/
 integrations/receiver/.test-artifacts/
+deliveries/windows-app/

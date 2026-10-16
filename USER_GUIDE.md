@@ -154,6 +154,20 @@ To convert existing Buttons, choose **+ → Floating Button / group from selecti
 
 To reuse a complete ring, open its zone settings and **Save full ring / activation zone preset**. In another profile choose **+ → Floating ring → Saved Presets → Add a new ring to this profile**. Review and Save the zone, then save the controller profile. Full presets include both saved orientation rectangles and ring configuration; grouped Buttons are excluded. Boost-only profiles are narrower and preserve the target's movement and aiming feel.
 
+## Optional facial input
+
+[Download FacialInput.exe](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) for Windows 10/11 x64 to add expression buttons and optional face movement through the same receiver. The standalone app includes Python 3.12, MediaPipe, OpenCV, the Qt GUI, and its verified Face Landmarker model. After download, launch is offline: no separate Python installation, pip, model download, or administrator access is required. Install ViGEmBus separately and keep one matching SimpleController receiver running; the facial app creates no additional virtual controller.
+
+1. Open `FacialInput.exe`; it starts **paused**.
+2. Choose **Standalone webcam**, select your camera, then **Apply camera / retry**. A compatible local shared-camera publisher is an optional alternative. Select the face region with two separate corner taps if needed.
+3. Use **Calibrate** to collect neutral samples and comfortable expressions. Review thresholds, then use **Test (no output)** to check deliberate actions and ordinary speech/blinking without sending game input.
+4. Choose a binding, Tap or Hold, and Player. Select **Start** when ready; fresh tracking, receiver readiness, and neutral checks still apply. **Pause** stops facial output.
+5. Use **Save Settings** to keep your changes. Existing settings and saved profiles stay under `%LOCALAPPDATA%\FacialGamingInput`; updating the EXE does not require deleting them.
+
+Processing stays local; camera images are not recorded or uploaded. Closing the window quits; **Minimize to tray** leaves it running. Optional movement, wink and boost settings need deliberate setup. Phone and face inputs can overlap, so another held source may mask a facial tap's release edge. Tune and test a simple binding first.
+
+The [facial-input guide](facial-input/README.md) covers source installation, developer packaging, synthetic package checks, and troubleshooting. Package checks do not establish webcam recognition, comfort, or game compatibility.
+
 ## Troubleshooting
 
 - **Nothing reaches the PC:** check that exactly one receiver is running, the displayed IP is correct, the phone uses UDP `42734`, and Firewall permits this receiver. Confirm the devices share a reachable network rather than an isolated guest network.
@@ -166,4 +180,4 @@ To reuse a complete ring, open its zone settings and **Save full ring / activati
 
 Receiver logs are under `%LOCALAPPDATA%\SimpleControllerReceiver\touchpad_logs`. When reporting an issue, include app/receiver versions, connection type, a minimal payload example, and what happened. Separate controller-tester results from game behavior.
 
-Optional [Facial Gaming Input](facial-input/README.md) can share the compatible receiver; follow its own setup instructions. Public source is under [source/android](source/android/) and [source/receiver](source/receiver/). Compilation and automated checks do not establish touch comfort, camera behavior, or compatibility with every game.
+Public Android and receiver source is under [source/android](source/android/) and [source/receiver](source/receiver/). The [VoiceAttack guide](voiceattack/USER_GUIDE.md) covers optional voice commands through the receiver. Compilation and automated checks do not establish touch comfort, camera behavior, or compatibility with every game.
