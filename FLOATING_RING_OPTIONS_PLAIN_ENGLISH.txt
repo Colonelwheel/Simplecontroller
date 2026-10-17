@@ -369,6 +369,13 @@ returned inward, also enable Hold latch. For REPEAT, also enable Repeat continua
 countdown is different from allowing the action outside its area. Lift before activation still
 cancels it.
 
+"Skip Boost 2 delay on direct touch" is OFF by default. Enable it for an immediate B2 action on
+a fresh direct touch while keeping "Boost 2 activation delay (ms)" for swiping into B2. It also
+works when the zone's saved starting role is BOOST_TWO. Swiping back into B2 later with that same
+finger still uses the delay, unless its action is already active or latched. The option belongs
+to the selected Shared/Movement/Aim Boost 2 settings and is saved in reusable Boost profiles.
+It does not skip the aim knob's qualified firing delay or shorten Tap/Repeat press/release times.
+
 11. CUSTOM RADIAL GEOMETRY AND PREVIEWS
 
 In either bank's "Custom radial geometry", "Use custom Movement boost geometry" or "Use custom Aim
@@ -488,6 +495,11 @@ B1: enabled, Fallback LT:1.0, directions blank, HOLD, Hold latch ON, retain on l
 enabled, Fallback RT:1.0, directions blank, HOLD, activation delay 300, cancel pending B2 delay on
 exit OFF, Hold latch ON, retain on lift OFF. Keep Repeat continuation OFF.
 
+To make a fresh direct B2 touch fire immediately while that upward swipe still waits 300 ms,
+enable B2's Direct taps enabled and Skip Boost 2 delay on direct touch. Leave the activation
+delay at 300. The saved starting role still selects the direct action bank. This bypass affects
+B2's own RT binding, so leave the knob's competing qualified RT firing OFF as above.
+
 Sweep beyond B1 to hold ADS, then beyond B2 to start the 300 ms RT wait. You may return inward
 before expiry: cancel OFF preserves the timer AND Hold latch ON permits activation outside B2.
 Lift before activation cancels it. Lift after activation releases both holds because retention is
@@ -553,3 +565,26 @@ A fresh touch on that surfaced direct band starts a neutral fine-Aim grab immedi
 starting role AIM makes it use Aim bank actions. For a dormant zone to start there immediately,
 choose the corresponding BOOST starting role and set its explicit bank to Aim. This still starts
 only the selected Boost; B2-to-B1 return and entry-timed firing remain separate opt-ins.
+
+G. FIRE WHEN YOU RETURN INSIDE AIM
+
+Start AIM and enable Aiming participates in boosts. Enable B1 and use blank payloads if it should
+only qualify firing. If B1 should also hold ADS, use LT:1.0, HOLD and Hold latch ON instead.
+Keep separate actions OFF for this example and use Shared Boost settings. Keep B2 disabled at
+first so it cannot supply a second RT action.
+
+For LT to release when you lift, leave B1's Retain activated output on lift OFF. Hold latch can
+stay ON to keep LT while you slide inward. Also leave the knob's Retain ADS on lift OFF if it
+has its own LT binding; one owner's release cannot clear another owner's retained LT.
+
+In the selected Aim knob, set ADS blank, Fire mode HOLD and Fire payload RT:1.0. Enable qualified
+boost firing ON; qualify B1 only; Start fire delay when entering Boost OFF; Firing delay 0.
+Leave fire retention OFF. Cross B1, then return anywhere inside the Aim circle: RT starts there.
+You do not need to reach the exact center. Use Firing delay 300 instead if RT should wait 300 ms
+after that return. Continue fire outside aim area OFF makes firing stop on another exit; ON
+allows already activated firing to continue outside. Lift still stops it with retention OFF.
+
+For a direct B2 start to qualify this same return behavior, enable B2/direct taps, qualify B2 in
+the knob, and enable one of the direct-Aim options. Leave B2's own RT payload blank so this knob
+is the RT source. Skip Boost 2 delay on direct touch does not bypass this knob's return-fire
+timer: it only affects B2's separate action binding.

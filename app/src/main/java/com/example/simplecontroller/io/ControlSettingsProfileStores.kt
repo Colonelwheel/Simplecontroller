@@ -222,11 +222,14 @@ fun requireSupportedFloatingBoostSchema(value: JsonObject) {
     require(version in 1..FloatingBoostProfile.CURRENT_SCHEMA_VERSION) {
         "Boost profile version $version is newer than supported version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION} or invalid."
     }
+    require(version >= FloatingBoostProfile.DIRECT_TOUCH_DELAY_SCHEMA_VERSION || !boostPairHasDirectTouchDelayOption(value)) {
+        "The saved direct-touch boost delay option requires boost profile version ${FloatingBoostProfile.DIRECT_TOUCH_DELAY_SCHEMA_VERSION}."
+    }
     val actions = value["ringAimActions"] as? JsonObject
     val hasNewOption = (actions?.get("knobActions") as? JsonArray).orEmpty().any { fire ->
         (fire as? JsonObject)?.let(::ringFireHasExtendedOptions) == true
     }
-    require(version >= FloatingBoostProfile.CURRENT_SCHEMA_VERSION || !hasNewOption) {
-        "The saved ring actions require boost profile version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION}."
+    require(version >= FloatingBoostProfile.RING_OPTIONS_SCHEMA_VERSION || !hasNewOption) {
+        "The saved ring actions require boost profile version ${FloatingBoostProfile.RING_OPTIONS_SCHEMA_VERSION}."
     }
 }

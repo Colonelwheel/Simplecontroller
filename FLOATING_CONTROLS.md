@@ -69,6 +69,8 @@ Each aim knob also offers **Start fire delay when entering Boost**, off by defau
 
 Boost-2 entry delay is separate from return-fire delay. It freezes the selected payload/action. UP before an unexpired deadline cancels the action completely, including with future retention enabled. A delayed Release-shot arms at its deadline and fires only on an eligible later lift; CANCEL and Finish never fire it. There is at most one waiting finite shot with a real release gap. Conflicting fire sources are rejected or indicated rather than stealing owners.
 
+Each Shared/Movement/Aim Boost 2 sheet offers **Skip Boost 2 delay on direct touch**, off by default. Enable it to bypass that stage's activation delay only for a fresh direct Boost 2 DOWN, including a saved Boost 2 summon. Swipe entry and later same-pointer re-entry retain the configured delay; an action already held/latched is not restarted. The selected bank, direct fine aiming, inward Boost 1 transition, Tap/Repeat press/gap, qualified knob-fire timer, and normal exit/lift/Finish rules are unchanged. This action setting is included in selected-bank boost profiles and complete ring presets.
+
 Fine sensitivity is opt-in, starts immediately on a selected boost return, and follows the selected backend/profile semantics. It remains while this ring's qualifying owned ADS latch remains, including later touches, or is gesture-scoped for a nonlatched qualifier. It does not change another aiming surface.
 
 ## Scoped actions and Camera Follow
@@ -87,6 +89,8 @@ Enabling any of the closer-boost, Finish-swipe or Boost-entry fire-timing option
 
 Stored role-bank settings, including disabled banks/custom geometry, or immediate direct aiming require controller format 12 and full-ring preset schema 3. Existing options alone still use format 11/schema 2; older schemas remain readable. No transfer or backup envelope change is required.
 
+An enabled direct Boost 2 delay bypass requires controller format 13, full-ring preset schema 4, and named boost-profile schema 3, including when stored in disabled settings. With the bypass off or absent, each writer retains the earlier conditional format/schema. Transfer and backup envelopes stay unchanged.
+
 Save a named boost profile as a frozen snapshot. Select one source bank when saving and one target bank when applying; Shared is available while separate actions are off. Apply boost settings only preserves the target's enable choices, custom geometry, other bank, layers, placement, movement and all normal/fine aiming tuning. It never implicitly replaces both banks. An optional saved ring aiming/actions preset has its own explicit apply action and validates knob-slot mapping before any change. Editing/deleting a reusable profile does not alter previously applied controls. Full-ring presets capture both banks and their geometry, including inactive settings.
 
 To move a complete tested ring into another controller profile, open its zone settings and choose Save full ring / activation zone preset. This captures the current draft's name, enabled switches, both saved activation rectangles, ring dimensions, movement, normal/fine aiming, knob positions and actions, ADS/fire, boosts, and starting settings. It saves configuration only, with no live position, held output or timers. Grouped Buttons are excluded from this library.
@@ -98,6 +102,14 @@ Summoned position/visibility, pointers, timers, suppression, ownership and armed
 ## Verification boundaries
 
 JVM tests exercise pure ring transitions, pulse timing, ownership, geometry, serialization, version rejection and copies. Receiver tests use fake native outputs and local mock sockets. APK/AAB compilation and lint do not establish phone touch feel, Android dispatch on hardware, audio/haptics, receiver deployment, game timing or Pico behavior. No connected primary-phone test/install, data clearing, receiver EXE replacement or firmware flash belongs to these checks.
+
+## Direct Boost 2 delay bypass verification - October 16, 2026
+
+Both Android variants passed 473 JVM tests with zero failures, errors or skips. Sideload APK and Play AAB packaging passed; full lint passed with zero errors (205 Sideload warnings, 203 Play warnings). Checks used the existing isolated build output and Gradle cache with one worker and limited JVM memory.
+
+Synthetic checks verify immediate action on a fresh direct Boost 2 touch when the option is enabled, the original wait when disabled, and a 300 ms wait on swipe entry or later same-finger re-entry. They also cover selected-bank actions, unchanged 20/80 ms Repeat press/gap timing, the independent qualified-fire deadline, lift/CANCEL/Finish cleanup, ownership denial, and profile/preset/backup round trips using the conditional controller 13, full-ring 4 and named boost 3 formats. Existing formats remain unchanged when the option is absent or off.
+
+The plain-English guide now includes return-to-Aim firing and releasing Boost 1 LT on lift. Receiver source and protocol are unchanged. Phone touch/game behavior is not established by these checks. Installation awaits separate confirmation that profile edits are saved; the working APK has not been promoted to the public release download.
 
 ## Per-role boost geometry and direct aiming verification - October 16, 2026
 

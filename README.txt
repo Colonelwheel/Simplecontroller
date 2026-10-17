@@ -14,6 +14,8 @@ For the current working branch's floating rings, optional per-role boost actions
 
 For every floating-ring option explained in plain English, with suggested combinations at the bottom, open [Floating ring options TXT guide](FLOATING_RING_OPTIONS_PLAIN_ENGLISH.txt).
 
+The working build also offers an optional Skip Boost 2 delay on direct touch switch: direct Boost 2 can act immediately while swipe entry keeps its configured delay.
+
 ---
 
 # 1. What Simple Controller Does

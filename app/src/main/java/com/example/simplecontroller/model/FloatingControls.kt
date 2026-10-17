@@ -179,7 +179,8 @@ data class RingBoostSettings(
     val hysteresisDp: Float = 2f,
     val directTapEnabled: Boolean = false,
     val directInnerDistanceDp: Float = 120f,
-    val directOuterDistanceDp: Float = 144f
+    val directOuterDistanceDp: Float = 144f,
+    val skipDelayOnDirectTouch: Boolean = false
 ) {
     fun payloadFor(direction: StickDirection): String =
         directionalPayloads.forDirection(direction).ifBlank { payload }
@@ -455,6 +456,7 @@ private fun boostPairValidationError(first: RingBoostSettings, second: RingBoost
     first.validationError()?.let { return it }
     second.validationError()?.let { return it }
     if (first.activationDelayMs != 0L) return "Only Boost 2 supports an activation delay."
+    if (first.skipDelayOnDirectTouch) return "Only Boost 2 supports skipping delay on direct touch."
     if (second.distanceDp <= first.distanceDp || first.directOuterDistanceDp > second.directInnerDistanceDp) {
         return "Boost distances and finite direct areas must be ordered."
     }
@@ -527,10 +529,11 @@ data class FloatingBoostProfile(
 ) {
     fun validationError(): String? {
         if (schemaVersion !in LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION) return "This boost profile version is not supported."
-        if (schemaVersion < requiredSchemaVersion()) return "The saved ring actions require boost profile version $CURRENT_SCHEMA_VERSION."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved ring actions require boost profile version ${requiredSchemaVersion()}."
         if (name.trim().length !in 1..80) return "Choose a boost profile name from 1 to 80 characters."
         boost1.validationError()?.let { return it }
         boost2.validationError()?.let { return it }
+        if (boost1.skipDelayOnDirectTouch) return "Only Boost 2 supports skipping delay on direct touch."
         if (boost1.activationDelayMs != 0L || boost2.distanceDp <= boost1.distanceDp ||
             boost1.directOuterDistanceDp > boost2.directInnerDistanceDp) return "The saved boost stages are not ordered."
         return ringAimActions?.validationError()
@@ -566,13 +569,17 @@ data class FloatingBoostProfile(
         ).takeIf { it.validationError() == null }
     }
 
-    fun requiredSchemaVersion(): Int = if (ringAimActions?.knobActions.orEmpty().any {
-        it.returnFire.startOnBoostEntry
-    }) CURRENT_SCHEMA_VERSION else LEGACY_SCHEMA_VERSION
+    fun requiredSchemaVersion(): Int = when {
+        boost1.skipDelayOnDirectTouch || boost2.skipDelayOnDirectTouch -> DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+        ringAimActions?.knobActions.orEmpty().any { it.returnFire.startOnBoostEntry } -> RING_OPTIONS_SCHEMA_VERSION
+        else -> LEGACY_SCHEMA_VERSION
+    }
 
     companion object {
         const val LEGACY_SCHEMA_VERSION = 1
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val RING_OPTIONS_SCHEMA_VERSION = 2
+        const val DIRECT_TOUCH_DELAY_SCHEMA_VERSION = 3
+        const val CURRENT_SCHEMA_VERSION = DIRECT_TOUCH_DELAY_SCHEMA_VERSION
     }
 }
 
@@ -583,13 +590,19 @@ fun FloatingRingConfig.captureBoostProfile(
     if (boostBanks?.enabled == true && bank == null) return null
     val selected = bank?.let { seedBoostBanks().settings(it) }
     return FloatingBoostProfile(
-        schemaVersion = if (includeRingAimActions && knobs.any { it.fire.returnFire.startOnBoostEntry })
-            FloatingBoostProfile.CURRENT_SCHEMA_VERSION else FloatingBoostProfile.LEGACY_SCHEMA_VERSION,
         id = id, name = name.trim(), createdAtEpochMs = nowMs, updatedAtEpochMs = nowMs,
         boost1 = selected?.boost1 ?: boost1, boost2 = selected?.boost2 ?: boost2,
         ringAimActions = if (includeRingAimActions) RingAimActionPreset(aim, knobs.map { it.fire }) else null
-    ).takeIf { it.validationError() == null }
+    ).let { it.copy(schemaVersion = it.requiredSchemaVersion()) }.takeIf { it.validationError() == null }
 }
+
+/** Even an inactive stored stage needs a reader that can retain this opt-in behavior. */
+fun FloatingZone.hasDirectTouchBoostDelayConfiguration(): Boolean = ring?.let { config ->
+    config.boost1.skipDelayOnDirectTouch || config.boost2.skipDelayOnDirectTouch ||
+        config.boostBanks?.let { banks ->
+            listOf(banks.movement, banks.aim).any { it.boost1.skipDelayOnDirectTouch || it.boost2.skipDelayOnDirectTouch }
+        } == true
+} == true
 
 /** Presence is meaningful even when separate actions and both custom layouts are switched off. */
 fun FloatingZone.hasRoleBoostConfiguration(): Boolean = ring?.let {

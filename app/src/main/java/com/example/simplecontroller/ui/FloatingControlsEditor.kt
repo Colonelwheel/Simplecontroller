@@ -486,6 +486,10 @@ class FloatingControlsEditor(
         val inner=f.number("Direct area inner distance (dp)",b.directInnerDistanceDp)
         val outer=f.number("Direct area outer distance (dp)",b.directOuterDistanceDp)
         val delay=if(stage==RingBoostStage.TWO) f.millis("Boost 2 activation delay (ms)",b.activationDelayMs) else { {0L} }
+        val skipDirectDelay=if(stage==RingBoostStage.TWO)
+            f.flag("Skip Boost 2 delay on direct touch",b.skipDelayOnDirectTouch) else { {false} }
+        if(stage==RingBoostStage.TWO)
+            f.note("A fresh direct Boost 2 touch starts its action immediately. Swiping into Boost 2, including a later re-entry with the same finger, still uses the activation delay. Qualified firing and pulse timing keep their own settings.")
         val cancel=f.flag("Cancel pending Boost 2 delay on threshold exit",b.cancelDelayOnExit)
         f.note("Drag boosts are cumulative. Direct Boost 2 starts only Boost 2. Hold latch, Repeat continuation and lift retention are separate.")
         dialog((bank?.let { bankName(it)+" " } ?: "Shared ")+"Boost "+if(stage==RingBoostStage.ONE) "1" else "2",f) {
@@ -493,7 +497,7 @@ class FloatingControlsEditor(
                 directionalPayloads=DirectionalCommands(up=up(),down=down(),left=left(),right=right()),action=action(),
                 pulsePressMs=press(),pulseGapMs=gap(),latchOnExit=latch(),repeatAfterExit=repeat(),retainOnLift=retain(),
                 hysteresisDp=hyst(),directTapEnabled=direct(),directInnerDistanceDp=inner(),directOuterDistanceDp=outer(),
-                activationDelayMs=delay(),cancelDelayOnExit=cancel())
+                activationDelayMs=delay(),cancelDelayOnExit=cancel(),skipDelayOnDirectTouch=skipDirectDelay())
             v.validationError()?.let { return@dialog it }
             val candidate=if(bank==null) {
                 if(stage==RingBoostStage.ONE)c.copy(boost1=v) else c.copy(boost2=v)

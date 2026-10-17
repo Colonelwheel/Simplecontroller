@@ -39,7 +39,9 @@ data class FloatingRingPreset(
     companion object {
         const val LEGACY_SCHEMA_VERSION = 1
         const val RING_OPTIONS_SCHEMA_VERSION = 2
-        const val CURRENT_SCHEMA_VERSION = 3
+        const val ROLE_BOOST_SCHEMA_VERSION = 3
+        const val DIRECT_TOUCH_DELAY_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = DIRECT_TOUCH_DELAY_SCHEMA_VERSION
     }
 }
 
@@ -57,7 +59,8 @@ fun FloatingZone.captureRingPreset(id: String, name: String, nowMs: Long): Float
 }
 
 private fun FloatingZone.requiredRingPresetSchemaVersion(): Int = when {
-    hasRoleBoostConfiguration() -> FloatingRingPreset.CURRENT_SCHEMA_VERSION
+    hasDirectTouchBoostDelayConfiguration() -> FloatingRingPreset.DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+    hasRoleBoostConfiguration() -> FloatingRingPreset.ROLE_BOOST_SCHEMA_VERSION
     hasExtendedFloatingConfiguration() -> FloatingRingPreset.RING_OPTIONS_SCHEMA_VERSION
     else -> FloatingRingPreset.LEGACY_SCHEMA_VERSION
 }

@@ -28,7 +28,8 @@ fun requireSupportedFloatingRingPresetSchema(value: JsonObject) {
 internal fun requireFloatingRingPresetOptionsSchema(value: JsonObject, version: Int) {
     val zone = value["zone"] as? JsonObject
     val required = when {
-        zone != null && floatingZoneHasRoleBoostOptions(zone) -> FloatingRingPreset.CURRENT_SCHEMA_VERSION
+        zone != null && floatingZoneHasDirectTouchBoostDelayOption(zone) -> FloatingRingPreset.DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+        zone != null && floatingZoneHasRoleBoostOptions(zone) -> FloatingRingPreset.ROLE_BOOST_SCHEMA_VERSION
         zone != null && floatingZoneHasExtendedOptions(zone) -> FloatingRingPreset.RING_OPTIONS_SCHEMA_VERSION
         else -> FloatingRingPreset.LEGACY_SCHEMA_VERSION
     }

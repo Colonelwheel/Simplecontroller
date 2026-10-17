@@ -296,7 +296,7 @@ class FloatingRingStateMachine(
                         }
                     }
                 }
-                enterBoost(selected, direction(x + offsetX, y + offsetY), time)
+                enterBoost(selected, direction(x + offsetX, y + offsetY), time, directTouch = true)
             }
         }
         publish()
@@ -756,7 +756,9 @@ class FloatingRingStateMachine(
         }
     }
 
-    private fun enterBoost(boost: BoostRuntime, direction: StickDirection, eventTime: Long) {
+    private fun enterBoost(
+        boost: BoostRuntime, direction: StickDirection, eventTime: Long, directTouch: Boolean = false
+    ) {
         val settings = boost.settings
         visitedStages.add(boost.stage)
         boost.direction = direction
@@ -768,7 +770,10 @@ class FloatingRingStateMachine(
         if (fireStopped && config.knobs.any { backend.payloadsOverlap(payload, it.fire.firePayload) }) return
         if (adsStopped && (isAdsPayload(payload) ||
                 config.knobs.any { it.fire.adsPayload.isNotBlank() && backend.payloadsOverlap(payload, it.fire.adsPayload) })) return
-        if (settings.activationDelayMs > 0L) {
+        // Only a fresh direct Boost 2 DOWN can bypass its own activation wait. Later
+        // entries from this same pointer, qualified fire and pulse timing remain independent.
+        val skipActivationDelay = directTouch && boost.stage == RingBoostStage.TWO && settings.skipDelayOnDirectTouch
+        if (settings.activationDelayMs > 0L && !skipActivationDelay) {
             boost.pending = true
             boost.pendingPayload = payload
             val generation = ++boost.delayGeneration

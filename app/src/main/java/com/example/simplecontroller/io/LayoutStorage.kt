@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.requiredFormatVersion
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
@@ -145,6 +146,10 @@ internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
     val zones = (profile["pages"] as? JsonArray).orEmpty().flatMap { page ->
         ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty()
     }
+    require(version >= FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        zones.none { (it as? JsonObject)?.let(::floatingZoneHasDirectTouchBoostDelayOption) == true }) {
+        "The saved direct-touch boost delay option requires controller profile format $FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
     require(version >= FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION ||
         zones.none { (it as? JsonObject)?.let(::floatingZoneHasRoleBoostOptions) == true }) {
         "The saved per-role boost options require controller profile format $FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION."
@@ -158,6 +163,19 @@ internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
         "The saved floating options require controller profile format $FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION."
     }
 }
+
+internal fun floatingZoneHasDirectTouchBoostDelayOption(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject ?: return false
+    val banks = ring["boostBanks"] as? JsonObject
+    return boostPairHasDirectTouchDelayOption(ring) || listOf("movement", "aim").any { role ->
+        (banks?.get(role) as? JsonObject)?.let(::boostPairHasDirectTouchDelayOption) == true
+    }
+}
+
+internal fun boostPairHasDirectTouchDelayOption(value: JsonObject): Boolean =
+    listOf("boost1", "boost2").any { stage ->
+        (((value[stage] as? JsonObject)?.get("skipDelayOnDirectTouch")) as? JsonPrimitive)?.booleanOrNull == true
+    }
 
 internal fun floatingZoneHasRoleBoostOptions(zone: JsonObject): Boolean {
     val ring = zone["ring"] as? JsonObject ?: return false

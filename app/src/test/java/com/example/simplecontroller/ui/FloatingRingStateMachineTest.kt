@@ -86,6 +86,10 @@ class FloatingRingStateMachineTest {
         val cy get() = geometry.center.y
         fun down(role: FloatingStartRole = config.startRole, knobId: String = config.startKnobId) =
             state.down(7, cx, cy, clock.now, role, knobId)
+        fun directDown(role: FloatingStartRole = FloatingStartRole.BOOST_TWO): Boolean {
+            val anchor = geometry.startAnchor(role)
+            return state.down(7, anchor.x, anchor.y, clock.now, role)
+        }
         fun move(distance: Float) = state.sample(7, cx, cy - distance, clock.now)
         fun up(distance: Float = 0f) = state.up(7, cx, cy - distance, clock.now)
         fun firePresses() = backend.events.count { it == "fire:RT:1.0" }
@@ -374,6 +378,192 @@ class FloatingRingStateMachineTest {
         f.state.recenterMovement(); f.state.sample(7, x + 44f, y, 2L); assertEquals(0f, f.backend.movement.x, 0f)
         f.state.sample(7, x + 66f, y, 3L); assertEquals(.25f, f.backend.movement.x, .0001f)
         f.state.cancel(); f.clock.runCanceled(); assertEquals(RingPoint(0f, 0f), f.backend.movement)
+    }
+
+    private fun delayedDirectTwo(skip: Boolean = true, action: RingAction = RingAction.HOLD): FloatingRingConfig {
+        val base = combat(RingFireMode.NONE)
+        return base.copy(startRole = FloatingStartRole.BOOST_TWO,
+            boost2 = base.boost2.copy(directTapEnabled = true, activationDelayMs = 300L,
+                skipDelayOnDirectTouch = skip, action = action, pulsePressMs = 20L, pulseGapMs = 80L))
+    }
+
+    @Test fun directTwoDelayBypass_isOptInAndStartsOnlyOneAction() {
+        listOf(false, true).forEach { skip ->
+            val f = Fixture(delayedDirectTwo(skip))
+            assertTrue(f.directDown())
+            assertEquals(skip, "boost2" in f.backend.held)
+            assertEquals(!skip, f.state.status.pending)
+            f.clock.advance(299); assertEquals(skip, "boost2" in f.backend.held)
+            f.clock.advance(1); assertEquals("X360A", f.backend.held["boost2"])
+            assertEquals(1, f.backend.events.count { it == "boost2:X360A" })
+        }
+    }
+
+    @Test fun directTwoDelayBypass_swipesFromAimAndMovementStillWait() {
+        listOf(FloatingStartRole.AIM, FloatingStartRole.MOVEMENT).forEach { role ->
+            val f = Fixture(delayedDirectTwo())
+            assertTrue(f.down(role)); f.move(170f)
+            assertTrue(f.state.status.pending); assertFalse("boost2" in f.backend.held)
+            f.clock.advance(299); assertFalse("boost2" in f.backend.held)
+            f.clock.advance(1); assertEquals("X360A", f.backend.held["boost2"])
+        }
+    }
+
+    @Test fun directTwoDelayBypass_zeroActivationDelayRemainsImmediateForEveryEntry() {
+        listOf(false, true).forEach { skip ->
+            listOf(false, true).forEach { swipe ->
+                val base = delayedDirectTwo(skip)
+                val f = Fixture(base.copy(boost2 = base.boost2.copy(activationDelayMs = 0L)))
+                if (swipe) { f.down(FloatingStartRole.AIM); f.move(170f) } else f.directDown()
+                assertEquals("X360A", f.backend.held["boost2"])
+                assertFalse(f.state.status.pending)
+                f.clock.advance(300)
+                assertEquals(1, f.backend.events.count { it == "boost2:X360A" })
+            }
+        }
+    }
+
+    @Test fun directTwoDelayBypass_neverChangesDirectStageOneOrInventsStageTwo() {
+        val base = delayedDirectTwo()
+        val f = Fixture(base.copy(boost1 = base.boost1.copy(directTapEnabled = true)))
+        assertTrue(f.directDown(FloatingStartRole.BOOST_ONE))
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertFalse("boost2" in f.backend.held); assertFalse(f.state.status.pending)
+        f.clock.advance(300)
+        assertTrue(f.backend.events.none { it == "boost2:X360A" })
+    }
+
+    @Test fun directTwoDelayBypass_sameDirectPointerReentryUsesFullDelay() {
+        val f = Fixture(delayedDirectTwo())
+        f.directDown(); assertEquals("X360A", f.backend.held["boost2"])
+        f.clock.advance(50); f.move(0f); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(50); f.move(170f)
+        assertTrue(f.state.status.pending); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(299); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(1)
+        assertEquals(2, f.backend.events.count { it == "boost2:X360A" })
+        assertEquals(FloatingStartRole.BOOST_TWO, f.state.status.role)
+    }
+
+    @Test fun directTwoDelayBypass_directionChangeInsideDirectBandStillWaits() {
+        val base = delayedDirectTwo()
+        val f = Fixture(base.copy(boost2 = base.boost2.copy(payload = "",
+            directionalPayloads = DirectionalCommands(up = "X360A", right = "X360B"))))
+        f.directDown(); assertEquals("X360A", f.backend.held["boost2"])
+        f.clock.advance(10); f.state.sample(7, f.cx + 170f, f.cy, f.clock.now)
+        assertTrue(f.state.status.pending); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(299); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(1); assertEquals("X360B", f.backend.held["boost2"])
+    }
+
+    @Test fun directTwoDelayBypass_usesSavedRolesSelectedBankSetting() {
+        listOf(FloatingStartRole.AIM, FloatingStartRole.MOVEMENT).forEach { role ->
+            val base = banked(); val banks = base.boostBanks!!
+            val f = Fixture(base.copy(startRole = role, boostBanks = banks.copy(
+                movement = banks.movement.copy(boost2 = banks.movement.boost2.copy(
+                    directTapEnabled = true, activationDelayMs = 300L, skipDelayOnDirectTouch = false)),
+                aim = banks.aim.copy(boost2 = banks.aim.boost2.copy(
+                    directTapEnabled = true, activationDelayMs = 300L, skipDelayOnDirectTouch = true)))))
+            assertTrue(f.directDown())
+            val slot = if (role == FloatingStartRole.AIM) "aim:boost2" else "movement:boost2"
+            assertEquals(role == FloatingStartRole.AIM, slot in f.backend.held)
+            assertEquals(role != FloatingStartRole.AIM, f.state.status.pending)
+            f.clock.advance(300)
+            assertEquals(if (role == FloatingStartRole.AIM) "X360Y" else "X360B", f.backend.held[slot])
+            val other = if (role == FloatingStartRole.AIM) "movement:boost2" else "aim:boost2"
+            assertFalse(other in f.backend.held)
+        }
+    }
+
+    @Test fun directTwoDelayBypass_doesNotBypassIndependentQualifiedFireTimer() {
+        val base = entryFire()
+        val f = Fixture(base.copy(startRole = FloatingStartRole.BOOST_TWO, directBoostToAim = true,
+            boost2 = base.boost2.copy(directTapEnabled = true, activationDelayMs = 300L, skipDelayOnDirectTouch = true),
+            knobs = base.knobs.map { it.copy(fire = it.fire.copy(returnFire = it.fire.returnFire.copy(
+                qualifyingStages = setOf(RingBoostStage.TWO)))) }))
+        assertTrue(f.directDown()); assertEquals("X360A", f.backend.held["boost2"])
+        assertTrue(f.state.status.pending); assertEquals(0, f.firePresses())
+        f.clock.advance(299); assertEquals(0, f.firePresses())
+        f.clock.advance(1); assertEquals(1, f.firePresses())
+        assertEquals(1, f.backend.events.count { it == "boost2:X360A" })
+    }
+
+    @Test fun directTwoDelayBypass_preservesTapAndRepeatPressGapTiming() {
+        listOf(RingAction.TAP, RingAction.REPEAT).forEach { action ->
+            val f = Fixture(delayedDirectTwo(action = action))
+            assertTrue(f.directDown()); assertEquals("X360A", f.backend.held["boost2"])
+            f.clock.advance(19); assertTrue("boost2" in f.backend.held)
+            f.clock.advance(1); assertFalse("boost2" in f.backend.held)
+            assertTrue("boost2" in f.backend.reservations)
+            f.clock.advance(79); assertFalse("boost2" in f.backend.held)
+            f.clock.advance(1)
+            assertEquals(if (action == RingAction.REPEAT) 2 else 1,
+                f.backend.events.count { it == "boost2:X360A" })
+            assertEquals(action == RingAction.REPEAT, "boost2" in f.backend.held)
+        }
+    }
+
+    @Test fun directTwoDelayBypass_quickLiftCancelAndFinishKeepExistingActionCleanup() {
+        RingAction.entries.forEach { action ->
+            listOf("lift", "cancel", "finish").forEach { end ->
+                val f = Fixture(delayedDirectTwo(action = action))
+                assertTrue(f.directDown()); f.clock.advance(5)
+                when (end) {
+                    "lift" -> f.up(170f)
+                    "cancel" -> f.state.cancel()
+                    else -> f.state.finish()
+                }
+                assertEquals("$action / $end", action == RingAction.TAP && end == "lift", "boost2" in f.backend.held)
+                f.clock.advance(1000); f.clock.runCanceled()
+                assertFalse("$action / $end", "boost2" in f.backend.held)
+                assertFalse("boost2" in f.backend.reservations)
+                assertEquals(1, f.backend.events.count { it == "boost2:X360A" })
+            }
+        }
+    }
+
+    @Test fun directTwoDelayBypass_defaultOffAndSwipeEarlyLiftStillCancelUnexpiredDelay() {
+        listOf(false, true).forEach { swipe ->
+            val f = Fixture(delayedDirectTwo(skip = swipe))
+            if (swipe) { f.down(FloatingStartRole.AIM); f.move(170f) } else f.directDown()
+            assertTrue(f.state.status.pending)
+            f.clock.advance(10); f.up(170f); f.clock.advance(1000); f.clock.runCanceled()
+            assertTrue(f.backend.events.none { it == "boost2:X360A" })
+        }
+    }
+
+    @Test fun directTwoDelayBypass_oldReentryDeadlineCannotDuplicateLaterFreshDirectAction() {
+        val f = Fixture(delayedDirectTwo())
+        f.directDown(); f.move(0f); f.move(170f); assertTrue(f.state.status.pending)
+        f.clock.advance(100); f.up(170f)
+        assertTrue(f.directDown()); assertEquals("X360A", f.backend.held["boost2"])
+        f.clock.advance(1000); f.clock.runCanceled()
+        assertEquals(2, f.backend.events.count { it == "boost2:X360A" })
+        assertEquals("X360A", f.backend.held["boost2"])
+    }
+
+    @Test fun directTwoDelayBypass_preservesFineAimOwnershipAndLiftRetention() {
+        val base = delayedDirectTwo()
+        val f = Fixture(base.copy(directBoostStartsAim = true,
+            aim = base.aim.copy(continueOutside = true, fine = RingFineAimSettings(enabled = true)),
+            boost2 = base.boost2.copy(latchOnExit = true, retainOnLift = true)))
+        assertTrue(f.directDown()); assertEquals(1, f.backend.aimBegins)
+        assertEquals(.4f, f.backend.sensitivity.first(), 0f)
+        assertEquals("X360A", f.backend.held["boost2"])
+        assertFalse("ads" in f.backend.held); assertEquals(0, f.firePresses())
+        f.move(0f); f.up(); assertEquals("X360A", f.backend.held["boost2"])
+        f.state.finish(); f.clock.advance(1000); f.clock.runCanceled()
+        assertFalse("boost2" in f.backend.held)
+    }
+
+    @Test fun directTwoDelayBypass_deniedOutputNeverRetriesOrStealsOtherClaims() {
+        val f = Fixture(delayedDirectTwo())
+        f.backend.denied.add("boost2"); f.backend.held["other"] = "LT:1.0"
+        assertTrue(f.directDown()); assertTrue("boost2" in f.state.status.overridden)
+        assertFalse(f.state.status.pending); assertFalse("boost2" in f.backend.held)
+        f.clock.advance(1000); f.clock.runCanceled()
+        assertTrue(f.backend.events.none { it == "boost2:X360A" })
+        assertEquals("LT:1.0", f.backend.held["other"])
     }
 
     @Test fun pureAim_hasNoAutomaticAdsOrFire() {
