@@ -109,7 +109,9 @@ Both Android variants passed 473 JVM tests with zero failures, errors or skips. 
 
 Synthetic checks verify immediate action on a fresh direct Boost 2 touch when the option is enabled, the original wait when disabled, and a 300 ms wait on swipe entry or later same-finger re-entry. They also cover selected-bank actions, unchanged 20/80 ms Repeat press/gap timing, the independent qualified-fire deadline, lift/CANCEL/Finish cleanup, ownership denial, and profile/preset/backup round trips using the conditional controller 13, full-ring 4 and named boost 3 formats. Existing formats remain unchanged when the option is absent or off.
 
-The plain-English guide now includes return-to-Aim firing and releasing Boost 1 LT on lift. Receiver source and protocol are unchanged. Phone touch/game behavior is not established by these checks. Installation awaits separate confirmation that profile edits are saved; the working APK has not been promoted to the public release download.
+The plain-English guide now includes return-to-Aim firing and releasing Boost 1 LT on lift. Receiver source and protocol are unchanged. Phone touch/game behavior is not established by these checks. The working APK has not been promoted to the public release download.
+
+After explicit confirmation that profile edits were saved, the in-place ADB update succeeded on the S22. The pre-install check detected edits made since the earlier snapshot and stopped before installation; a fresh read-only backup captured those saved edits before proceeding. Signing certificates matched, the installed APK bytes matched the verified candidate, and all 122 saved files retained identical names and SHA-256 hashes against that fresh snapshot. No backup was restored or profiles overwritten. The prior APK and saved-file archive remain preserved outside Git in `SimpleController profile backups/2026-10-16 direct boost delay update saved edits`. The app was not launched for automated touch/game testing; the public release branch and APK were not updated.
 
 ## Per-role boost geometry and direct aiming verification - October 16, 2026
 
