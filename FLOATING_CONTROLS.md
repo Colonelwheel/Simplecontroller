@@ -107,6 +107,8 @@ Synthetic examples verify compact direct bands of 32-40 / 40-64 dp for an Aim-st
 
 The receiver/protocol is unchanged. These are automated checks; phone touch and game feel remain untested for this build. The working APK is not promoted to the public release download.
 
+After explicit confirmation that profile edits were saved, the in-place ADB update succeeded. Signing certificates matched, installed APK bytes matched the verified candidate, and all 122 saved files retained identical names and SHA-256 hashes against the fresh pre-update snapshot. The previous APK and verified saved-file archive remain preserved outside Git. No app launch or touch/game test was performed by the update.
+
 ## Verified implementation checks - October 13, 2026
 
 - 311 JVM tests passed in each of Sideload Debug and Play Release, including 41 ring tests and 19 shared-output coordinator tests.
