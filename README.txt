@@ -10,6 +10,10 @@ The basic setup is:
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
+For the current working branch's floating rings, optional per-role boost actions/geometry, direct aiming and orange-button movement re-centering, see [Floating controls](FLOATING_CONTROLS.md) and the [current user guide](SIMPLECONTROLLER_USER_GUIDE.md). Test APK changes are separate from the public release until explicitly promoted.
+
+For every floating-ring option explained in plain English, with suggested combinations at the bottom, open [Floating ring options TXT guide](FLOATING_RING_OPTIONS_PLAIN_ENGLISH.txt).
+
 ---
 
 # 1. What Simple Controller Does

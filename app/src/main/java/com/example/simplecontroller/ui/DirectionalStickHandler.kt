@@ -18,7 +18,7 @@ import kotlin.math.abs
  */
 class DirectionalStickHandler(
     private val model: Control,
-    private val uiHandler: Handler = Handler(Looper.getMainLooper()),
+    private val uiHandler: Handler? = Handler(Looper.getMainLooper()),
     payloadExecutor: ButtonAimPayloadExecutor,
     private val scopeProvider: () -> PhoneOutputScope? = { null }
 ) {
@@ -289,21 +289,21 @@ class DirectionalStickHandler(
                             }
                     }
 
-                    uiHandler.postDelayed(this, continuousSendIntervalMs) // Send at faster rate
+                    uiHandler?.postDelayed(this, continuousSendIntervalMs) // Send at faster rate
                 }
             }
 
             // Start continuous sending
-            uiHandler.postDelayed(continuousDirectional!!, continuousSendIntervalMs)
+            uiHandler?.postDelayed(continuousDirectional!!, continuousSendIntervalMs)
         }
     }
 
     /**
      * Stop any continuous directional commands being sent
      */
-    fun stopDirectionalCommands() {
+    fun stopDirectionalCommands(centerOutput: Boolean = true) {
         commandState.clear()
-        continuousDirectional?.let { uiHandler.removeCallbacks(it) }
+        continuousDirectional?.let { uiHandler?.removeCallbacks(it) }
         continuousDirectional = null
         sendingUp = false
         sendingDown = false
@@ -319,8 +319,8 @@ class DirectionalStickHandler(
         sendingRightSuperBoost = false
 
         // Only send stop command for actual stick controls
-        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
-            model.type == ControlType.RADIAL_CURVED_STICK) {
+        if (centerOutput && (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK)) {
             // Also send a final zero position via UDP to ensure server knows we've stopped
             sendOwnedPosition(model.id, 0f, 0f)
         }

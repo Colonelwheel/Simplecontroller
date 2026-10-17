@@ -145,14 +145,14 @@ class ContinuousSender(
         // Note: we no longer reset lastStickX/Y here – they’re kept for restart.
     }
 
-    /** Emergency cleanup always centers, including intentionally non-auto-centering sticks. */
-    fun stopAndCenter() {
+    /** Reset the sender; ordinary cleanup still centers unless its owner releases the scope itself. */
+    fun stopAndCenter(centerOutput: Boolean = true) {
         continuousSender?.let { uiHandler.removeCallbacks(it) }
         continuousSender = null
         lastStickX = 0f
         lastStickY = 0f
-        if (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
-            model.type == ControlType.RADIAL_CURVED_STICK) {
+        if (centerOutput && (model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
+            model.type == ControlType.RADIAL_CURVED_STICK)) {
             sendCenter()
         }
     }

@@ -3,12 +3,15 @@ package com.example.simplecontroller.ui
 import com.example.simplecontroller.model.FloatingRingConfig
 import com.example.simplecontroller.model.FloatingStartRole
 import com.example.simplecontroller.model.RingAimKnob
+import com.example.simplecontroller.model.RingBoostBank
+import com.example.simplecontroller.model.RingBoostBandLayout
 import com.example.simplecontroller.model.RingBoostStage
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 
 data class RingPoint(val x: Float, val y: Float)
+data class RingBand(val innerRadius: Float, val outerRadius: Float)
 data class RingRect(val left: Float, val top: Float, val right: Float, val bottom: Float) {
     fun contains(x: Float, y: Float): Boolean = x >= left && x <= right && y >= top && y <= bottom
 }
@@ -32,27 +35,45 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
     fun distance(x: Float, y: Float): Float = hypot(x - center.x, y - center.y)
     fun insideAim(x: Float, y: Float): Boolean = distance(x, y) <= innerRadius
 
-    /** Only a captured Aim gesture may borrow Movement's band; saved/direct geometry stays fixed. */
+    private fun customLayout(bank: RingBoostBank?): RingBoostBandLayout? = when (bank) {
+        RingBoostBank.MOVEMENT -> config.boostBanks?.movement?.geometry
+        RingBoostBank.AIM -> config.boostBanks?.aim?.geometry
+        null -> null
+    }?.takeIf { it.enabled }
+
+    /** Captured role selects swipe geometry; direct areas have their own protected placement. */
     fun boostDistance(
-        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false
-    ): Float =
-        if (compactAim && config.compactAimBoosts) when (stage) {
+        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false,
+        bank: RingBoostBank? = null
+    ): Float {
+        customLayout(bank)?.let { layout ->
+            return (layout.boost1DistanceDp + if (stage == RingBoostStage.TWO) layout.boost1ThicknessDp else 0f) * density
+        }
+        return if ((compactAim || bank == RingBoostBank.AIM) && config.compactAimBoosts) when (stage) {
             RingBoostStage.ONE -> innerRadius
             RingBoostStage.TWO -> movementRadius
-        } else if (adjacentMovement && config.adjacentMovementBoosts) when (stage) {
+        } else if ((adjacentMovement || bank == RingBoostBank.MOVEMENT) && config.adjacentMovementBoosts) when (stage) {
             RingBoostStage.ONE -> movementRadius
-            RingBoostStage.TWO -> movementRadius + (config.boost2.distanceDp - config.boost1.distanceDp) * density
-        } else config.boost(stage).distanceDp * density
+            RingBoostStage.TWO -> movementRadius +
+                (config.boost(RingBoostStage.TWO, bank).distanceDp - config.boost(RingBoostStage.ONE, bank).distanceDp) * density
+        } else config.boost(stage, bank).distanceDp * density
+    }
 
     fun boostHysteresis(
-        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false
+        stage: RingBoostStage, compactAim: Boolean = false, adjacentMovement: Boolean = false,
+        bank: RingBoostBank? = null
     ): Float {
-        val saved = config.boost(stage).hysteresisDp * density
-        if (!(compactAim && config.compactAimBoosts) && !(adjacentMovement && config.adjacentMovementBoosts)) return saved
+        val saved = config.boost(stage, bank).hysteresisDp * density
+        customLayout(bank)?.let { layout ->
+            val boundary = boostDistance(stage, bank = bank)
+            return min(saved, min(boundary / 2f, layout.boost1ThicknessDp * density / 2f))
+        }
+        if (!((compactAim || bank == RingBoostBank.AIM) && config.compactAimBoosts) &&
+            !((adjacentMovement || bank == RingBoostBank.MOVEMENT) && config.adjacentMovementBoosts)) return saved
         val bandWidth = when (stage) {
-            RingBoostStage.ONE -> boostDistance(stage, compactAim, adjacentMovement)
-            RingBoostStage.TWO -> boostDistance(stage, compactAim, adjacentMovement) -
-                boostDistance(RingBoostStage.ONE, compactAim, adjacentMovement)
+            RingBoostStage.ONE -> boostDistance(stage, compactAim, adjacentMovement, bank)
+            RingBoostStage.TWO -> boostDistance(stage, compactAim, adjacentMovement, bank) -
+                boostDistance(RingBoostStage.ONE, compactAim, adjacentMovement, bank)
         }
         // A large value valid for the original radius must not trap a compressed boost on.
         return min(saved, bandWidth / 2f)
@@ -84,16 +105,41 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
         return null
     }
 
-    fun directHit(stage: RingBoostStage, x: Float, y: Float): Boolean {
-        val settings = if (stage == RingBoostStage.ONE) config.boost1 else config.boost2
+    /** Compact direct taps always sit outside visible Movement, including Aim-start templates. */
+    fun directBand(stage: RingBoostStage, bank: RingBoostBank = config.directBoostBank()): RingBand {
+        val settings = config.boost(stage, bank)
+        customLayout(bank)?.let { layout ->
+            val start = layout.directStartDistanceDp + if (stage == RingBoostStage.TWO) layout.boost1ThicknessDp else 0f
+            val width = if (stage == RingBoostStage.ONE) layout.boost1ThicknessDp else layout.boost2ThicknessDp
+            return RingBand(start * density, (start + width) * density)
+        }
+        if (config.compactAimBoosts || config.adjacentMovementBoosts) {
+            val base = if (config.movement.enabled) movementRadius else innerRadius
+            val widthOne = if (bank == RingBoostBank.AIM && config.compactAimBoosts) movementRadius - innerRadius else
+                (config.boost(RingBoostStage.TWO, bank).distanceDp - config.boost(RingBoostStage.ONE, bank).distanceDp) * density
+            val start = base + if (stage == RingBoostStage.TWO) widthOne else 0f
+            val width = if (stage == RingBoostStage.ONE) widthOne else
+                (settings.directOuterDistanceDp - settings.directInnerDistanceDp) * density
+            return RingBand(start, start + width)
+        }
+        return RingBand(settings.directInnerDistanceDp * density, settings.directOuterDistanceDp * density)
+    }
+
+    fun directHit(
+        stage: RingBoostStage, x: Float, y: Float, bank: RingBoostBank = config.directBoostBank()
+    ): Boolean {
+        val settings = config.boost(stage, bank)
+        val band = directBand(stage, bank)
         val distance = distance(x, y)
         return settings.enabled && settings.directTapEnabled &&
-            distance >= settings.directInnerDistanceDp * density &&
-            distance <= settings.directOuterDistanceDp * density
+            distance >= band.innerRadius && distance <= band.outerRadius
     }
 
     /** Starting-role anchor, used to place the selected part under the real first DOWN. */
-    fun startAnchor(role: FloatingStartRole, knobId: String = config.startKnobId): RingPoint = when (role) {
+    fun startAnchor(
+        role: FloatingStartRole, knobId: String = config.startKnobId,
+        bank: RingBoostBank = config.boostBankForRole(role)
+    ): RingPoint = when (role) {
         FloatingStartRole.MOVEMENT -> RingPoint(
             center.x + config.movement.initialX * movementRadius,
             center.y + config.movement.initialY * movementRadius
@@ -101,9 +147,9 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
         FloatingStartRole.AIM -> config.knobs.firstOrNull { it.enabled && it.id == knobId }
             ?.let(::knobCenter) ?: center
         FloatingStartRole.BOOST_ONE, FloatingStartRole.BOOST_TWO -> {
-            val boost = if (role == FloatingStartRole.BOOST_ONE) config.boost1 else config.boost2
-            RingPoint(center.x, center.y -
-                ((boost.directInnerDistanceDp + boost.directOuterDistanceDp) / 2f) * density)
+            val stage = if (role == FloatingStartRole.BOOST_ONE) RingBoostStage.ONE else RingBoostStage.TWO
+            val band = directBand(stage, bank)
+            RingPoint(center.x, center.y - (band.innerRadius + band.outerRadius) / 2f)
         }
     }
 
@@ -115,11 +161,11 @@ class FloatingRingGeometry(val config: FloatingRingConfig, val density: Float = 
     /** Editor feedback only: sector endpoints that cannot be reached in the usable canvas. */
     fun unreachableDirections(
         stage: RingBoostStage, origin: RingPoint, canvas: RingRect,
-        compactAim: Boolean = false, adjacentMovement: Boolean = false
+        compactAim: Boolean = false, adjacentMovement: Boolean = false, bank: RingBoostBank? = null
     ): Set<String> {
-        val boost = if (stage == RingBoostStage.ONE) config.boost1 else config.boost2
+        val boost = config.boost(stage, bank)
         if (!boost.enabled) return emptySet()
-        val radius = boostDistance(stage, compactAim, adjacentMovement)
+        val radius = boostDistance(stage, compactAim, adjacentMovement, bank)
         val cx = origin.x + center.x
         val cy = origin.y + center.y
         return buildSet {

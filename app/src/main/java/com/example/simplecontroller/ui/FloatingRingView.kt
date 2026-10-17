@@ -101,12 +101,19 @@ class FloatingRingView(
     fun releaseAds() = state.releaseAds()
     fun releaseAll() = state.hardCleanup()
     fun endSuppression() = state.endSuppression()
+    fun recenterMovement() = state.recenterMovement()
 
     /** Includes finite invisible direct-boost areas, used only after actual visible targets win. */
     fun acceptsDown(localX: Float, localY: Float): Boolean =
         geometry.finish.contains(localX, localY) || geometry.roleAt(localX, localY) != null
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        SwipeManager.registerFloatingRing(this)
+    }
+
     override fun onDetachedFromWindow() {
+        SwipeManager.unregisterFloatingRing(this)
         state.hardCleanup()
         super.onDetachedFromWindow()
     }
@@ -158,7 +165,8 @@ class FloatingRingView(
             if (currentStatus.busy) add("Busy")
             if (currentStatus.fine) add("Fine")
             if (currentStatus.suppressed) add("CF paused")
-            currentStatus.boosts.sortedBy { it.ordinal }.forEach { stage ->
+            if (currentStatus.bankBoostLabels.isNotEmpty()) addAll(currentStatus.bankBoostLabels)
+            else currentStatus.boosts.sortedBy { it.ordinal }.forEach { stage ->
                 val action = when {
                     stage in currentStatus.repeatingBoosts -> "repeat"
                     stage in currentStatus.latchedBoosts -> "latched"

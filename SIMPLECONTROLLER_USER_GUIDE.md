@@ -1036,6 +1036,12 @@ change. See [Aim control options](AIM_CONTROL_OPTIONS.md) for details.
 
 ## Floating controls
 
+For a full plain-English explanation of the settings and suggested combinations, see [Floating ring options TXT guide](FLOATING_RING_OPTIONS_PLAIN_ENGLISH.txt).
+
 See [FLOATING_CONTROLS.md](FLOATING_CONTROLS.md). In Edit, use Add or hold Edit to create/configure zones. In Play, hold Edit for the accessible scoped Finish list. Floating features require a compatible updated Windows receiver; existing controls retain their legacy/Pico path. No installed receiver or APK is changed by a build.
 
 The working version adds optional closer Boost boundaries in Ring geometry, visible boost guides on the Edit canvas, **Finish ignores swipes** in zone settings, and **Start fire delay when entering Boost** in each aim knob's firing settings. Existing profiles keep their previous behavior until these options are enabled. The working APK is separate from the public release download until explicitly promoted.
+
+Compact direct Boost taps now sit just outside visible Movement, with Boost 2 immediately beyond Boost 1. Their actions follow the ring's saved starting role. To tune the bands, open the zone's **Movement-start boost settings** or **Aim-start boost settings**, then **Custom radial geometry**. Its optional switch enables exact distance, thickness and direct-tap placement controls. **Use separate Movement / Aim boost actions** independently enables different actions for those starting touches; leaving it off uses Shared Boost settings. Full-ring presets save both banks and their geometry.
+
+In **Ring geometry, layers and starting role**, optionally enable **Start aiming immediately on direct Boost touch** to use the destination knob and the ring's configured fine sensitivity from the initial touch. The orange **Re-center** button now centers floating Movement too, including movement held after lifting, while keeping the ring open and its Aim/ADS/fire state intact.

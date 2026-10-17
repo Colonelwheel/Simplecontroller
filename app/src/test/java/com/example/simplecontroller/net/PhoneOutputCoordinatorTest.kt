@@ -87,6 +87,50 @@ class PhoneOutputCoordinatorTest {
         assertEquals("STICK_L:0.5,0.0",f.lastState())
     }
 
+    @Test fun ordinaryRecenter_releasesTerminalZeroSoRingCanReclaimWithoutEndingAdsOrFire() {
+        val f = Fixture()
+        val ordinary = f.scope("ordinary").child("stick")
+        val ring = f.scope("ring")
+        val movement = ring.child("movement")
+        assertTrue(ring.acquirePayload("ads", "LT:1"))
+        assertTrue(ring.acquirePayload("fire", "RT:1"))
+        assertTrue(ordinary.sendStick("LS", .75f, 0f))
+        assertTrue(ordinary.sendStick("LS", 0f, 0f))
+        val terminalZero = f.packets.last()
+        assertFalse(movement.sendStick("LS", .5f, 0f))
+
+        ordinary.releaseAllClaims()
+        ordinary.setRetained(false)
+
+        assertFalse(terminalZero.isCurrent())
+        assertTrue(movement.sendStick("LS", .5f, 0f))
+        assertEquals("STICK_L:0.5,0.0", f.lastState())
+        assertTrue(ring.isActive)
+        assertTrue(ring.payloadIsOwned("ads"))
+        assertTrue(ring.payloadIsOwned("fire"))
+    }
+
+    @Test fun inactiveOrdinaryRecenter_preservesAnotherRetainedRightStickAimOwner() {
+        val f = Fixture()
+        val aim = f.scope("ring").child("aim")
+        var replaced = 0
+        aim.setRetained(true) { replaced++ }
+        assertTrue(aim.sendStick("RS", .25f, .6f))
+        val retainedPacket = f.packets.last()
+        val packetCount = f.packets.size
+        val ordinary = f.scope("ordinary").child("stick")
+
+        ordinary.releaseAllClaims()
+        ordinary.setRetained(false)
+
+        assertEquals(0, replaced)
+        assertEquals(packetCount, f.packets.size)
+        assertTrue(retainedPacket.isCurrent())
+        assertEquals("STICK_R:0.25,0.6", f.lastState())
+        assertTrue(aim.sendStick("RS", .5f, .1f))
+        assertEquals("STICK_R:0.5,0.1", f.lastState())
+    }
+
     @Test fun rootFinishClosesItsChildrenAndReportsFailedAcknowledgement() {
         val f = Fixture(); val root=f.scope("root"); val child=root.child("ads")
         child.sendCommand("LT:1")

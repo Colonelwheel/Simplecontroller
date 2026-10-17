@@ -636,6 +636,10 @@ object SwipeManager {
 
     // All registered control views
     private val allViews = mutableSetOf<ControlView>()
+    private val floatingRings = mutableSetOf<FloatingRingView>()
+
+    fun registerFloatingRing(view: FloatingRingView) { floatingRings.add(view) }
+    fun unregisterFloatingRing(view: FloatingRingView) { floatingRings.remove(view) }
 
     /**
      * Register a control view with the manager
@@ -739,26 +743,10 @@ object SwipeManager {
      * This is triggered by the Re-center button
      */
     fun recenterAllSticks() {
+        floatingRings.toList().forEach { it.recenterMovement() }
         // Button Aim retention owns a canonical stick independently of ordinary Stick views.
         // Center it first so its generation is invalidated before any terminal packet is sent.
         allViews.forEach { it.recenterButtonAimStick() }
-        allViews.forEach { view ->
-            if (view.model.type == ControlType.STICK ||
-                view.model.type == ControlType.CURVED_STICK ||
-                view.model.type == ControlType.RADIAL_CURVED_STICK
-            ) {
-                // Stop any continuous sending or directional commands
-                view.stopContinuousSending()
-                view.stopDirectionalCommands()
-
-                // Send zero values to center the stick
-                if (view.model.directionalMode) {
-                    // For directional sticks, we just stop any active commands
-                } else {
-                    // For analog sticks, send center position (0,0)
-                    view.sendOwnedStick(view.model.payload, 0f, 0f)
-                }
-            }
-        }
+        allViews.forEach { it.recenterStickOutput() }
     }
 }

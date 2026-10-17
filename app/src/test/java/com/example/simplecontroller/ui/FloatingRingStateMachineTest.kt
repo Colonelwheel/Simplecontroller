@@ -114,6 +114,268 @@ class FloatingRingStateMachineTest {
             continueFireOutside = outside, returnFire = it.fire.returnFire.copy(startOnBoostEntry = true))) })
     }
 
+    private fun banked(base: FloatingRingConfig = combat(RingFireMode.NONE)): FloatingRingConfig = base.copy(
+        boostBanks = RingBoostBanks(enabled = true,
+            movement = RingBoostBankSettings(boost1 = base.boost1.copy(payload = "X360A"),
+                boost2 = base.boost2.copy(payload = "X360B")),
+            aim = RingBoostBankSettings(boost1 = base.boost1.copy(payload = "LT:1.0"),
+                boost2 = base.boost2.copy(payload = "X360Y"))))
+
+    @Test fun independentBanks_keepBothRetainedClaimsAndCapturedRole() {
+        val f = Fixture(banked())
+        assertTrue(f.down(FloatingStartRole.MOVEMENT)); f.move(125f); f.move(0f)
+        assertEquals(FloatingStartRole.MOVEMENT, f.state.status.role)
+        f.up(); assertEquals("X360A", f.backend.held["movement:boost1"])
+        assertTrue(f.down(FloatingStartRole.AIM)); f.move(125f)
+        assertEquals(FloatingStartRole.AIM, f.state.status.role)
+        f.up()
+        assertEquals("X360A", f.backend.held["movement:boost1"])
+        assertEquals("LT:1.0", f.backend.held["aim:boost1"])
+        assertTrue(f.state.status.bankBoostLabels.any { it.startsWith("Movement B1") })
+        assertTrue(f.state.status.bankBoostLabels.any { it.startsWith("Aim B1") })
+        f.state.finish(); assertTrue(f.backend.held.isEmpty()); assertTrue(f.backend.reservations.isEmpty())
+    }
+
+    @Test fun independentBanks_retainedRepeatKeepsItsTimingAcrossOtherBankLift() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(movement = banks.movement.copy(
+            boost1 = banks.movement.boost1.copy(action = RingAction.REPEAT,
+                pulsePressMs = 20L, pulseGapMs = 30L, repeatAfterExit = true)))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f)
+        f.clock.advance(10); f.down(FloatingStartRole.AIM); f.move(125f); f.up(125f)
+        f.clock.advance(10); assertFalse("movement:boost1" in f.backend.held)
+        assertEquals("LT:1.0", f.backend.held["aim:boost1"])
+        f.clock.advance(29); assertEquals(1, f.backend.events.count { it == "movement:boost1:X360A" })
+        f.clock.advance(1); assertEquals(2, f.backend.events.count { it == "movement:boost1:X360A" })
+        assertTrue(f.state.status.bankBoostLabels.contains("Movement B1 repeating"))
+        f.state.finish(); f.clock.advance(500); f.clock.runCanceled(); assertTrue(f.backend.held.isEmpty())
+    }
+
+    @Test fun independentBanks_oldFiniteTailSurvivesNewBankCancellation() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(movement = banks.movement.copy(
+            boost1 = banks.movement.boost1.copy(action = RingAction.TAP, pulsePressMs = 100L,
+                pulseGapMs = 50L, latchOnExit = false, retainOnLift = false)))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f)
+        f.clock.advance(10); f.down(FloatingStartRole.AIM); f.move(125f); f.state.cancel()
+        assertEquals("X360A", f.backend.held["movement:boost1"])
+        assertFalse("aim:boost1" in f.backend.held)
+        f.clock.advance(90); assertFalse("movement:boost1" in f.backend.held)
+        f.clock.advance(50); f.clock.runCanceled()
+        assertEquals(1, f.backend.events.count { it == "movement:boost1:X360A" })
+        assertTrue(f.backend.reservations.isEmpty())
+    }
+
+    @Test fun independentBanks_unexpiredDelayNeverMigratesToTheNextGesture() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(
+            movement = banks.movement.copy(boost2 = banks.movement.boost2.copy(activationDelayMs = 200L)),
+            aim = banks.aim.copy(boost2 = banks.aim.boost2.copy(activationDelayMs = 50L)))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(170f); f.up(170f)
+        f.down(FloatingStartRole.AIM); f.move(170f)
+        assertEquals(setOf("X360Y"), f.state.payloadsForSlot("aim:boost2"))
+        f.clock.advance(50); assertEquals("X360Y", f.backend.held["aim:boost2"])
+        f.clock.advance(200); f.clock.runCanceled()
+        assertTrue(f.backend.events.none { it == "movement:boost2:X360B" })
+    }
+
+    @Test fun independentBanks_directTouchUsesSavedSummonRoleAndWrapperFallback() {
+        listOf(FloatingStartRole.AIM, FloatingStartRole.MOVEMENT, FloatingStartRole.BOOST_TWO).forEach { savedRole ->
+            val base = banked(); val banks = base.boostBanks!!
+            val config = base.copy(startRole = savedRole, boostBanks = banks.copy(directStartBank = RingBoostBank.AIM,
+                movement = banks.movement.copy(boost1 = banks.movement.boost1.copy(directTapEnabled = true)),
+                aim = banks.aim.copy(boost1 = banks.aim.boost1.copy(directTapEnabled = true),
+                    boost2 = banks.aim.boost2.copy(directTapEnabled = true))))
+            val f = Fixture(config); val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+            assertTrue("saved role=$savedRole validation=${config.validationError()}",
+                f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE))
+            val slot = if (savedRole == FloatingStartRole.MOVEMENT) "movement:boost1" else "aim:boost1"
+            assertTrue(slot in f.backend.held); assertEquals(0, f.backend.aimBegins)
+            assertEquals(FloatingStartRole.BOOST_ONE, f.state.status.role)
+        }
+    }
+
+    @Test fun independentBanks_directTwoReturnKeepsBankAndOneEarlyFireDeadline() {
+        val base = banked(entryFire()); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(startRole = FloatingStartRole.AIM, directBoostToAim = true,
+            directBoostTwoToOne = true, boostBanks = banks.copy(
+                aim = banks.aim.copy(boost2 = banks.aim.boost2.copy(directTapEnabled = true))),
+            knobs = base.knobs.map { it.copy(fire = it.fire.copy(returnFire = it.fire.returnFire.copy(
+                qualifyingStages = RingBoostStage.entries.toSet()))) }))
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_TWO)
+        f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_TWO)
+        assertFalse("aim:boost1" in f.backend.held)
+        f.clock.advance(100); f.move(f.geometry.directBand(RingBoostStage.TWO).innerRadius - 1f)
+        assertEquals("LT:1.0", f.backend.held["aim:boost1"])
+        assertFalse("movement:boost1" in f.backend.held)
+        f.clock.advance(100); f.move(0f)
+        assertEquals(FloatingStartRole.BOOST_TWO, f.state.status.role)
+        f.clock.advance(99); assertEquals(0, f.firePresses())
+        f.clock.advance(1); assertEquals(1, f.firePresses())
+    }
+
+    @Test fun independentBanks_fineLatchCannotBeBorrowedByOtherBanksSameStage() {
+        val base = banked()
+        val f = Fixture(base.copy(aim = base.aim.copy(fine = RingFineAimSettings(enabled = true))))
+        f.down(FloatingStartRole.AIM); f.move(125f); f.move(0f); f.up(); assertTrue(f.state.status.fine)
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); assertTrue(f.state.status.fine)
+        f.state.outputReplaced("aim:boost1")
+        assertFalse(f.state.status.fine); assertEquals("X360A", f.backend.held["movement:boost1"])
+        assertFalse("aim:boost1" in f.backend.held)
+    }
+
+    @Test fun independentBanks_replacementCancelsOnlyThatBanksRetainedSender() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(movement = banks.movement.copy(
+            boost1 = banks.movement.boost1.copy(action = RingAction.REPEAT, repeatAfterExit = true)))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f)
+        f.down(FloatingStartRole.AIM); f.move(125f); f.up(125f)
+        f.state.outputReplaced("movement:boost1")
+        val count = f.backend.events.count { it == "movement:boost1:X360A" }
+        f.clock.advance(500); f.clock.runCanceled()
+        assertEquals(count, f.backend.events.count { it == "movement:boost1:X360A" })
+        assertEquals("LT:1.0", f.backend.held["aim:boost1"])
+    }
+
+    @Test fun independentBanks_oldLatchReplacementCannotCancelNewDirectFineGesture() {
+        listOf(FloatingStartRole.MOVEMENT, FloatingStartRole.AIM).forEach { savedRole ->
+            val base = banked(); val banks = base.boostBanks!!
+            val f = Fixture(base.copy(startRole = savedRole, directBoostStartsAim = true,
+                aim = base.aim.copy(fine = RingFineAimSettings(enabled = true)),
+                boostBanks = banks.copy(
+                    movement = banks.movement.copy(boost2 = banks.movement.boost2.copy(directTapEnabled = true)),
+                    aim = banks.aim.copy(boost2 = banks.aim.boost2.copy(directTapEnabled = true)))))
+            f.down(FloatingStartRole.AIM); f.move(125f); f.move(0f); f.up()
+            val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_TWO)
+            f.state.down(7, anchor.x, anchor.y, 1L, FloatingStartRole.BOOST_TWO)
+            assertTrue(f.state.status.fine)
+            f.state.outputReplaced("aim:boost1")
+            assertTrue("saved role=$savedRole", f.state.status.fine)
+            assertEquals(.4f, f.backend.sensitivity.last(), 0f)
+            f.state.releaseAds(); assertFalse(f.state.status.fine)
+        }
+    }
+
+    @Test fun independentBanks_scopedFireAndAdsStopsInspectOlderBanks() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(movement = banks.movement.copy(
+            boost1 = banks.movement.boost1.copy(payload = "RT:1.0")))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f)
+        f.down(FloatingStartRole.AIM); f.move(125f); f.up(125f)
+        f.state.stopFiring(); assertFalse("movement:boost1" in f.backend.held)
+        assertEquals("LT:1.0", f.backend.held["aim:boost1"])
+        f.state.releaseAds(); assertTrue(f.backend.held.isEmpty())
+    }
+
+    @Test fun disabledActionBanks_keepSharedLegacyRetentionEvenWithCustomGeometry() {
+        val base = banked(); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(boostBanks = banks.copy(enabled = false, aim = banks.aim.copy(
+            geometry = RingBoostBandLayout(enabled = true, boost1DistanceDp = 50f,
+                boost1ThicknessDp = 30f, boost2ThicknessDp = 20f, directStartDistanceDp = 88f)))))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f)
+        assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.down(FloatingStartRole.AIM); f.move(51f)
+        assertEquals(1, f.backend.events.count { it == "boost1:LT:1.0" })
+        assertTrue(f.state.status.bankBoostLabels.isEmpty()); assertTrue(f.backend.held.keys.none { ':' in it })
+    }
+
+    @Test fun customBankGeometry_exactProtectedBoundaryDoesNotEnterBoost() {
+        listOf(FloatingStartRole.AIM, FloatingStartRole.MOVEMENT).forEach { role ->
+            val base = banked(); val banks = base.boostBanks!!
+            val threshold = if (role == FloatingStartRole.AIM) 48f else 88f
+            val layout = RingBoostBandLayout(enabled = true, boost1DistanceDp = threshold,
+                boost1ThicknessDp = 30f, boost2ThicknessDp = 20f, directStartDistanceDp = 88f)
+            val bank = if (role == FloatingStartRole.AIM) RingBoostBank.AIM else RingBoostBank.MOVEMENT
+            val f = Fixture(base.copy(boostBanks = banks.withBank(bank, banks.settings(bank).copy(geometry = layout))))
+            assertTrue("role=$role validation=${f.config.validationError()}", f.down(role))
+            val slot = if (role == FloatingStartRole.AIM) "aim:boost1" else "movement:boost1"
+            f.move(threshold); assertFalse(slot in f.backend.held)
+            f.move(threshold + .1f); assertTrue(slot in f.backend.held)
+        }
+    }
+
+    @Test fun directImmediateAim_beginsFineOnDownWithoutAutomaticAdsOrFire() {
+        val base = banked(combat(RingFireMode.HOLD)); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(directBoostStartsAim = true, directBoostToAim = false,
+            aim = base.aim.copy(continueOutside = true, suppressCameraFollow = true,
+                fine = RingFineAimSettings(enabled = true, sensitivity = .25f,
+                    qualifyingStages = setOf(RingBoostStage.TWO))),
+            knobs = base.knobs.map { it.copy(fire = it.fire.copy(adsPayload = "X360LB", returnFire = RingReturnFireSettings())) },
+            boostBanks = banks.copy(aim = banks.aim.copy(boost1 = banks.aim.boost1.copy(directTapEnabled = true)))))
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+        assertTrue(f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE))
+        assertEquals(1, f.backend.aimBegins); assertEquals(.25f, f.backend.sensitivity.first(), 0f)
+        assertTrue(f.state.status.fine); assertTrue(f.backend.suppression)
+        assertFalse("ads" in f.backend.held); assertEquals(0, f.firePresses())
+        assertEquals(FloatingStartRole.BOOST_ONE, f.state.status.role)
+        f.state.sample(7, anchor.x + 5f, anchor.y, 1L); assertEquals(1, f.backend.aimMoves)
+    }
+
+    @Test fun directImmediateAim_honorsStopOutsideAndFineDisabled() {
+        listOf(false, true).forEach { fine ->
+            val base = banked(); val banks = base.boostBanks!!
+            val f = Fixture(base.copy(directBoostStartsAim = true,
+                aim = base.aim.copy(continueOutside = false, fine = RingFineAimSettings(enabled = fine)),
+                boostBanks = banks.copy(aim = banks.aim.copy(boost1 = banks.aim.boost1.copy(directTapEnabled = true)))))
+            val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+            f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE)
+            assertEquals(if (fine) .4f else 1f, f.backend.sensitivity.first(), 0f); assertTrue(f.backend.paused)
+            f.state.sample(7, anchor.x + 5f, anchor.y, 1L); assertEquals(0, f.backend.aimMoves)
+            f.move(0f); assertFalse(f.backend.paused); assertEquals(1, f.backend.aimMoves)
+        }
+    }
+
+    @Test fun directImmediateAim_earlyFireStillWaitsAndCleansUpOutside() {
+        val base = banked(entryFire()); val banks = base.boostBanks!!
+        val f = Fixture(base.copy(directBoostStartsAim = true, directBoostToAim = false,
+            boostBanks = banks.copy(aim = banks.aim.copy(boost1 = banks.aim.boost1.copy(directTapEnabled = true)))))
+        val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_ONE)
+        f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_ONE)
+        assertTrue(f.backend.paused); assertTrue(f.state.status.pending)
+        f.clock.advance(299); assertEquals(0, f.firePresses())
+        f.clock.advance(1); assertEquals(1, f.firePresses())
+        f.state.up(7, anchor.x, anchor.y, 300L); assertFalse("fire" in f.backend.held)
+    }
+
+    @Test fun recenterMovement_releasesRetainedMovementWithoutTouchingBoostOrAim() {
+        val base = combat(RingFireMode.NONE)
+        val f = Fixture(base.copy(movement = base.movement.copy(autoCenter = false)))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.up(125f); assertTrue(f.state.status.movementRetained)
+        f.down(FloatingStartRole.AIM); val begins = f.backend.aimBegins
+        f.state.recenterMovement(); assertFalse(f.state.status.movementRetained)
+        assertEquals(RingPoint(0f, 0f), f.backend.movement); assertEquals("LT:1.0", f.backend.held["boost1"])
+        assertEquals(begins, f.backend.aimBegins); assertEquals(FloatingStartRole.AIM, f.state.status.role)
+    }
+
+    @Test fun recenterMovement_rebasesOnlyMovementWhileBoostDistancesStayFixed() {
+        val base = combat(RingFireMode.NONE)
+        val f = Fixture(base.copy(movement = base.movement.copy(autoCenter = false)))
+        f.down(FloatingStartRole.MOVEMENT); f.move(125f); f.state.recenterMovement(); f.move(125f)
+        assertEquals(RingPoint(0f, 0f), f.backend.movement); assertEquals("LT:1.0", f.backend.held["boost1"])
+        f.move(147f); assertEquals(-.25f, f.backend.movement.y, .0001f)
+        f.move(170f); assertEquals("X360A", f.backend.held["boost2"])
+        assertEquals(-45f / 88f, f.backend.movement.y, .0001f)
+        assertEquals(1, f.backend.events.count { it == "boost1:LT:1.0" })
+    }
+
+    @Test fun recenterMovement_stationaryLiftDoesNotRestoreRetentionAndNextDownResetsGrab() {
+        val f = Fixture(FloatingRingConfig(movement = RingMovementSettings(autoCenter = false)))
+        f.down(); f.move(44f); f.state.recenterMovement(); f.up(44f)
+        assertFalse(f.state.status.movementRetained); assertEquals(0f, f.state.status.movementY, 0f)
+        f.down(); f.move(44f); assertEquals(-.5f, f.backend.movement.y, .0001f)
+        f.up(44f); assertTrue(f.state.status.movementRetained)
+    }
+
+    @Test fun recenterMovement_preservesEdgeFitOffsetsAndCancelsCleanly() {
+        val f = Fixture(FloatingRingConfig()); val x = 5f; val y = 70f
+        f.state.down(7, x, y, 0L, FloatingStartRole.MOVEMENT,
+            offsetX = f.cx - x, offsetY = f.cy - y, checkFinish = false)
+        f.state.sample(7, x + 44f, y, 1L); assertEquals(.5f, f.backend.movement.x, .0001f)
+        f.state.recenterMovement(); f.state.sample(7, x + 44f, y, 2L); assertEquals(0f, f.backend.movement.x, 0f)
+        f.state.sample(7, x + 66f, y, 3L); assertEquals(.25f, f.backend.movement.x, .0001f)
+        f.state.cancel(); f.clock.runCanceled(); assertEquals(RingPoint(0f, 0f), f.backend.movement)
+    }
+
     @Test fun pureAim_hasNoAutomaticAdsOrFire() {
         val f = Fixture(FloatingRingConfig(startRole = FloatingStartRole.AIM))
         assertTrue(f.down()); f.move(10f); f.up()
@@ -354,7 +616,7 @@ class FloatingRingStateMachineTest {
             val anchor = f.geometry.startAnchor(FloatingStartRole.BOOST_TWO)
             f.state.down(7, anchor.x, anchor.y, 0L, FloatingStartRole.BOOST_TWO)
             assertEquals(RingBoostStage.TWO in qualifiers, f.state.status.pending)
-            f.clock.advance(100); f.move(140f)
+            f.clock.advance(100); f.move(f.geometry.directBand(RingBoostStage.TWO).innerRadius - 1f)
             assertTrue(f.state.status.pending)
             f.clock.advance(100); f.move(0f)
             val remaining = if (RingBoostStage.TWO in qualifiers) 100L else 200L

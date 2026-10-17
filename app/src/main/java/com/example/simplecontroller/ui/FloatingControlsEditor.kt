@@ -155,8 +155,9 @@ class FloatingControlsEditor(
         val h=f.dimension("Zone height (px)",rectangle.h,canvas.height)
         var start:()->String={ source.startMemberId }
         var swipe:()->Boolean={source.groupSwipe}
+        var ringDraft:()->FloatingRingConfig?={ draft.ring }
         fun currentDraft()=draft.copy(name=name(),enabled=enabled(),startMemberId=start(),groupSwipe=swipe(),
-            finishIgnoresSwipes=finishIgnoresSwipes())
+            finishIgnoresSwipes=finishIgnoresSwipes(),ring=ringDraft())
             .withGeometry(orientation(),FloatingZoneGeometry(canvas.width.toFloat(),canvas.height.toFloat(),ControlGeometry(x(),y(),w(),h())))
         if(source.kind!=FloatingZoneKind.RING) {
             val ids=source.memberIds
@@ -168,20 +169,35 @@ class FloatingControlsEditor(
                 swipe=f.flag("Swipe between compatible ordinary members",source.groupSwipe)
             f.note("Member properties remain in their existing Button options. Zone resizing does not resize members.")
         } else {
-            f.button("Ring geometry, layers and starting role") { editRing(draft.ring!!) { draft=draft.copy(ring=it) } }
-            f.button("Movement settings") { editMovement(draft.ring!!) { draft=draft.copy(ring=it) } }
-            f.button("Aiming and fine sensitivity") { editAim(draft.ring!!) { draft=draft.copy(ring=it) } }
-            f.button("Aim knobs and firing") { editKnobs(draft.ring!!) { draft=draft.copy(ring=it) } }
-            f.button("Boost 1") { editBoost(draft.ring!!,RingBoostStage.ONE) { draft=draft.copy(ring=it) } }
-            f.button("Boost 2") { editBoost(draft.ring!!,RingBoostStage.TWO) { draft=draft.copy(ring=it) } }
-            f.button("Preview boost reachability") {
-                val preview=FloatingRingEditorPreview(context,draft.ring!!,
-                    (canvas.width-canvas.paddingLeft-canvas.paddingRight).toFloat(),
-                    (canvas.height-canvas.paddingTop-canvas.paddingBottom).toFloat())
-                AlertDialog.Builder(context).setTitle("Ring reachability preview").setView(preview)
-                    .setPositiveButton("Done",null).show()
+            val separate=f.flag("Use separate Movement / Aim boost actions",draft.ring!!.boostBanks?.enabled==true)
+            fun currentRing():FloatingRingConfig {
+                val c=draft.ring!!
+                return if(separate()) c.copy(boostBanks=c.seedBoostBanks().copy(enabled=true))
+                    else c.boostBanks?.let { c.copy(boostBanks=it.copy(enabled=false)) } ?: c
             }
-            f.button("Save / apply named boost profiles") { boostProfiles(draft.ring!!) { draft=draft.copy(ring=it) } }
+            ringDraft={ currentRing() }
+            fun keep(c:FloatingRingConfig) { draft=draft.copy(ring=c) }
+            f.note("Separate actions are optional. Each bank's custom geometry has its own switch. Turning either option off keeps its saved settings.")
+            f.button("Ring geometry, layers and starting role") { editRing(currentRing(),::keep) }
+            f.button("Movement settings") { editMovement(currentRing(),::keep) }
+            f.button("Aiming and fine sensitivity") { editAim(currentRing(),::keep) }
+            f.button("Aim knobs and firing") { editKnobs(currentRing(),::keep) }
+            f.button("Shared Boost 1 settings") { editBoost(currentRing(),RingBoostStage.ONE,save=::keep) }
+            f.button("Shared Boost 2 settings") { editBoost(currentRing(),RingBoostStage.TWO,save=::keep) }
+            f.note("Shared actions apply while separate actions are off. Bank geometry can still be enabled independently.")
+            f.button("Movement-start boost settings") { editBoostBank(currentRing(),RingBoostBank.MOVEMENT,::keep) }
+            f.button("Aim-start boost settings") { editBoostBank(currentRing(),RingBoostBank.AIM,::keep) }
+            f.button("Preview boost reachability") {
+                chooseBoostBank("Preview boost bank",currentRing(),includeShared=false) { bank ->
+                    val selected=bank ?: return@chooseBoostBank
+                    val preview=FloatingRingEditorPreview(context,currentRing(),
+                        (canvas.width-canvas.paddingLeft-canvas.paddingRight).toFloat(),
+                        (canvas.height-canvas.paddingTop-canvas.paddingBottom).toFloat(),selected)
+                    AlertDialog.Builder(context).setTitle("${bankName(selected)} boost preview").setView(preview)
+                        .setPositiveButton("Done",null).show()
+                }
+            }
+            f.button("Save / apply named boost profiles") { boostProfiles(currentRing(),::keep) }
             f.button("Save full ring / activation zone preset") {
                 try { saveRingPreset(currentDraft()) }
                 catch(error:IllegalArgumentException) { message(error.message ?: "Invalid zone setting.") }
@@ -279,19 +295,26 @@ class FloatingControlsEditor(
         val inner=f.number("Inner aim radius (dp)",c.innerRadiusDp)
         val outer=f.number("Movement outer radius (dp)",c.movementRadiusDp)
         val adjacent=f.flag("Boost 1 immediately outside Movement",c.adjacentMovementBoosts)
-        f.note("For Movement gestures that participate in boosts, Boost 1 starts just outside the Movement radius. Boost 2 keeps the saved Boost 1-to-Boost 2 band width. Direct boost areas keep their saved distances.")
+        f.note("For Movement gestures that participate in boosts, Boost 1 starts just outside the Movement radius. Boost 2 keeps the saved Boost 1-to-Boost 2 band width. Custom bank geometry overrides this spacing. With either closer-spacing option on, direct taps are placed outside visible Movement using the saved starting role's bank.")
         val compact=f.flag("Compact boosts while aiming",c.compactAimBoosts)
-        f.note("Requires Aiming participates in boosts; this switch does not enable participation. During an original Aim touch, Boost 1 starts just outside inner aim and Boost 2 at the Movement radius. Movement uses its separate option above; direct boost starts keep their saved distances.")
+        f.note("Requires Aiming participates in boosts; this switch does not enable participation. During an original Aim touch, Boost 1 starts just outside inner aim and Boost 2 at the Movement radius. Custom Aim geometry overrides this spacing. Direct tap bands use their separate protected placement.")
         val role=f.choice("Summon starting role",FloatingStartRole.entries.toList(),c.startRole)
         val start=f.choice("Starting aim knob",c.knobs.map { it.id },c.startKnobId)
         val direct=f.flag("Start aiming when a direct boost enters inner area",c.directBoostToAim)
+        val immediate=f.flag("Start aiming immediately on direct Boost touch",c.directBoostStartsAim)
+        f.note("Immediate aiming uses the destination knob below with a neutral grab and configured fine sensitivity when fine aiming is enabled. It adds no ADS or fire action by itself; the captured Boost role and bank stay the same.")
         val dest=f.choice("Direct boost aim destination",c.knobs.map { it.id },c.directBoostAimKnobId)
+        val directBank=f.choice("Bank when the saved starting role is direct Boost",RingBoostBank.entries.toList(),
+            c.boostBanks?.directStartBank ?: RingBoostBank.MOVEMENT,::bankName)
+        f.note("Direct taps use the saved starting role's bank: Aim uses Aim, Movement uses Movement. The choice above covers saved Boost 1 / Boost 2 starts.")
         val lower=f.flag("Activate Boost 1 when returning from direct Boost 2",c.directBoostTwoToOne)
         f.note("On inward return past the Boost 2 direct area's inner edge, enabled Boost 1 starts using its normal action and threshold settings. Boost 1 direct tap need not be enabled.")
         dialog("Ring geometry",f) {
             val v=c.copy(innerRadiusDp=inner(),movementRadiusDp=outer(),startRole=role(),startKnobId=start(),
-                directBoostToAim=direct(),directBoostAimKnobId=dest(),directBoostTwoToOne=lower(),
-                compactAimBoosts=compact(),adjacentMovementBoosts=adjacent())
+                directBoostToAim=direct(),directBoostStartsAim=immediate(),directBoostAimKnobId=dest(),directBoostTwoToOne=lower(),
+                compactAimBoosts=compact(),adjacentMovementBoosts=adjacent(),
+                boostBanks=if(c.boostBanks!=null || directBank()!=RingBoostBank.MOVEMENT)
+                    c.seedBoostBanks().copy(directStartBank=directBank()) else null)
             // Disabled starting selections are validated on the final zone Save.
             save(v);null
         }
@@ -383,10 +406,73 @@ class FloatingControlsEditor(
             save(c.copy(knobs=c.knobs.mapIndexed { i,value->if(i==index) result else value }));null
         }
     }
-    private fun editBoost(c:FloatingRingConfig,stage:RingBoostStage,save:(FloatingRingConfig)->Unit) {
-        val b=c.boost(stage);val f=Form(context)
+    private fun bankName(bank:RingBoostBank)=if(bank==RingBoostBank.MOVEMENT) "Movement" else "Aim"
+    private fun chooseBoostBank(title:String,c:FloatingRingConfig,includeShared:Boolean=true,chosen:(RingBoostBank?)->Unit) {
+        val options=if(includeShared && c.boostBanks?.enabled!=true) listOf<RingBoostBank?>(null)+RingBoostBank.entries
+            else RingBoostBank.entries.toList()
+        AlertDialog.Builder(context).setTitle(title)
+            .setItems(options.map { it?.let(::bankName) ?: "Shared" }.toTypedArray()) { _,index->chosen(options[index]) }
+            .setNegativeButton("Cancel",null).show()
+    }
+    private fun editBoostBank(c:FloatingRingConfig,bank:RingBoostBank,save:(FloatingRingConfig)->Unit) {
+        val other=if(bank==RingBoostBank.MOVEMENT) RingBoostBank.AIM else RingBoostBank.MOVEMENT
+        val banks=c.seedBoostBanks()
+        val settings=banks.settings(bank)
+        AlertDialog.Builder(context).setTitle("${bankName(bank)}-start boosts")
+            .setItems(arrayOf("Custom radial geometry","Boost 1 action settings","Boost 2 action settings",
+                "Copy ${bankName(other)} actions here (keep enable choices)","Copy ${bankName(other)} geometry here")) { _,index->
+                when(index) {
+                    0->editBoostGeometry(c,bank,save)
+                    1->editBoost(c,RingBoostStage.ONE,bank,save)
+                    2->editBoost(c,RingBoostStage.TWO,bank,save)
+                    else->{
+                        val source=banks.settings(other)
+                        val copied=if(index==3) settings.copy(
+                            boost1=source.boost1.copy(enabled=settings.boost1.enabled),
+                            boost2=source.boost2.copy(enabled=settings.boost2.enabled))
+                            else settings.copy(geometry=source.geometry.copy(enabled=settings.geometry.enabled))
+                        AlertDialog.Builder(context).setTitle("Copy ${bankName(other)} settings to ${bankName(bank)}?")
+                            .setMessage(if(index==3) "Replace this bank's saved boost settings, including actions, timings and fallback manual thresholds. Its enabled choices, custom geometry and the other bank stay as saved."
+                                else "Replace this bank's radial distances and thicknesses. Its custom-geometry switch, actions and the other bank stay as saved.")
+                            .setPositiveButton("Copy") { _,_->save(c.copy(boostBanks=banks.withBank(bank,copied))) }
+                            .setNegativeButton("Cancel",null).show()
+                    }
+                }
+            }.setNegativeButton("Back",null).show()
+    }
+    private fun editBoostGeometry(c:FloatingRingConfig,bank:RingBoostBank,save:(FloatingRingConfig)->Unit) {
+        val banks=c.seedBoostBanks();val settings=banks.settings(bank);val g=settings.geometry;val f=Form(context)
+        val enabled=f.flag("Use custom ${bankName(bank)} boost geometry",g.enabled)
+        val extent=(maxOf(canvas.width,canvas.height)/context.resources.displayMetrics.density).toInt()
+        val distance=f.dimension("Distance from ring center to Boost 1 (dp)",g.boost1DistanceDp,extent)
+        val first=f.dimension("Boost 1 thickness (dp)",g.boost1ThicknessDp,extent)
+        val second=f.dimension("Boost 2 thickness (dp)",g.boost2ThicknessDp,extent)
+        val direct=f.dimension("Direct-tap start distance from center (dp)",g.directStartDistanceDp,extent)
+        val boundaries=TextView(context)
+        f.body.addView(boundaries)
+        fun updateBoundaries() {
+            boundaries.text=try {
+                "Derived Boost 2 start: drag ${distance()+first()} dp; direct ${direct()+first()} dp. Outer edges: drag ${distance()+first()+second()} dp; direct ${direct()+first()+second()} dp."
+            } catch(_:IllegalArgumentException) { "Enter finite distances and thicknesses to calculate Boost 2." }
+        }
+        f.body.children.filterIsInstance<EditText>().forEach { it.doAfterTextChanged { updateBoundaries() } }
+        updateBoundaries()
+        f.note("Boost 2 begins at Boost 1 distance + Boost 1 thickness. Both direct-tap bands use these same thicknesses from their separate start distance. Drag bands stay outside their Aim or Movement base; direct bands also clear visible Movement. Drag boosts remain cumulative. No center offsets are used.")
+        f.note("This geometry switch is independent of separate actions. Turning it off preserves these numbers and restores the existing spacing options. Save this dialog, then use Preview boost reachability to inspect the result.")
+        dialog("${bankName(bank)} radial geometry",f) {
+            val updated=settings.copy(geometry=g.copy(enabled=enabled(),boost1DistanceDp=distance(),
+                boost1ThicknessDp=first(),boost2ThicknessDp=second(),directStartDistanceDp=direct()))
+            val candidate=c.copy(boostBanks=banks.withBank(bank,updated))
+            candidate.validationError()?.let { return@dialog it }
+            save(candidate);null
+        }
+    }
+    private fun editBoost(c:FloatingRingConfig,stage:RingBoostStage,bank:RingBoostBank?=null,save:(FloatingRingConfig)->Unit) {
+        val stored=bank?.let { c.seedBoostBanks().settings(it) }
+        val b=if(stored==null) c.boost(stage) else if(stage==RingBoostStage.ONE) stored.boost1 else stored.boost2
+        val f=Form(context)
         val enabled=f.flag("Boost enabled",b.enabled);val distance=f.number("Saved circular threshold distance (dp)",b.distanceDp)
-        f.note("Movement adjacency and compact Aim options derive their active thresholds from the ring radii. This field keeps the manual saved distance; direct areas remain separate.")
+        f.note("Custom bank geometry and closer-spacing options derive their active thresholds. These fields keep fallback manual distances. With closer spacing on, direct bands automatically match the saved starting bank outside visible Movement; custom geometry takes precedence.")
         val payload=f.text("Fallback payload (blank for none)",b.payload)
         val up=f.text("Up payload",b.directionalPayloads.up);val down=f.text("Down payload",b.directionalPayloads.down)
         val left=f.text("Left payload",b.directionalPayloads.left);val right=f.text("Right payload",b.directionalPayloads.right)
@@ -402,14 +488,20 @@ class FloatingControlsEditor(
         val delay=if(stage==RingBoostStage.TWO) f.millis("Boost 2 activation delay (ms)",b.activationDelayMs) else { {0L} }
         val cancel=f.flag("Cancel pending Boost 2 delay on threshold exit",b.cancelDelayOnExit)
         f.note("Drag boosts are cumulative. Direct Boost 2 starts only Boost 2. Hold latch, Repeat continuation and lift retention are separate.")
-        dialog("Boost "+if(stage==RingBoostStage.ONE) "1" else "2",f) {
+        dialog((bank?.let { bankName(it)+" " } ?: "Shared ")+"Boost "+if(stage==RingBoostStage.ONE) "1" else "2",f) {
             val v=b.copy(enabled=enabled(),distanceDp=distance(),payload=payload(),
                 directionalPayloads=DirectionalCommands(up=up(),down=down(),left=left(),right=right()),action=action(),
                 pulsePressMs=press(),pulseGapMs=gap(),latchOnExit=latch(),repeatAfterExit=repeat(),retainOnLift=retain(),
                 hysteresisDp=hyst(),directTapEnabled=direct(),directInnerDistanceDp=inner(),directOuterDistanceDp=outer(),
                 activationDelayMs=delay(),cancelDelayOnExit=cancel())
             v.validationError()?.let { return@dialog it }
-            save(if(stage==RingBoostStage.ONE)c.copy(boost1=v) else c.copy(boost2=v));null
+            val candidate=if(bank==null) {
+                if(stage==RingBoostStage.ONE)c.copy(boost1=v) else c.copy(boost2=v)
+            } else {
+                val settings=if(stage==RingBoostStage.ONE) stored!!.copy(boost1=v) else stored!!.copy(boost2=v)
+                c.copy(boostBanks=c.seedBoostBanks().withBank(bank,settings))
+            }
+            save(candidate);null
         }
     }
     private fun boostProfiles(c:FloatingRingConfig,save:(FloatingRingConfig)->Unit) {
@@ -418,8 +510,13 @@ class FloatingControlsEditor(
         AlertDialog.Builder(context).setTitle("Named boost profiles").setItems(labels.toTypedArray()) { _,i->
             if(i==0) {
                 val f=Form(context);val name=f.text("Profile name","");val full=f.flag("Include optional ring aiming / firing preset",false)
+                val sources=if(c.boostBanks?.enabled==true) RingBoostBank.entries.toList()
+                    else listOf<RingBoostBank?>(null)+RingBoostBank.entries
+                val source=f.choice("Save boost settings from",sources,
+                    if(c.boostBanks?.enabled==true) c.directBoostBank() else null) { it?.let(::bankName) ?: "Shared" }
+                f.note("This reusable boost profile captures one selected bank. A full ring / activation zone preset captures both banks, including inactive options.")
                 dialog("Save boost profile",f) {
-                    val p=c.captureBoostProfile(id(),name(),System.currentTimeMillis(),full()) ?: return@dialog "The ring settings are invalid."
+                    val p=c.captureBoostProfile(id(),name(),System.currentTimeMillis(),full(),bank=source()) ?: return@dialog "The ring settings are invalid."
                     if(!FloatingBoostProfileStore.save(context,p).succeeded) "Could not save the boost profile." else null
                 }
             } else {
@@ -427,7 +524,10 @@ class FloatingControlsEditor(
                 AlertDialog.Builder(context).setTitle(p.name)
                     .setItems(arrayOf("Apply boost settings only","Apply saved ring aiming / actions","Rename","Delete")) { _,action->
                         when(action) {
-                            0->p.applyBoostSettingsOnlyTo(c)?.let(save) ?: message("The boost geometry is incompatible; nothing changed.")
+                            0->chooseBoostBank("Apply boost settings to",c) { bank ->
+                                p.applyBoostSettingsOnlyTo(c,bank=bank)?.let(save)
+                                    ?: message("The boost geometry is incompatible; nothing changed.")
+                            }
                             1->p.applyRingAimActionsTo(c)?.let(save) ?: message("The preset is missing or its knob slots are incompatible; nothing changed.")
                             2->{ val f=Form(context);val name=f.text("New name",p.name);dialog("Rename boost profile",f) {
                                 if(FloatingBoostProfileStore.rename(context,p,name(),System.currentTimeMillis()).succeeded) null else "Could not rename."

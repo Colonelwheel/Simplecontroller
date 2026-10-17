@@ -9,6 +9,7 @@ import android.view.View
 import com.example.simplecontroller.model.ControlGeometry
 import com.example.simplecontroller.model.FloatingRingConfig
 import com.example.simplecontroller.model.RingBoostStage
+import com.example.simplecontroller.model.RingBoostBank
 import kotlin.math.max
 
 /** Actual-size Edit guides only: no backend, pointer capture, timer or runtime instance. */
@@ -50,25 +51,27 @@ internal class FloatingRingEditOverlay(
         val cy = origin.y + geometry.center.y
         canvas.save()
         canvas.clipRect(usable.x, usable.y, usable.x + usable.w, usable.y + usable.h)
+        val bank = config.boostBankForRole(config.startRole)
+        val bankLabel = if (bank == RingBoostBank.MOVEMENT) "Move" else "Aim"
+        val participates = if (bank == RingBoostBank.MOVEMENT)
+            config.movement.enabled && config.movement.participateInBoosts
+            else config.aim.enabled && config.aim.participateInBoosts
         listOf(RingBoostStage.ONE, RingBoostStage.TWO).forEach { stage ->
-            val settings = config.boost(stage)
+            val settings = config.boost(stage, bank)
             val enabled = zoneEnabled && settings.enabled
             val color = if (stage == RingBoostStage.ONE) Color.rgb(240, 194, 87) else Color.rgb(226, 119, 153)
             val name = zoneName.ifBlank { "Ring" }.take(18)
-            val reference = if (config.adjacentMovementBoosts) "Move B" else "B"
-            val label = "$name $reference${stage.ordinal + 1}" + if (enabled) "" else " OFF"
-            circle(canvas, cx, cy, geometry.boostDistance(stage, adjacentMovement = true), enabled, color, false,
+            val label = "$name $bankLabel B${stage.ordinal + 1}" + if (enabled && participates) "" else " OFF"
+            val radius = geometry.boostDistance(stage, bank = bank)
+            val direct = geometry.directBand(stage, bank)
+            val outer = if (stage == RingBoostStage.ONE) geometry.boostDistance(RingBoostStage.TWO, bank = bank)
+                else radius + direct.outerRadius - direct.innerRadius
+            circle(canvas, cx, cy, outer, enabled && participates, color)
+            circle(canvas, cx, cy, radius, enabled && participates, color, false,
                 label + if (placement == null) " (does not fit)" else "", stage)
-            if (settings.directTapEnabled) {
-                circle(canvas, cx, cy, settings.directInnerDistanceDp * density, enabled, color)
-                circle(canvas, cx, cy, settings.directOuterDistanceDp * density, enabled, color)
-            }
-            if (config.compactAimBoosts) {
-                val compactEnabled = enabled && config.aim.enabled && config.aim.participateInBoosts
-                circle(canvas, cx, cy, geometry.boostDistance(stage, compactAim = true),
-                    compactEnabled, color, true,
-                    "$name Aim B${stage.ordinal + 1}" + if (compactEnabled) "" else " OFF", stage)
-            }
+            circle(canvas, cx, cy, direct.innerRadius, enabled && settings.directTapEnabled, color, true)
+            circle(canvas, cx, cy, direct.outerRadius, enabled && settings.directTapEnabled, color, true,
+                "$name Direct $bankLabel B${stage.ordinal + 1}" + if (enabled && settings.directTapEnabled) "" else " OFF", stage)
         }
         canvas.restore()
     }

@@ -18,7 +18,7 @@ data class FloatingRingPreset(
 ) {
     fun validationError(): String? {
         if (schemaVersion !in LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION) return "This ring preset version is not supported."
-        if (schemaVersion < requiredSchemaVersion()) return "The saved ring options require ring preset version $CURRENT_SCHEMA_VERSION."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved ring options require ring preset version ${requiredSchemaVersion()}."
         if (runCatching { UUID.fromString(id).toString() }.getOrNull() != id) return "Invalid ring preset identifier."
         if (name.trim().length !in 1..80) return "Choose a ring preset name from 1 to 80 characters."
         if (createdAtEpochMs < 0L || updatedAtEpochMs < createdAtEpochMs) return "Invalid ring preset timestamps."
@@ -34,13 +34,12 @@ data class FloatingRingPreset(
         return detachedFloatingRingZone(zone).copy(id = newZoneId, name = zoneName ?: zone.name)
     }
 
-    fun requiredSchemaVersion(): Int = if (zone.hasExtendedFloatingConfiguration()) {
-        CURRENT_SCHEMA_VERSION
-    } else LEGACY_SCHEMA_VERSION
+    fun requiredSchemaVersion(): Int = zone.requiredRingPresetSchemaVersion()
 
     companion object {
         const val LEGACY_SCHEMA_VERSION = 1
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val RING_OPTIONS_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
     }
 }
 
@@ -48,14 +47,19 @@ data class FloatingRingPreset(
 fun FloatingZone.captureRingPreset(id: String, name: String, nowMs: Long): FloatingRingPreset? {
     if (ringPresetValidationError() != null) return null
     return FloatingRingPreset(
-        schemaVersion = if (hasExtendedFloatingConfiguration()) FloatingRingPreset.CURRENT_SCHEMA_VERSION
-            else FloatingRingPreset.LEGACY_SCHEMA_VERSION,
+        schemaVersion = requiredRingPresetSchemaVersion(),
         id = id,
         name = name.trim(),
         createdAtEpochMs = nowMs,
         updatedAtEpochMs = nowMs,
         zone = detachedFloatingRingZone(this)
     ).takeIf { it.validationError() == null }
+}
+
+private fun FloatingZone.requiredRingPresetSchemaVersion(): Int = when {
+    hasRoleBoostConfiguration() -> FloatingRingPreset.CURRENT_SCHEMA_VERSION
+    hasExtendedFloatingConfiguration() -> FloatingRingPreset.RING_OPTIONS_SCHEMA_VERSION
+    else -> FloatingRingPreset.LEGACY_SCHEMA_VERSION
 }
 
 private fun FloatingZone.ringPresetValidationError(): String? {

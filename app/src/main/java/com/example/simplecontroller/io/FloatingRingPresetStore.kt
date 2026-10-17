@@ -27,9 +27,13 @@ fun requireSupportedFloatingRingPresetSchema(value: JsonObject) {
 
 internal fun requireFloatingRingPresetOptionsSchema(value: JsonObject, version: Int) {
     val zone = value["zone"] as? JsonObject
-    require(version >= FloatingRingPreset.CURRENT_SCHEMA_VERSION ||
-        zone == null || !floatingZoneHasExtendedOptions(zone)) {
-        "The saved ring options require ring preset version ${FloatingRingPreset.CURRENT_SCHEMA_VERSION}."
+    val required = when {
+        zone != null && floatingZoneHasRoleBoostOptions(zone) -> FloatingRingPreset.CURRENT_SCHEMA_VERSION
+        zone != null && floatingZoneHasExtendedOptions(zone) -> FloatingRingPreset.RING_OPTIONS_SCHEMA_VERSION
+        else -> FloatingRingPreset.LEGACY_SCHEMA_VERSION
+    }
+    require(version >= required) {
+        "The saved ring options require ring preset version $required."
     }
 }
 

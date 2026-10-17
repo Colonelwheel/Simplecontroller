@@ -5,6 +5,7 @@ import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.requiredFormatVersion
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
@@ -27,6 +28,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -140,6 +142,13 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
 
 /** Check new saved behavior before typed decoding, including settings on inactive zones. */
 internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
+    val zones = (profile["pages"] as? JsonArray).orEmpty().flatMap { page ->
+        ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty()
+    }
+    require(version >= FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        zones.none { (it as? JsonObject)?.let(::floatingZoneHasRoleBoostOptions) == true }) {
+        "The saved per-role boost options require controller profile format $FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
     val hasNewOptions = (profile["pages"] as? JsonArray).orEmpty().any { page ->
         ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty().any { zone ->
             (zone as? JsonObject)?.let(::floatingZoneHasExtendedOptions) == true
@@ -148,6 +157,12 @@ internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
     require(!hasNewOptions || version >= FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION) {
         "The saved floating options require controller profile format $FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION."
     }
+}
+
+internal fun floatingZoneHasRoleBoostOptions(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject ?: return false
+    return (ring["directBoostStartsAim"] as? JsonPrimitive)?.booleanOrNull == true ||
+        ring["boostBanks"]?.let { it != JsonNull } == true
 }
 
 internal fun floatingZoneHasExtendedOptions(zone: JsonObject): Boolean {

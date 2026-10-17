@@ -1,0 +1,555 @@
+FLOATING RINGS AND ACTIVATION ZONES: PLAIN-ENGLISH OPTIONS GUIDE
+
+This describes the current working Simplecontroller implementation. Quoted names match the editor.
+The combinations at the bottom are examples to try, not a report of your saved phone settings or a
+promise about a particular game's sensitivity.
+
+1. WHAT A FLOATING RING DOES
+
+An activation zone is an invisible rectangle in Play. A fresh touch in otherwise unused space
+inside it brings up its ring and starts the saved starting function under your finger. The
+rectangle decides WHERE you can summon the ring; it does not determine the ring's size.
+
+Movement sends a virtual controller stick. Aim sends mouse movement or the right controller stick.
+Boost 1 and Boost 2 are extra actions reached at distances from the ring's center. An Aim knob
+selects an aiming/firing setup. ADS means aiming down sights; the app only sends your chosen
+binding, and the game decides what it does.
+
+A "payload" is a binding such as LT:1.0, RT:1.0, X360A or W. LT and RT are the virtual controller
+triggers; 1.0 means fully pressed. A comma-separated binding can hold several outputs together,
+such as W,SHIFT. It is not a timed sequence. The ring's Tap/Hold/Repeat controls supply timing; do
+not put a separate timed trigger pulse inside the binding.
+
+Ring distances use dp: Android size units adjusted for screen density. Activation rectangles and
+some Right Stick tuning use px: actual screen pixels. They are different units. Timing uses ms:
+1000 ms is one second; 300 ms is 0.3 second. X/Y movement values of -1 to 1 are proportions, not
+distances.
+
+Floating controls need the compatible Windows receiver's acknowledgement. If connection
+preparation is unfinished, a touch can wait up to 1500 ms while the same finger remains down. When
+ready, the ring appears at the latest finger position with a fresh timing start. Waiting movement
+is not replayed as aiming or Boost travel. Lifting cancels that pending summon.
+
+2. CREATE, POSITION AND SAVE AN ACTIVATION ZONE
+
+In Edit, use + -> Floating ring -> New or Saved Presets. + -> Manage floating controls, or holding
+Edit, opens the floating-control manager. It lists covered zones by name, so you can edit one even
+when another outline or button covers it.
+
+"Name" identifies the zone and its Finish-list entry. "Activation zone enabled" permits summoning
+it in Play. Turning it off keeps its saved configuration.
+
+"Zone left (px)" and "Zone top (px)" position the rectangle. "Zone width (px)" and "Zone height
+(px)" resize it. Each has an exact field and slider. Drag an outline in Edit to move it; lift
+commits the drag. Cancellation or lost contact rolls the unfinished drag back. Tap or hold an
+outline to open settings.
+
+Rectangle changes affect the current orientation. Portrait and Landscape have separate saved
+arrangements. Resizing the activation rectangle does not resize the ring, its Aim targets or
+grouped buttons. Existing buttons and app controls keep touch priority; a zone behind them cannot
+steal their initial touch.
+
+Settings dialogs edit a draft. Save the inner dialog, then Save the floating-zone dialog, then
+save the controller profile normally. Canceling the outer dialog discards its draft changes.
+Saving a reusable preset is a separate library action, not the same as saving your controller
+profile.
+
+"Duplicate floating zone and its members" makes an independent copy. "Move zone above overlapping
+zones" changes which dormant zone wins where activation rectangles overlap. It does not outrank
+existing visible buttons. "Remove zone" removes a ring zone. For floated buttons/groups, "Ungroup
+and restore original geometry" restores their saved original arrangements while keeping their
+latest button settings.
+
+The manager also creates a floating Button/group by rectangle selection. "Initial Button (Reveal
+only produces no input)" chooses its first button, or Reveal only for a group. "Swipe between
+compatible ordinary members" controls movement between its buttons. Their individual settings
+remain in the ordinary button editor. The rest of this guide concentrates on rings.
+
+3. DEFAULTS AND HOW A TOUCH KEEPS ITS JOB
+
+A new ring has Movement and Aim enabled, Boosts disabled, and one centered Aim knob. Its inner Aim
+radius is 48 dp; Movement radius is 88 dp. It starts as MOVEMENT, with neutral initial X/Y. Aim
+uses MOUSE, sensitivity 1 and LINEAR_RELATIVE. Fire mode is NONE; ADS is blank. The stored Fire
+payload RT:1.0 does nothing while Fire mode is NONE.
+
+Separate action sets, custom geometry, closer-spacing options, both direct-Aim options, direct
+B2-to-B1 return, swipe-resistant Finish, fine aiming, qualified firing and Boost-entry fire timing
+all start OFF. Direct taps start OFF. Existing saved rings retain their settings; these defaults
+do not reset them.
+
+The first touch in a dormant activation rectangle always uses "Summon starting role". It does not
+inspect which invisible band happened to lie under that touch. A direct Boost touch normally means
+a new touch on a direct band of an already visible ring. Selecting a saved BOOST starting role can
+also summon directly into that action.
+
+Movement stays Movement if you drag inward. Aim stays Aim when you drag outward through Boosts. A
+direct Boost touch keeps its captured Boost role even if an optional setting adds Aim later.
+Lifting permits a new touch to choose another function. Extra fingers do not take over the
+captured touch.
+
+The ring remains visible after lift until Finish or cleanup. Several different zones can have
+visible instances. One zone does not create multiple simultaneous copies of itself.
+
+4. RING GEOMETRY, STARTING ROLE AND DIRECT AIM
+
+Open "Ring geometry, layers and starting role".
+
+"Inner aim radius (dp)" sizes the inner Aim background. "Movement outer radius (dp)" sizes
+Movement and its full-strength reference. The Movement radius must exceed the positive Aim radius,
+even if a layer is disabled. These are distances from the shared center; there are no
+center-offset controls.
+
+"Summon starting role" offers MOVEMENT, AIM, BOOST_ONE and BOOST_TWO. MOVEMENT uses the Movement
+settings and initial vector. AIM starts "Starting aim knob", which selects the default ordinary
+Aim setup for summon and the inner background. Its list shows existing knob identifiers, such as
+aim_1. One choice means only one knob exists; use "Aim knobs and firing" -> "Add aim knob" for
+more. A BOOST role starts only its selected direct stage and requires that stage and its direct
+taps to be enabled. Choose an enabled role explicitly when disabling layers.
+
+"Boost 1 immediately outside Movement" brings Movement's first drag threshold just beyond the
+Movement radius. Boost 2 keeps the saved B1-to-B2 gap: default 120/160 dp becomes 88/128 dp. It
+does not enable Boosts or Movement participation.
+
+"Compact boosts while aiming" brings an original Aim gesture's B1 just outside inner Aim, with B2
+at the Movement radius: defaults 48/88 dp. Enable "Aiming participates in boosts" separately.
+During that compact Aim gesture the Movement background/marker is hidden; it returns on lift.
+Movement/direct-started gestures keep their original jobs.
+
+With either closer-spacing option enabled, direct-tap bands are automatically placed outside
+visible Movement, using the saved starting role's bank and matching band widths. If Movement is
+disabled they start outside Aim. This prevents visible base areas from swallowing the direct
+bands. With neither closer spacing nor custom geometry, the saved finite direct areas remain in
+use. A bank's enabled custom geometry overrides its automatic spacing.
+
+"Start aiming when a direct boost enters inner area" adds Aim when that same Boost finger moves
+inward into Aim. It starts a fresh aiming grab there, without accumulated outward travel. It does
+not start the destination knob's ordinary ADS/fire actions automatically.
+
+"Start aiming immediately on direct Boost touch" adds Aim on the direct Boost DOWN instead. It
+starts neutrally at that contact and immediately uses configured fine sensitivity if fine aiming
+is enabled, without requiring a prior qualifying return. It remains independent of the inner-entry
+option. If "Continue aiming outside inner boundary" is OFF, outside movement still pauses Aim
+until inner return.
+
+"Direct boost aim destination" selects the existing knob used by either direct-Aim option. One
+choice here likewise means only one knob exists, not that the option is broken. Aim and that knob
+must be enabled. These options add aiming; Boost bindings and explicitly enabled qualified firing
+remain separate. They do not invent ADS or ordinary Fire-mode activation.
+
+"Bank when the saved starting role is direct Boost" matters for saved BOOST_ONE/BOOST_TWO starts.
+Saved AIM always gives direct taps the Aim bank; saved MOVEMENT always gives them Movement. For
+saved Boost starts, this selector chooses Movement or Aim. The bank stays fixed when the Boost
+finger later aims.
+
+"Activate Boost 1 when returning from direct Boost 2" allows inward B2 return to start B1. It is
+OFF by default. Crossing below B2's direct inner edge unlocks enabled B1 for that gesture; B1
+direct taps need not be enabled. B1 follows its normal action, threshold and exit rules. A fast
+swipe that skips the band still visits it once, then applies exit/latch behavior. Lift or
+cancellation cannot start B1. This does not change B2's delay.
+
+5. MOVEMENT SETTINGS AND THE ORANGE RE-CENTER BUTTON
+
+"Movement enabled" enables this layer. "Movement stick" selects LEFT_STICK or RIGHT_STICK. For
+ordinary controller movement plus controller aiming, LEFT_STICK here and RIGHT_STICK for Aim avoid
+competing for one stick.
+
+"Movement sensitivity" adjusts output. With "Movement response" LINEAR and sensitivity 1, 22/44/88
+dp from center give 25%/50%/100% at an 88 dp radius. Output caps at full strength. Lower linear
+sensitivity also lowers maximum output. Boost thresholds still use raw distance, not
+sensitivity-adjusted output.
+
+RESPONSE_CURVE changes the two axes separately. Below 1 it softens the center but still reaches
+full output at the edge; above 1 it responds more strongly near center. RADIAL_RESPONSE_CURVE
+curves distance while preserving direction, which is useful for gentle diagonals. Sensitivity 0
+produces no Movement output; supported sensitivity values are 0 through 5.
+
+"Auto-center on lift" ON releases Movement when you lift. OFF retains its last vector, letting
+movement continue while your finger operates another control. It does not retain ADS or fire.
+
+The existing orange Re-center button centers surfaced rings' Movement, including retained
+movement. It keeps the ring visible and leaves its Aim, ADS, fire and Boost actions alone. It also
+retains its existing ordinary-stick/Button Aim recenter duties. If used during a held ring
+Movement gesture, the current finger position becomes the new Movement neutral. Boost distances
+keep the original ring origin. After more deliberate movement, normal retention can apply again.
+
+"Initial X (-1 to 1)" and "Initial Y (-1 to 1)" set the first Movement vector at summon: X
+positive is right, negative left; Y positive down, negative up. Use 0/0 for neutral. A vector's
+combined length cannot exceed 1; 1/1 is invalid. Response and sensitivity still apply.
+
+"Movement participates in boosts" lets this captured Movement gesture trigger drag Boosts; it
+defaults ON. Enabled Boosts are still required. "Exclude movement from Camera Follow" keeps that
+Movement out of Camera Follow's movement-based steering calculation. It does not turn off Movement
+or globally disable Camera Follow.
+
+6. AIMING AND FINE SENSITIVITY
+
+Open "Aiming and fine sensitivity". "Inner aiming enabled" enables Aim and its knobs. "Aim output"
+selects MOUSE, GAME_MOUSE or RIGHT_STICK. MOUSE sends ordinary mouse movement; GAME_MOUSE uses the
+receiver's game-relative mouse path; RIGHT_STICK sends the virtual controller's aiming stick. The
+game must support the chosen input.
+
+"Normal aim sensitivity" is the normal gain/response setting, 0 through 5. "Invert vertical aim"
+reverses vertical Aim. "Mouse profile" LINEAR_RELATIVE follows finger changes directly;
+SMOOTHED_NONLINEAR smooths changes and adds nonlinear scaling. These profiles affect mouse
+outputs. "Stick response" LINEAR, RESPONSE_CURVE and RADIAL_RESPONSE_CURVE affect RIGHT_STICK,
+with the same curve distinction described for Movement.
+
+For RIGHT_STICK, "Stick full displacement (px)" is travel from the initial aiming grab needed for
+full stick, normally 220 px. "Stick deadzone (px)" ignores small travel, normally 8 px. More full
+displacement requires more finger travel. These are pixels, not dp.
+
+"Stick uses control-center position" replaces that initial-grab displacement mapping with position
+relative to the Aim area's center. Then the Aim area's size supplies the position mapping;
+changing full-displacement/deadzone values does not tune that center-based mapping. Ordinary
+center-based touches can immediately produce nonzero output when away from center. Direct-Aim
+additions still establish their neutral grab.
+
+"Aim auto-center on lift" ON centers RIGHT_STICK on lift; OFF can retain its last aiming vector,
+shown as "RS held". Mouse movement has no held aiming vector to keep turning after lift. This is
+independent of Movement auto-center and all ADS/fire retention.
+
+"Aim haptics" requests touch vibration feedback. "Continue aiming outside inner boundary" defaults
+ON. OFF pauses mouse Aim or centers RIGHT_STICK outside, then resumes on return without
+accumulated outside travel. It does not itself stop ADS, fire or a Boost timer.
+
+"Aiming participates in boosts" defaults OFF. Turn it on for an Aim-started outward sweep to
+qualify Boosts, fine-return behavior and qualified fire. Direct Boost starts can use their own
+stages without this switch.
+
+"Suppress Camera Follow while this mouse aim owns a claim" temporarily prevents automatic camera
+steering while this ring owns mouse Aim. It is OFF by default. Its claim can survive lift until
+explicit End suppression, Finish or cleanup. It does not change the user's global Camera Follow
+preference or another surface's claim.
+
+"Fine aim on return from selected boosts" enables the alternate sensitivity, normally 0.4. "Fine
+aim qualifies from Boost 1" and "Fine aim qualifies from Boost 2" choose which visits qualify. A
+qualifying same-finger return to inner Aim applies "Fine aim sensitivity" immediately. Fine aiming
+keeps the selected backend/profile; 0.4 with a curve is not simply 40% maximum output.
+
+"Keep fine sensitivity while qualifying ADS is latched" keeps qualifying fine Aim available while
+this ring still owns the associated latched Boost hold, typically ADS. Enable that Boost's Hold
+latch and lift retention if it should survive lift. Releasing/replacing that claim ends its fine
+qualification. Without that lifetime, fine is gesture-scoped. Immediate direct Aim has the
+separate immediate-fine behavior described above.
+
+7. AIM KNOBS, ADS AND FIRE MODES
+
+"Aim knobs and firing" configures up to three knobs; "Add aim knob" creates another. "Knob name"
+labels it; "Knob enabled" makes it selectable. "Knob X (inner-radius units)" and "Knob Y
+(inner-radius units)" position its center relative to Aim: 0/0 is centered, 0.5 is halfway to that
+radius. "Knob target diameter (dp)" sizes its actual touch target. The whole target must fit
+inside Aim. At least one knob must remain enabled while Aim is enabled.
+
+Touching a knob selects its firing setup for that touch. The rest of the inner background uses the
+saved starting knob. Targets do not turn all surrounding space into nearest-knob regions. A fresh
+touch selects another knob; dragging a captured gesture does not switch knobs.
+
+"ADS payload (blank for none)" is independent of "Fire payload (blank for none)". For an ordinary
+Aim touch, ADS is held from touch-down unless blank. Fire follows "Fire mode":
+
+NONE: no fire output. Blank ADS as well gives pure aiming. HOLD: keep Fire pressed while eligible.
+TAP: one finite press on activation, followed by its release gap. RELEASE_SHOT: arm one shot and
+send it on an eligible lift. REPEAT: repeatedly press/release while eligible.
+
+"Fire press duration (ms)" and "Fire release gap (ms)" set Tap/Repeat/Release-shot pulse timing;
+defaults are 35/35 ms. Repeat's full cycle is press plus gap. Hold does not repeatedly pulse. The
+firing action has at most one pending finite shot rather than an unlimited queue.
+
+"Retain ADS on lift" keeps ordinary ADS held after lift. "Retain fire / repeat on lift" keeps
+active HOLD/REPEAT firing. Both default OFF. They do not make an unexpired delay survive lift or
+turn TAP/RELEASE_SHOT into indefinite firing.
+
+"Continue ADS outside aim area" and "Continue fire outside aim area" default ON. OFF stops the
+corresponding ordinary held/repeating action on Aim exit; it can resume on eligible return. These
+do not pause aiming itself. A finite Tap already started completes its transaction; they are not
+substitutes for canceling a Release-shot.
+
+"Cancel Release-shot on aim boundary exit" cancels the armed shot when you leave Aim. "Re-arm
+Release-shot on return" can restore eligibility on return. Both default OFF. Without boundary
+cancellation an eligible release-shot can fire when lifted outside. Cancellation, Finish and hard
+cleanup never count as a firing lift.
+
+8. QUALIFIED FIRE AND THE TWO DIFFERENT DELAYS
+
+"Enable qualified boost firing" is OFF by default. ON makes the knob wait for a qualifying Boost
+visit instead of immediately activating its normal Fire mode. "Firing qualifies from Boost 1" and
+"Firing qualifies from Boost 2" select qualifying stages. "Firing delay (ms)" normally begins when
+that same finger returns to Aim. Aiming can resume immediately while firing waits.
+
+"Start fire delay when entering Boost" moves the start to the qualifying Boost entry. It requires
+qualified firing to be enabled. With a 300 ms delay and an Aim return after 200 ms, 100 ms
+remains. Another qualifying stage or that return does not restart the pending countdown.
+
+With "Continue fire outside aim area" ON, that countdown can expire and fire before Aim return.
+With it OFF, an expired countdown becomes ready and activates on Aim return without a second
+delay. RELEASE_SHOT only arms at expiry and still needs an eligible later lift. NONE never fires.
+A qualifying Boost can have blank bindings: the visit can qualify firing without also sending a
+Boost output.
+
+"Cancel pending firing delay when leaving inner area" defaults ON. For normal return-timed fire,
+another exit cancels the waiting delay; a new qualified return starts a full delay. For
+entry-timed fire, it does not cancel the first outward countdown before the first Aim return.
+After that return, a later Aim exit can cancel it. OFF preserves the original pending deadline
+across exit; it does not enable outside aiming or override the fire-outside/Release-shot rules.
+
+Lifting before activation cancels pending work. Stop fire, Finish, cancellation and cleanup also
+invalidate it. Direct Boosts can use the destination knob's entry-timed qualified firing when
+either direct-Aim option is enabled; command-only direct Boosts cannot. This timer does not
+automatically start ADS or Aim before the configured direct-Aim behavior does.
+
+"Boost 2 activation delay (ms)" is a separate timer belonging to B2's own binding. Do not assign
+delayed RT to both this and the knob's qualified firing for the same action. Their exact controls
+and exit behavior are below.
+
+9. SHARED ACTIONS AND THE TWO BANKS
+
+A bank means one stored pair of Boost action settings. "Use separate Movement / Aim boost actions"
+defaults OFF. OFF uses "Shared Boost 1 settings" and "Shared Boost 2 settings". ON uses complete
+settings from "Movement-start boost settings" or "Aim-start boost settings", according to the
+captured starting function.
+
+Each bank can have different enabled stages, bindings, actions, repeat timing, delays and
+retention. Direct touches follow the saved starting role's bank, not the last gesture or whichever
+function they later enter. A retained action keeps the bank/settings that created it. Status
+labels identify these bank-specific actions.
+
+New bank settings are detached copies of shared settings when first initialized. Later shared
+edits do not keep synchronizing them. Turning separate actions OFF preserves both banks. Editing a
+bank does not itself enable separate actions.
+
+Each bank menu offers "Custom radial geometry", "Boost 1 action settings" and "Boost 2 action
+settings". "Copy Aim actions here (keep enable choices)" or its Movement counterpart explicitly
+replaces that destination's saved action/timing/fallback-threshold settings. Destination Boost
+enabled choices and custom geometry remain. The other bank remains unchanged.
+
+"Copy Aim geometry here" or its Movement counterpart copies distances and thicknesses but keeps
+the destination custom-geometry switch and action settings. Copies affect the current draft; Save
+the zone to keep them.
+
+10. EVERY BOOST ACTION CONTROL
+
+"Boost enabled" allows that stage's action. "Saved circular threshold distance (dp)" is its
+fallback raw distance from ring center. Custom geometry/closer-spacing options may override the
+active threshold without erasing this saved value. Ordinary fallback B1/B2 distances default to
+120/160 dp and must stay ordered.
+
+"Up payload", "Down payload", "Left payload" and "Right payload" select bindings by finger
+direction from center. "Fallback payload (blank for none)" is used when the selected direction's
+field is blank. To make only Up act, put the command in Up, leave other directions blank AND leave
+Fallback blank. A blank Down with a nonblank Fallback still acts. Reversing direction does not
+reuse Up for Down; an already started Tap can still complete.
+
+"Boost action" TAP gives one finite press per entry/activation; HOLD holds; REPEAT pulses
+repeatedly. "Press duration (ms)" and "Release gap (ms)" default to 35/35 and govern
+finite/repeating pulses.
+
+"Hold: latch after threshold exit" keeps an activated HOLD after returning inward/leaving its
+area. "Repeat: continue after threshold exit" keeps REPEAT running after exit. These switches
+apply to their respective actions and default OFF. Neither alone keeps output after lift.
+
+"Retain activated output on lift" separately keeps an active Hold/Repeat after lift. It defaults
+OFF. A timer that has not activated still cancels on lift. Choose retention deliberately;
+returning inward, lifting and finishing are three different events.
+
+"Threshold hysteresis (dp)" prevents repeated on/off activation when a finger wobbles at a drag
+threshold. At 120 dp with 2 dp hysteresis, an entered stage can stay active down to about 118 dp.
+Closer/custom geometry caps excessive hysteresis so a compressed band cannot become trapped
+active. It does not enlarge the finite direct area or change stored ring radii.
+
+"Direct taps enabled" permits fresh touches in that stage's finite direct band. "Direct area inner
+distance (dp)" and "Direct area outer distance (dp)" store fallback band edges. Their default B1
+interval is 120-144 dp; B2 is 160-184 dp. Automatic closer placement or custom geometry can
+replace their effective positions/widths. Visible Aim/Movement keep fresh-touch priority. At a
+shared direct-band edge, the outer B2 selection has priority.
+
+Only B2 offers "Boost 2 activation delay (ms)", default 0. "Cancel pending Boost 2 delay on
+threshold exit" defaults ON. ON cancels when you leave before activation; another entry starts a
+new wait. OFF preserves the original pending timer. For HOLD to activate after you already
+returned inward, also enable Hold latch. For REPEAT, also enable Repeat continuation. Keeping a
+countdown is different from allowing the action outside its area. Lift before activation still
+cancels it.
+
+11. CUSTOM RADIAL GEOMETRY AND PREVIEWS
+
+In either bank's "Custom radial geometry", "Use custom Movement boost geometry" or "Use custom Aim
+boost geometry" defaults OFF and is independent of separate actions. You can use custom Aim
+spacing with shared actions, or separate actions with automatic spacing.
+
+"Distance from ring center to Boost 1 (dp)" places B1's drag threshold. "Boost 1 thickness (dp)"
+sets the gap to B2. "Boost 2 thickness (dp)" supplies its displayed/direct band width. "Direct-tap
+start distance from center (dp)" separately places direct B1; direct B2 follows it using B1's
+thickness. Sliders/exact fields update the derived B2 and outer-edge readout.
+
+Example: drag start 60, B1 thickness 28, B2 thickness 24 gives drag B2 at 88 and a displayed outer
+edge at 112 dp. Direct start 88 gives direct B1 88-116 and B2 116-140 dp. The same widths are
+used, but drag and direct starts can differ.
+
+Custom Aim drag bands cannot start inside inner Aim. Movement drag bands cannot start inside
+Movement. Direct bands must clear visible Movement, or Aim when Movement is disabled. Actual base
+targets retain their priority at the exact shared edge. There is no inside-Aim Boost option.
+
+Dragging is cumulative: reaching B2 also qualifies B1, and passing the displayed outer B2 edge
+does not stop a drag stage. Direct touches are finite: direct B2 starts only B2 and leaving its
+actual band applies exit rules. Thickness therefore does not turn cumulative swipes into finite
+isolated buttons.
+
+Edit draws actual-size guides behind existing controls, labeled for the saved starting bank;
+dotted guides show direct areas. They follow outline dragging and rollback. "Preview boost
+reachability" lets you inspect Movement or Aim and identifies the actual saved direct bank. The
+shown summon uses a sample position, not your eventual Play touch. Beyond-canvas directions or
+overlapping visible controls can limit access.
+
+Boost guides remain invisible in Play. They do not enlarge the visible ring's fitting bounds. The
+ring and Finish are translated to fit, never shrunk; an oversized visible ring gives a fit error.
+Disabled options retain their numbers for later use.
+
+12. FINISH, OTHER OWNERS AND SAVING REUSABLE SETTINGS
+
+"Finish ignores swipes" defaults OFF. Normally, deliberately dragging into Finish ends the ring.
+ON ignores Finish crossings during a captured drag, including the final lift; the ordinary lift
+action still happens, including an eligible release-shot. A fresh separate touch on Finish still
+ends it. The active-instance Finish list is available by holding Edit in Play when Finish is
+covered.
+
+Finish stops that instance's outputs/timers and hides it. The orange Re-center centers Movement
+without ending the ring. Scoped Stop fire keeps independent ADS/Movement; Release ADS and End
+suppression have separate purposes. Ordinary buttons can assign these through their "Floating /
+Camera Follow options" with a "Scoped action" and "Action target". Release All remains global.
+Another phone/face/voice source legitimately holding the same output can prevent a full release or
+mask pulse edges; ring feedback identifies such conflicts.
+
+"Save / apply named boost profiles" -> "Save as new" captures one "Save boost settings from"
+source: Shared, Movement or Aim. "Profile name" names that library snapshot. Shared is available
+while separate actions are OFF. "Include optional ring aiming / firing preset" additionally
+captures Aim tuning and knob actions, not both banks' geometry.
+
+"Apply boost settings only" asks for ONE destination. It preserves destination enabled choices,
+custom geometry, other bank, ring dimensions/start options, Movement and Aim/firing tuning. "Apply
+saved ring aiming / actions" is the separate optional operation: it preserves the Aim enabled
+switch and knob identities/positions/enabled switches, mapping actions by knob slot. A mismatched
+knob count is rejected atomically.
+
+"Save full ring / activation zone preset" captures the whole current ring/zone draft, both banks
+including inactive options, both saved orientation rectangles, enabled switches, tuning and start
+options. "Preset name" names this full snapshot. "Add a new ring to this profile" creates a
+separate independent ring to review and Save. Rename/delete changes the library, not previously
+added rings. Full-profile backup includes these libraries. Live finger positions, timers and held
+outputs are never saved as settings.
+
+For save errors, check finite positive geometry, valid enabled start/destination, and whole-number
+delays. "Firing delay (ms)" must be 0-60000 and at least one "Firing qualifies" stage must remain
+selected even while qualified firing is OFF. At least one "Fine aim qualifies" stage must also
+remain selected even while fine Aim is OFF. Disable these features with "Enable qualified boost
+firing" or "Fine aim on return from selected boosts", rather than unchecking every qualifier.
+Press/release durations must be whole numbers from 1-60000. Inactive settings still need valid
+values.
+
+ADS and fire need different outputs. Boost Tap/Repeat cannot share an output with a competing held
+ADS/fire or another finite/repeating Boost. Do not give the same RT both a delayed B2 source and
+qualified Aim firing. Two Hold owners may share a binding, but one releasing cannot release the
+other's hold. Separate controls/banks can retain legitimate claims; Finish cleans only its owner.
+Page/profile/orientation/connection changes and app cleanup end live sessions.
+
+13. PRACTICAL SETTING COMBINATIONS
+
+These are starting examples, not your installed settings. Use an available game binding, preview
+reachability, and save a separate controller profile copy if you want to retain an existing setup.
+Unless listed, leave optional features OFF and retention OFF. Distances below are dp, timers ms.
+
+A. MOVEMENT THAT KEEPS GOING, WITH ONE-TAP ORANGE STOP
+
+Set starting role MOVEMENT, Movement enabled ON, Inner aiming enabled OFF, LEFT_STICK, LINEAR,
+sensitivity 1, Initial X/Y 0/0, Movement radius 88. Set Auto-center on lift OFF. Keep both Boosts
+OFF.
+
+Drag 44 dp for about half-strength movement and lift; it continues. Tap the orange Re-center to
+stop Movement while leaving the ring available. Another ring's Aim/ADS/fire is not stopped by the
+ring-Movement portion of recenter. Turn Auto-center on lift ON instead if every lift should stop
+movement.
+
+B. SIMPLE AIM ONLY
+
+Set starting role AIM with the centered knob enabled, Movement enabled OFF, Inner aiming enabled
+ON, Aim output MOUSE, Normal aim sensitivity 1, Mouse profile LINEAR_RELATIVE and Continue aiming
+outside inner boundary ON. Set knob ADS blank and Fire mode NONE. Keep Boosts, qualified firing
+and fine aiming OFF.
+
+This is a movable aiming surface with no firing binding. Try sensitivity 0.7 if travel is too
+strong. For controller Aim instead, choose RIGHT_STICK, initial-grab mapping, full displacement
+220 px, deadzone 8 px and Aim auto-center on lift ON; game settings will still affect the result.
+
+C. ADS FROM B1, DELAYED RT FROM B2, THEN RETURN TO AIM
+
+Start AIM; enable Aiming participates in boosts and Compact boosts while aiming. Keep separate
+actions OFF and use Shared settings. Leave knob ADS blank, Fire mode NONE and qualified firing OFF
+so the knob supplies no competing RT.
+
+B1: enabled, Fallback LT:1.0, directions blank, HOLD, Hold latch ON, retain on lift OFF. B2:
+enabled, Fallback RT:1.0, directions blank, HOLD, activation delay 300, cancel pending B2 delay on
+exit OFF, Hold latch ON, retain on lift OFF. Keep Repeat continuation OFF.
+
+Sweep beyond B1 to hold ADS, then beyond B2 to start the 300 ms RT wait. You may return inward
+before expiry: cancel OFF preserves the timer AND Hold latch ON permits activation outside B2.
+Lift before activation cancels it. Lift after activation releases both holds because retention is
+OFF. Optional fine Aim: enable it at 0.4 and qualify B1; returning inward applies it while ADS is
+latched during that gesture.
+
+For ADS to stay held between touches, change only B1's Retain activated output on lift to ON. B1's
+Hold latch remains ON. Then LT survives lift until Release ADS, Finish or cleanup; leave B2
+retention OFF so RT still ends on lift. Enable Keep fine sensitivity while qualifying ADS is
+latched if that fine setting should persist with retained ADS. Orange Re-center does not release
+this retained ADS.
+
+For fire that is allowed only while you remain beyond B2, use cancel-on-exit ON and Hold latch OFF
+instead. Those settings deliberately cancel a fast return before the delay finishes.
+
+D. BOOST-ENTRY FIRE TIMER, WITHOUT A COMPETING B2 RT BINDING
+
+Start AIM, Aim participation ON, compact Aim spacing ON. Set knob ADS LT:1.0, Fire mode HOLD, Fire
+payload RT:1.0. Enable qualified boost firing, qualify B1 only, Start fire delay when entering
+Boost ON, Firing delay 300, Continue fire outside aim area ON and cancel pending firing delay on
+inner exit ON.
+
+Enable B1 but leave its Fallback/directional bindings blank. Keep B2 disabled or use a
+noncompeting blank binding. B1 can qualify the timer without producing another output. Crossing B1
+starts the wait: return after 200 ms and about 100 ms remains. It can fire while still outside
+because fire continuation is ON. Lift before activation cancels; lift after activation ends
+ADS/fire with retention OFF.
+
+To require Aim return before firing, turn Continue fire outside aim area OFF; an expired timer
+waits ready instead of starting another delay. For return-timed rather than entry-timed fire, turn
+Start fire delay when entering Boost OFF. Do not also add delayed RT to B2.
+
+E. DIFFERENT MOVEMENT AND AIM BOOST ACTIONS
+
+Enable separate Movement / Aim boost actions. Keep Movement LEFT_STICK and use mouse Aim or
+RIGHT_STICK. Enable participation for both functions you want to use.
+
+Movement bank: B1 enabled, Fallback X360A, HOLD, latch/retain OFF; B2 disabled. Aim bank: B1
+enabled, Fallback LT:1.0, HOLD, Hold latch ON, retain OFF; B2 disabled. Keep knob Fire mode NONE
+initially. Choose bank actions deliberately; changing tabs does not copy them.
+
+Optional independent geometry: Movement custom ON, drag start 88, thicknesses 40/24, direct start
+88. Aim custom ON, drag start 48, thicknesses 40/24, direct start 88. With default radii this
+gives Movement B2 at 128 and Aim B2 at 88. Direct taps can stay OFF. Saved AIM sends later direct
+taps to Aim actions; saved MOVEMENT sends them to Movement actions.
+
+F. OPTIONAL DIRECT FINE AIMING
+
+Set Summon starting role AIM and Inner aiming enabled ON. Use Aim output MOUSE, Mouse profile
+LINEAR_RELATIVE and Normal aim sensitivity 1. Enable the fine setting at 0.4, then enable Start
+aiming immediately on direct Boost touch. Select an enabled Direct boost aim destination. Keep
+Continue aiming outside inner boundary ON if you want aiming immediately in the outside direct
+band. Set the destination knob Fire mode NONE, ADS blank and qualified firing OFF. Immediate fine
+applies even if that direct stage is not selected as a return qualifier.
+
+Keep separate actions OFF. In Shared Boost 1 settings, set Boost enabled ON, Direct taps enabled
+ON, action HOLD and all payloads blank; keep B2 disabled. For example use Aim custom geometry:
+drag start 48, thicknesses 40/24, direct start 88, with Movement radius 88 and inner Aim 48. B1
+direct band is 88-128; B2's reference band is 128-152 but remains disabled. You can later add a
+desired B1 binding; blank gives a direct fine-Aim entry without another command.
+
+A fresh touch on that surfaced direct band starts a neutral fine-Aim grab immediately. Saved
+starting role AIM makes it use Aim bank actions. For a dormant zone to start there immediately,
+choose the corresponding BOOST starting role and set its explicit bank to Aim. This still starts
+only the selected Boost; B2-to-B1 return and entry-timed firing remain separate opt-ins.

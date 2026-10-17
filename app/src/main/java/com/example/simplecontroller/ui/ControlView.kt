@@ -1273,6 +1273,25 @@ class ControlView(
         refreshLegacyOutputBusy()
     }
 
+    /** Orange Recenter ends this Stick's claim without acquiring a new neutral owner. */
+    fun recenterStickOutput() {
+        if (model.type != ControlType.STICK && model.type != ControlType.CURVED_STICK &&
+            model.type != ControlType.RADIAL_CURVED_STICK) return
+        continuousSender.stopAndCenter(centerOutput = false)
+        stopDirectionalCommands(centerOutput = false)
+        releaseManualStickOwnership(center = false)
+        if (UdpClient.floatingSupported) {
+            // Releasing only our existing child publishes neutral only if no other owner remains.
+            outputRoot?.takeIf { it.isActive }?.child("stick")?.let { scope ->
+                scope.releaseAllClaims()
+                scope.setRetained(false)
+            }
+        } else if (!model.directionalMode) {
+            sendOwnedStick(model.payload, 0f, 0f)
+        }
+        refreshLegacyOutputBusy()
+    }
+
     fun stopContinuousSendingForStick(stickName: String) {
         if ((model.type == ControlType.STICK || model.type == ControlType.CURVED_STICK ||
                 model.type == ControlType.RADIAL_CURVED_STICK) &&
@@ -1300,8 +1319,8 @@ class ControlView(
     /**
      * Stop directional commands
      */
-    fun stopDirectionalCommands() {
-        directionalHandler.stopDirectionalCommands()
+    fun stopDirectionalCommands(centerOutput: Boolean = true) {
+        directionalHandler.stopDirectionalCommands(centerOutput)
         refreshLegacyOutputBusy()
     }
 
