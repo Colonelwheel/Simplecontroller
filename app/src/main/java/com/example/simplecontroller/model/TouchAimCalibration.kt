@@ -70,7 +70,7 @@ data class TouchAimPassSummary(
 
 @Serializable
 data class TouchAimCalibrationProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -112,7 +112,20 @@ data class TouchAimCalibrationProfile(
     val shootBehavior: TouchAimShootBehavior
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
+    }
+
+    fun requiredSchemaVersion(): Int = if (listOf(aimPayload, shootPayload).any(PayloadModifiers::hasModifiers)) {
+        CURRENT_SCHEMA_VERSION
+    } else LEGACY_SCHEMA_VERSION
+
+    fun versionValidationError(): String? = when {
+        schemaVersion !in 1..CURRENT_SCHEMA_VERSION -> "This calibration version is not supported."
+        schemaVersion < requiredSchemaVersion() -> "Payload modifiers require calibration profile version 2."
+        listOf(aimPayload, shootPayload).payloadModifiersValidationError() != null ->
+            listOf(aimPayload, shootPayload).payloadModifiersValidationError()
+        else -> null
     }
 }
 
@@ -123,7 +136,8 @@ data class TouchAimCalibrationCollection(
 )
 
 fun TouchAimCalibrationProfile.isApplicable(allowUnreliableBestGuess: Boolean = false): Boolean =
-    (quality != TouchAimCalibrationQuality.UNRELIABLE || allowUnreliableBestGuess) &&
+    versionValidationError() == null &&
+        (quality != TouchAimCalibrationQuality.UNRELIABLE || allowUnreliableBestGuess) &&
         validationCompleted &&
         sensors.isNotEmpty() &&
         sensors.map { it.sensor }.distinct().size == sensors.size &&

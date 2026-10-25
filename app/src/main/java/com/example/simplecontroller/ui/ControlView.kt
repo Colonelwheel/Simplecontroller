@@ -24,6 +24,7 @@ import com.example.simplecontroller.model.ControlType
 import com.example.simplecontroller.model.PageAction
 import com.example.simplecontroller.model.isLocalPageAction
 import com.example.simplecontroller.model.FloatingLocalAction
+import com.example.simplecontroller.model.PayloadModifiers
 import com.example.simplecontroller.net.PhoneOutputScope
 import com.example.simplecontroller.net.PhoneOutputCoordinator
 import com.example.simplecontroller.net.UdpClient
@@ -80,6 +81,7 @@ class ControlView(
         val busy = physicalGestureActive || isPressed || isLatched || leftHeld || fingerIsDown || ownsManualStick ||
             pendingSingleTap != null || awaitingSecondTap ||
             continuousSender.isActive() || autoTapController?.isActive == true ||
+            (autoTapPayloadExecutor?.activeLeaseCount() ?: 0) > 0 ||
             buttonAimHandler?.hasRuntimeState() == true || buttonDirectionalHandler?.hasRuntimeState() == true ||
             touchAimHandler?.hasRuntimeState() == true || directionalHandler.hasRuntimeState() || uiHelper.hasPendingOutputWork()
         UdpClient.setLegacyOutputBusy(this, !UdpClient.floatingSupported && busy)
@@ -335,6 +337,10 @@ class ControlView(
                     }
                 },
                 releasePayload = {
+                    executor.releaseNormally(autoTapLease)
+                    autoTapLease = null
+                },
+                cancelPayload = {
                     executor.release(autoTapLease)
                     autoTapLease = null
                 },
@@ -390,6 +396,14 @@ class ControlView(
                 },
                 fireLegacyPayload = uiHelper::firePayload,
                 releaseLegacyPayload = uiHelper::releaseLatched,
+                cancelLegacyPayload = {
+                    uiHelper.cancelPendingActionsForReleaseAll()
+                    uiHelper.releaseLatched()
+                },
+                releaseLegacyPayloadWithoutSor = {
+                    if (isLatched) uiHelper.suppressModifiedSor()
+                    else uiHelper.releaseModifiedPayload(suppressSendOnRelease = true)
+                },
                 startTurbo = uiHelper::startRepeat,
                 stopTurbo = uiHelper::stopRepeat,
                 isGlobalHold = { GlobalSettings.globalHold },
@@ -807,6 +821,13 @@ class ControlView(
                     }
 
                     stopRepeat()
+                    if (e.actionMasked == MotionEvent.ACTION_CANCEL && PayloadModifiers.hasModifiers(model.payload)) {
+                        uiHelper.cancelPendingActionsForReleaseAll()
+                        isPressed = false
+                        if (isLatched) isLatched = false
+                        invalidate()
+                        return
+                    }
                     isPressed = false  // ✅ Cancel any pending delayed latch
                     invalidate() // ✅ Trigger redraw to remove pressed visual state
 
@@ -820,8 +841,9 @@ class ControlView(
 
                     if (!isLatched &&
                         !model.holdToggle && // ✅ don't release for hold-toggle quick taps
-                        !model.payload.contains("RT:1.0P", ignoreCase = true) &&
-                        !model.payload.contains("LT:1.0P", ignoreCase = true)
+                        (PayloadModifiers.hasModifiers(model.payload) ||
+                        (!model.payload.contains("RT:1.0P", ignoreCase = true) &&
+                        !model.payload.contains("LT:1.0P", ignoreCase = true)))
                     ) {
                         uiHelper.releaseLatched()  // ✅ Only release if NOT latched, NOT hold-toggle, and not pulse-based
                     }
@@ -866,7 +888,7 @@ class ControlView(
                 // Stop continuous sending when touching the stick again
                 if (e.actionMasked == MotionEvent.ACTION_DOWN) {
                     stopContinuousSending()
-                    stopDirectionalCommands()
+                    stopDirectionalCommands(natural = true)
                     if (!model.directionalMode) {
                         val stickName = ManualStickArbiter.canonicalStickName(model.payload)
                         SwipeManager.stopContinuousSendingForStick(stickName)
@@ -1319,8 +1341,8 @@ class ControlView(
     /**
      * Stop directional commands
      */
-    fun stopDirectionalCommands(centerOutput: Boolean = true) {
-        directionalHandler.stopDirectionalCommands(centerOutput)
+    fun stopDirectionalCommands(centerOutput: Boolean = true, natural: Boolean = false) {
+        directionalHandler.stopDirectionalCommands(centerOutput, natural)
         refreshLegacyOutputBusy()
     }
 

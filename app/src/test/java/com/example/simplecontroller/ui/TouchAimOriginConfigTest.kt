@@ -45,6 +45,29 @@ class TouchAimOriginConfigTest {
         assertEquals(4f, config.stickDeadzonePx)
     }
 
+    @Test
+    fun stageSensitivity_overridesAreIndependentAndUnsetStagesInheritGlobal() {
+        val control = touchAim().copy(
+            sensitivity = .507f,
+            touchAimAimOnlySensitivity = .123f,
+            touchLowSensitivity = 0f,
+            touchMediumSensitivity = .456f
+        )
+        assertEquals(.123f, control.touchAimStageSensitivity(TouchContactLevel.AIM_ONLY))
+        assertEquals(0f, control.touchAimStageSensitivity(TouchContactLevel.LOW))
+        assertEquals(.456f, control.touchAimStageSensitivity(TouchContactLevel.MEDIUM))
+        assertEquals(.507f, control.touchAimStageSensitivity(TouchContactLevel.HIGH))
+    }
+
+    @Test
+    fun invalidStageSensitivity_fallsBackToGlobal() {
+        val control = touchAim().copy(
+            sensitivity = .321f, touchLowSensitivity = Float.NaN, touchMediumSensitivity = -1f
+        )
+        assertEquals(.321f, control.touchAimStageSensitivity(TouchContactLevel.LOW))
+        assertEquals(.321f, control.touchAimStageSensitivity(TouchContactLevel.MEDIUM))
+    }
+
     private fun touchAim() = Control(
         id = "touch",
         type = ControlType.TOUCH_AIM,

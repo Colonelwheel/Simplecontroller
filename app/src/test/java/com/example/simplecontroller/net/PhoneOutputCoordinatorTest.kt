@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PhoneOutputCoordinatorTest {
+    @Test fun modifierMetadata_stripsSuffixesForKeysAndReservationWithoutSendingThem() {
+        val f = Fixture()
+        val payload = "LT:1.0(I)(HRD200),RT:1.0(SOR),W(HRD250)"
+        assertEquals(setOf("player1|TRIGGER|LT", "player1|TRIGGER|RT", "GLOBAL|KEY|W"),
+            PhoneOutputCoordinator.payloadLogicalKeys(payload))
+        val scope = f.scope("ring")
+        assertTrue(scope.reservePayload("fire", payload))
+        assertTrue(f.packets.isEmpty())
+        assertFalse(scope.sendCommand(payload))
+        assertFalse(scope.reservePayload("bad", "RT:1.0(HRD-2)"))
+        assertNull(PhoneOutputCoordinator.payloadLogicalKeys("RT:1.0(HRD-2)"))
+        assertTrue(f.packets.isEmpty())
+    }
     private class Fixture {
         var sequence = 0L
         val packets = mutableListOf<PhoneOutputPacket>()

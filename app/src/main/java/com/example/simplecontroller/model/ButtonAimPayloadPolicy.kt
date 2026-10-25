@@ -7,19 +7,35 @@ object ButtonAimPayloadPolicy {
     private data class TokenResult(val kind: TokenKind? = null, val error: String? = null)
 
     fun validationError(payload: String, allowBlank: Boolean = false): String? {
-        val tokens = tokenize(payload)
+        val parsed = PayloadModifiers.parse(payload)
+        parsed.error?.let { return it }
+        val tokens = parsed.commands
         if (tokens.isEmpty()) return if (allowBlank) null else "Payload is blank"
-        return tokens.firstNotNullOfOrNull { classify(it).error }
+        tokens.firstNotNullOfOrNull(::classifyCommand)?.let { return it }
+        return if (tokens.any { it.hasModifiers } && tokens.any { classify(it.command).kind != TokenKind.OUTPUT }) {
+            "Payloads with modifiers may contain only releasable output commands."
+        } else null
     }
 
     /** TouchAim states must contain only outputs whose ownership can be released safely. */
     fun stateValidationError(payload: String): String? {
-        val tokens = tokenize(payload)
+        val parsed = PayloadModifiers.parse(payload)
+        parsed.error?.let { return it }
+        val tokens = parsed.commands
         if (tokens.isEmpty()) return null
-        val results = tokens.map(::classify)
+        tokens.firstNotNullOfOrNull(::classifyCommand)?.let { return it }
+        val results = tokens.map { classify(it.command) }
         results.firstNotNullOfOrNull(TokenResult::error)?.let { return it }
         return if (results.all { it.kind == TokenKind.OUTPUT }) null else
             "TouchAim Aim/Shoot payloads may use only releasable Xbox, trigger, mouse-button, keyboard, or stick-macro outputs."
+    }
+
+    private fun classifyCommand(token: PayloadCommand): String? {
+        val result = classify(token.command)
+        result.error?.let { return it }
+        return if (token.hasModifiers && result.kind != TokenKind.OUTPUT) {
+            "Payload modifiers require a releasable Xbox, trigger, mouse-button, keyboard, or stick-macro command: ${token.command}"
+        } else null
     }
 
     private fun classify(raw: String): TokenResult {

@@ -10,6 +10,8 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested format `14` when action payloads store timing modifiers or TouchAim stores
+  per-stage sensitivity/confirmation tuning, including inactive settings;
 - nested `ControllerProfile` format version `10` for floating zones/groups/rings and stored scoped/suppression options, including disabled settings;
 - nested format `11` when a floating zone stores closer Aim/Movement boost spacing, swipe-resistant Finish or Boost-entry fire timing;
 - nested format `12` when a ring stores role boost banks/custom geometry, even disabled, or immediate direct-Boost aiming;
@@ -92,7 +94,9 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - Maximum backup version: `3`; writers use `3` when the full-ring preset library is present, `2` for boost profiles without full-ring presets, otherwise `1`. Historical backups 1 and 2 remain readable. Nonempty boost libraries require at least version 2; nonempty full-ring preset libraries require version 3. Future envelope and nested preset versions are rejected before decoding.
-- Maximum nested controller-profile format: `13` (formats `2` through `12` remain importable)
+- Maximum nested controller-profile format: `14` (formats `2` through `13` remain importable)
+- Writers use `14` for stored payload modifiers or nondefault per-stage TouchAim
+  tuning; otherwise the existing conditional formats below remain unchanged.
 - Writers use `13` if a root or stored role-bank Boost 2 has `skipDelayOnDirectTouch: true`, even when disabled; otherwise `12` if a ring stores nonnull `boostBanks` (including disabled actions/geometry) or `directBoostStartsAim: true`; otherwise `11` if any floating zone stores `finishIgnoresSwipes`, `compactAimBoosts`, `adjacentMovementBoosts`, or an aim knob's `returnFire.startOnBoostEntry` as true, even inside disabled configuration; otherwise `10` when floating/scoped configuration is stored, even disabled; otherwise
   `9` when a Button stores either boundary cancellation/re-arming option as true;
   otherwise `8` when any control excludes its movement from Camera Follow or stores strength
@@ -122,6 +126,15 @@ transport settings, theme, the current-profile preference, and other app/device 
 The `sideloadDebug` build retains target API 34 and application ID
 `com.example.simplecontroller`. The separate `playRelease` build targets API 36 and uses
 `io.github.colonelwheel.simplecontroller`. Both builds must retain this contract and golden fixture.
+
+Payload modifiers require reusable manual TouchAim/calibration schema 2,
+Button Aim schema 6, Directional/Stick+ schema 3, named floating boost schema 4,
+and complete ring preset schema 5 as applicable. Manual TouchAim schema 2 also
+stores independent Aim-only/Low/Medium/High sensitivities and stage confirmation
+times. Writers select those versions only when needed; historical schemas remain
+readable. Missing stage sensitivity overrides inherit the original sensitivity;
+missing confirmation times are zero. Unsupported or under-versioned nested
+features are rejected before application. See `PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md`.
 
 ## Floating configuration and library contract
 

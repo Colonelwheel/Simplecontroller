@@ -6,6 +6,7 @@ import android.util.Log
 import com.example.simplecontroller.model.TouchAimCalibrationProfile
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import java.io.File
 import java.util.UUID
 
@@ -64,7 +65,7 @@ object TouchAimCalibrationCatalog {
         profiles.filterNot { it.id == id }
 
     fun migrated(profile: TouchAimCalibrationProfile): TouchAimCalibrationProfile? =
-        profile.takeIf { it.schemaVersion in 1..TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION }
+        profile.takeIf { it.versionValidationError() == null }
 }
 
 /** App-private, UUID-addressed profile files. A corrupt profile cannot hide the other profiles. */
@@ -98,15 +99,13 @@ object TouchAimCalibrationStore {
     fun save(context: Context, profile: TouchAimCalibrationProfile): TouchAimCalibrationOperationResult {
         val cleanName = profile.name.trim()
         if (cleanName.isEmpty()) return TouchAimCalibrationOperationResult(error = "Name is required.")
-        if (profile.schemaVersion !in 1..TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION) {
-            return TouchAimCalibrationOperationResult(error = "This calibration version is not supported.")
-        }
+        profile.versionValidationError()?.let { return TouchAimCalibrationOperationResult(error = it) }
         if (list(context).any { it.id != profile.id && it.name.equals(cleanName, true) }) {
             return TouchAimCalibrationOperationResult(error = "A calibration with that name already exists.")
         }
         val file = validatedFile(context, profile.id)
             ?: return TouchAimCalibrationOperationResult(error = "Invalid calibration identifier.")
-        val normalized = profile.copy(name = cleanName)
+        val normalized = profile.copy(name = cleanName, schemaVersion = profile.requiredSchemaVersion())
         return runCatching {
             val atomic = AtomicFile(file)
             val output = atomic.startWrite()
@@ -151,8 +150,12 @@ object TouchAimCalibrationStore {
         val fileId = file.name.removePrefix(PREFIX).removeSuffix(SUFFIX)
         if (!UUID_PATTERN.matches(fileId)) return@runCatching null
         AtomicFile(file).openRead().bufferedReader(Charsets.UTF_8).use {
+            val text = it.readText()
+            val value = json.parseToJsonElement(text) as? JsonObject ?: error("Invalid calibration profile.")
+            requirePayloadFeatureSchema(value, "calibration profile", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION,
+                TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION)
             TouchAimCalibrationCatalog.migrated(
-                json.decodeFromString<TouchAimCalibrationProfile>(it.readText())
+                json.decodeFromString<TouchAimCalibrationProfile>(text)
             )?.takeIf { profile -> profile.id.equals(fileId, ignoreCase = true) }
         }
     }.onFailure { Log.w(TAG, "Skipping unreadable profile ${file.name}", it) }.getOrNull()

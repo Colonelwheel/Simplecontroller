@@ -301,8 +301,8 @@ class DirectionalStickHandler(
     /**
      * Stop any continuous directional commands being sent
      */
-    fun stopDirectionalCommands(centerOutput: Boolean = true) {
-        commandState.clear()
+    fun stopDirectionalCommands(centerOutput: Boolean = true, natural: Boolean = false) {
+        commandState.clear(natural)
         continuousDirectional?.let { uiHandler?.removeCallbacks(it) }
         continuousDirectional = null
         sendingUp = false

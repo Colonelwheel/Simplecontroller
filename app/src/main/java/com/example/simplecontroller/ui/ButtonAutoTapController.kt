@@ -1,12 +1,12 @@
 package com.example.simplecontroller.ui
 
+import com.example.simplecontroller.model.PayloadModifiers
 import kotlin.math.min
 
 fun autoTapUnsupportedPayloadReason(payload: String): String? {
-    val commands = payload.split(Regex("[,\\s]+"))
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .map { it.uppercase() }
+    val parsed = PayloadModifiers.parse(payload)
+    parsed.error?.let { return it }
+    val commands = parsed.commands.map { it.command.uppercase() }
     return when {
         commands.isEmpty() -> "Auto-tap needs a button payload."
         commands.any { it.startsWith("PAGE_") } ->
@@ -32,7 +32,8 @@ class ButtonAutoTapController(
     private val scheduler: ButtonAimPayloadScheduler,
     private val pressPayload: () -> Boolean,
     private val releasePayload: () -> Unit,
-    private val onStateChanged: (Boolean) -> Unit = {}
+    private val onStateChanged: (Boolean) -> Unit = {},
+    private val cancelPayload: () -> Unit = releasePayload
 ) {
     var isActive: Boolean = false
         private set
@@ -45,17 +46,17 @@ class ButtonAutoTapController(
     /** Returns the resulting active state. */
     fun toggle(intervalMs: Long): Boolean {
         if (isActive) {
-            stop()
+            stop(cancelPulse = false)
         } else {
             start(intervalMs)
         }
         return isActive
     }
 
-    fun stop() {
+    fun stop(cancelPulse: Boolean = true) {
         generation++
         cancelScheduledTasks()
-        releaseCurrentPulse()
+        releaseCurrentPulse(cancelPulse)
         if (isActive) {
             isActive = false
             onStateChanged(false)
@@ -107,10 +108,10 @@ class ButtonAutoTapController(
         nextTapTask = null
     }
 
-    private fun releaseCurrentPulse() {
+    private fun releaseCurrentPulse(cancel: Boolean = false) {
         if (!pulseHeld) return
         pulseHeld = false
-        releasePayload()
+        if (cancel) cancelPayload() else releasePayload()
     }
 
     companion object {

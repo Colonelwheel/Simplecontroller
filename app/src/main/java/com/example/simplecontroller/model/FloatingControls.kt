@@ -570,6 +570,9 @@ data class FloatingBoostProfile(
     }
 
     fun requiredSchemaVersion(): Int = when {
+        (boost1.actionPayloads() + boost2.actionPayloads() +
+            ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
+            .any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
         boost1.skipDelayOnDirectTouch || boost2.skipDelayOnDirectTouch -> DIRECT_TOUCH_DELAY_SCHEMA_VERSION
         ringAimActions?.knobActions.orEmpty().any { it.returnFire.startOnBoostEntry } -> RING_OPTIONS_SCHEMA_VERSION
         else -> LEGACY_SCHEMA_VERSION
@@ -579,7 +582,8 @@ data class FloatingBoostProfile(
         const val LEGACY_SCHEMA_VERSION = 1
         const val RING_OPTIONS_SCHEMA_VERSION = 2
         const val DIRECT_TOUCH_DELAY_SCHEMA_VERSION = 3
-        const val CURRENT_SCHEMA_VERSION = DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = PAYLOAD_MODIFIERS_SCHEMA_VERSION
     }
 }
 

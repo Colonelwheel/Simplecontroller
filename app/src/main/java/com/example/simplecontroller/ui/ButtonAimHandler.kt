@@ -8,6 +8,8 @@ import com.example.simplecontroller.model.ButtonAimOutput
 import com.example.simplecontroller.model.ButtonAimPayloadTiming
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.TouchAimOutput
+import com.example.simplecontroller.model.PayloadModifiers
+import com.example.simplecontroller.model.PayloadCommandTiming
 
 enum class ButtonAimVisualState {
     IDLE,
@@ -42,7 +44,9 @@ class ButtonAimHandler(
     private val vibrate: (Long) -> Unit,
     private val onPayloadError: (String) -> Unit,
     private val onStateChanged: () -> Unit,
-    private val onMouseAimEngaged: () -> Unit = {}
+    private val onMouseAimEngaged: () -> Unit = {},
+    private val cancelLegacyPayload: () -> Unit = releaseLegacyPayload,
+    private val releaseLegacyPayloadWithoutSor: () -> Unit = releaseLegacyPayload
 ) {
     private val dpadOutput = ButtonAimDpadSession(payloadExecutor, controlSize)
     private val deliberateSwipe = DeliberateSwipeTracker(touchSlopPx)
@@ -143,7 +147,7 @@ class ButtonAimHandler(
         cancelTimers()
         stopTurbo()
         if (legacyPayloadHeld || legacyTurboActive) {
-            releaseLegacyPayload()
+            cancelLegacyPayload()
         }
         legacyPayloadHeld = false
         legacyTurboActive = false
@@ -195,7 +199,7 @@ class ButtonAimHandler(
         activePointerId = event.getPointerId(event.actionIndex)
         releaseBoundary.begin(
             model.buttonAimCancelOnBoundaryExit,
-            if (alternate) model.buttonAimAlternatePayloadTiming else model.buttonAimPayloadTiming,
+            boundaryPayloadTiming(alternate),
             model.buttonAimRearmOnBoundaryReturn
         )
         holdThresholdReached = false
@@ -298,6 +302,31 @@ class ButtonAimHandler(
     }
 
     private fun startBaseGesture() {
+        if (PayloadModifiers.hasModifiers(model.payload)) {
+            gestureState = GestureState.BASE_IMMEDIATE_ACTIVE
+            setVisualState(ButtonAimVisualState.AIMING)
+            if (isGlobalHold() && !model.holdToggle) setLatched(true)
+            if (isGlobalTurbo() && model.buttonAimPayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) {
+                startTurbo()
+                legacyTurboActive = true
+                legacyPayloadHeld = true
+                return
+            }
+            when (val result = payloadExecutor.activate(
+                ButtonAimPayloadOwner.BASE, model.payload,
+                if (isLatched()) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE,
+                defaultTiming = if (model.buttonAimPayloadTiming == ButtonAimPayloadTiming.SEND_ON_RELEASE)
+                    PayloadCommandTiming.SEND_ON_RELEASE else PayloadCommandTiming.IMMEDIATE,
+                defaultReleaseDelayMs = model.buttonAimReleaseDelayMs,
+                preserveAuthoredPulseOnRelease = true
+            )) {
+                is ButtonAimPayloadActivationResult.Activated -> baseLease = result.lease
+                is ButtonAimPayloadActivationResult.Invalid -> { onPayloadError(result.reason); hardReset(); return }
+                ButtonAimPayloadActivationResult.ReleaseAll -> { hardReset(); return }
+            }
+            if (model.holdToggle) scheduleHoldThreshold(latchImmediately = true)
+            return
+        }
         if (model.buttonAimPayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) {
             gestureState = GestureState.BASE_IMMEDIATE_ACTIVE
             setVisualState(ButtonAimVisualState.AIMING)
@@ -342,6 +371,21 @@ class ButtonAimHandler(
 
     private fun startAlternateGesture() {
         scheduleAlternateResetThreshold()
+
+        if (PayloadModifiers.hasModifiers(model.buttonAimAlternatePayload)) {
+            gestureState = GestureState.ALTERNATE_IMMEDIATE_ACTIVE
+            when (val result = payloadExecutor.activate(
+                ButtonAimPayloadOwner.ALTERNATE, model.buttonAimAlternatePayload,
+                defaultTiming = if (model.buttonAimAlternatePayloadTiming == ButtonAimPayloadTiming.SEND_ON_RELEASE)
+                    PayloadCommandTiming.SEND_ON_RELEASE else PayloadCommandTiming.IMMEDIATE
+            )) {
+                is ButtonAimPayloadActivationResult.Activated -> alternateLease = result.lease
+                is ButtonAimPayloadActivationResult.Invalid -> { onPayloadError(result.reason); hardReset(); return }
+                ButtonAimPayloadActivationResult.ReleaseAll -> { hardReset(); return }
+            }
+            updateAlternateVisual(active = true)
+            return
+        }
 
         if (model.buttonAimAlternatePayloadTiming == ButtonAimPayloadTiming.IMMEDIATE) {
             gestureState = GestureState.ALTERNATE_IMMEDIATE_ACTIVE
@@ -486,6 +530,22 @@ class ButtonAimHandler(
 
     private fun completeBoundaryCanceledGesture() {
         val alternate = isAlternatePhase()
+        if (alternate && PayloadModifiers.hasModifiers(model.buttonAimAlternatePayload)) {
+            payloadExecutor.releaseNormally(alternateLease, suppressSendOnRelease = true)
+            alternateLease = null
+        } else if (!alternate && PayloadModifiers.hasModifiers(model.payload)) {
+            if (isLatched()) payloadExecutor.suppressSendOnRelease(baseLease)
+            else {
+                payloadExecutor.releaseNormally(baseLease, suppressSendOnRelease = true)
+                baseLease = null
+            }
+            if (legacyTurboActive || legacyPayloadHeld) {
+                stopTurbo()
+                releaseLegacyPayloadWithoutSor()
+            }
+            legacyTurboActive = false
+            legacyPayloadHeld = false
+        }
         // Keep ordinary centering/retention and pointer ownership independent of payload cancellation.
         finishOrdinaryAimOutput()
         resetGestureOnly(preservePresentation = true)
@@ -508,8 +568,8 @@ class ButtonAimHandler(
             legacyTurboActive = false
             legacyPayloadHeld = false
         } else if (usesPayloadExecutor()) {
-            if (!isLatched() && !shouldSkipImmediateRelease()) {
-                payloadExecutor.release(baseLease)
+            if (!isLatched() && (!shouldSkipImmediateRelease() || PayloadModifiers.hasModifiers(model.payload))) {
+                payloadExecutor.releaseNormally(baseLease)
                 baseLease = null
             }
         } else if (!isLatched()) {
@@ -661,7 +721,7 @@ class ButtonAimHandler(
         cancelTimers()
         stopTurbo()
         if (legacyPayloadHeld || legacyTurboActive) {
-            releaseLegacyPayload()
+            cancelLegacyPayload()
         }
         legacyPayloadHeld = false
         legacyTurboActive = false
@@ -784,7 +844,7 @@ class ButtonAimHandler(
             model.buttonAimAlternateBaseUnlatchDelayMs > 0L
 
         if (shouldDelayBaseUnlatch) {
-            payloadExecutor.release(alternateLease)
+            payloadExecutor.releaseNormally(alternateLease)
             alternateLease = null
             return true
         }
@@ -792,11 +852,11 @@ class ButtonAimHandler(
         if (returnToBase) {
             // With no configured delay, release atomically to avoid briefly restoring an
             // overlapping Base trigger/stick value between Alternate and neutral.
-            payloadExecutor.releaseTogether(alternateLease, baseLease)
+            payloadExecutor.releaseNormallyTogether(alternateLease, baseLease)
             alternateLease = null
             baseLease = null
         } else {
-            payloadExecutor.release(alternateLease)
+            payloadExecutor.releaseNormally(alternateLease)
             alternateLease = null
         }
         return false
@@ -826,7 +886,7 @@ class ButtonAimHandler(
     }
 
     private fun releaseBaseOwnership() {
-        payloadExecutor.releaseOwner(ButtonAimPayloadOwner.BASE)
+        payloadExecutor.releaseNormally(baseLease)
         baseLease = null
     }
 
@@ -957,7 +1017,17 @@ class ButtonAimHandler(
     private fun usesOneShotExecutor(): Boolean = model.buttonAimOneShotAlternateEnabled
 
     private fun usesPayloadExecutor(): Boolean =
-        model.buttonAimOneShotAlternateEnabled || model.buttonDirectional.enabled
+        model.buttonAimOneShotAlternateEnabled || model.buttonDirectional.enabled || PayloadModifiers.hasModifiers(model.payload)
+
+    private fun boundaryPayloadTiming(alternate: Boolean): ButtonAimPayloadTiming {
+        val payload = if (alternate) model.buttonAimAlternatePayload else model.payload
+        val fallback = if (alternate) model.buttonAimAlternatePayloadTiming else model.buttonAimPayloadTiming
+        if (!PayloadModifiers.hasModifiers(payload)) return fallback
+        val commands = PayloadModifiers.parse(payload).commands
+        val hasSor = commands.any { it.timing == PayloadCommandTiming.SEND_ON_RELEASE ||
+            (it.timing == null && fallback == ButtonAimPayloadTiming.SEND_ON_RELEASE) }
+        return if (hasSor) ButtonAimPayloadTiming.SEND_ON_RELEASE else ButtonAimPayloadTiming.IMMEDIATE
+    }
 
     companion object {
         private const val FINITE_PRESS_DURATION_MS = 90L

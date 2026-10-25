@@ -615,6 +615,18 @@ This is useful when a game needs the Base modifier to overlap the end of the Alt
 
 ## Touch Aim
 
+Sensitivity now uses a text field accepting values such as `0.001`. In Manual
+three-stage mode, Aim-only, Low, Medium and High each offer an optional sensitivity
+override and **Enter Stage Confirmation** in milliseconds. Blank sensitivity
+inherits the main value; blank or zero confirmation enters immediately.
+Confirmation keeps the previous stage active until the destination remains steady.
+
+Action commands also accept `(I)`, `(SOR)` and `(HRD200)`. HRD extends a held
+TouchAim output only after finger lift; it does not change Hold carryover between
+stages. On Buttons it starts on release, or on actual unlatch for Hold Toggle.
+See [payload modifiers and stage tuning](PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md)
+for exact timing, pulse syntax and cleanup behavior.
+
 Touch Aim is an experimental one-finger aiming control. It can move the mouse, right stick, or left stick while also changing actions according to the finger-contact shape reported by Android.
 
 1. Add **Touch Aim**.

@@ -12,6 +12,7 @@ import com.example.simplecontroller.model.RingBoostSettings
 import com.example.simplecontroller.model.RingBoostStage
 import com.example.simplecontroller.model.RingFireMode
 import com.example.simplecontroller.model.StickDirection
+import com.example.simplecontroller.model.PayloadModifiers
 import kotlin.math.abs
 
 /** The adapter owns shared phone output claims, transport ordering and the manual-stick arbiter. */
@@ -24,6 +25,8 @@ interface FloatingRingBackend {
     /** Reserve an active/finite sender across its OFF gaps; those gaps are not takeover windows. */
     fun reservePayload(slot: String, payload: String, retained: Boolean = false, exclusive: Boolean = true): Boolean = true
     fun endPayload(slot: String) = releasePayload(slot)
+    /** Normal release may send SOR and retain HRD claims; Finish/cancel use [endPayload]. */
+    fun endPayloadNormally(slot: String) = endPayload(slot)
     fun closeScope() {}
     fun beginAim(pointerId: Int, x: Float, y: Float, eventTime: Long, tuning: ButtonAimTuning): Boolean
     fun updateAim(pointerId: Int, x: Float, y: Float, eventTime: Long)
@@ -37,8 +40,8 @@ interface FloatingRingBackend {
     fun releaseMovement()
     fun mouseSuppression(active: Boolean)
     fun payloadsOverlap(first: String, second: String): Boolean =
-        first.uppercase().split(Regex("[,\\s]+" )).filter(String::isNotBlank).toSet()
-            .intersect(second.uppercase().split(Regex("[,\\s]+" )).filter(String::isNotBlank).toSet()).isNotEmpty()
+        PayloadModifiers.parse(first).commands.map { it.command.uppercase() }.toSet()
+            .intersect(PayloadModifiers.parse(second).commands.map { it.command.uppercase() }.toSet()).isNotEmpty()
 }
 
 data class FloatingRingStatus(
@@ -547,8 +550,8 @@ class FloatingRingStateMachine(
 
     private fun startAim(selected: RingAimKnob, x: Float, y: Float, time: Long, directAddition: Boolean): Boolean {
         if (knob?.id != null && knob?.id != selected.id) {
-            if (earlyFireKnob?.id != selected.id) stopOutput(fire)
-            stopOutput(ads)
+            if (earlyFireKnob?.id != selected.id) stopOutputNormally(fire)
+            stopOutputNormally(ads)
         }
         knob = selected
         val tuning = if (effectiveFine()) config.aim.tuning.copy(sensitivity = config.aim.fine.sensitivity)
@@ -588,9 +591,9 @@ class FloatingRingStateMachine(
             cancelReturn()
             if (!fireEligible) armed = false
         }
-        if (!settings.continueAdsOutside) stopOutput(ads)
+        if (!settings.continueAdsOutside) stopOutputNormally(ads)
         if (!settings.continueFireOutside && settings.mode in setOf(RingFireMode.HOLD, RingFireMode.REPEAT)) {
-            stopOutput(fire)
+            stopOutputNormally(fire)
         }
         if (settings.mode == RingFireMode.RELEASE_SHOT && settings.cancelReleaseShotOnBoundaryExit) {
             releaseCanceled = true
@@ -750,7 +753,7 @@ class FloatingRingStateMachine(
                 }
             }
             else if (boost.inside && direction != boost.direction && !boost.pending && !boost.latched) {
-                if (settings.action != RingAction.TAP) stopOutput(boost.output)
+                if (settings.action != RingAction.TAP) stopOutputNormally(boost.output)
                 enterBoost(boost, direction, eventTime)
             }
         }
@@ -813,8 +816,8 @@ class FloatingRingStateMachine(
         val settings = boost.settings
         if (settings.cancelDelayOnExit) cancelBoostDelay(boost)
         when (settings.action) {
-            RingAction.HOLD -> if (!boost.latched && !boost.output.retained) stopOutput(boost.output)
-            RingAction.REPEAT -> if (!settings.repeatAfterExit && !boost.output.retained) stopOutput(boost.output)
+            RingAction.HOLD -> if (!boost.latched && !boost.output.retained) stopOutputNormally(boost.output)
+            RingAction.REPEAT -> if (!settings.repeatAfterExit && !boost.output.retained) stopOutputNormally(boost.output)
             RingAction.TAP -> Unit
         }
     }
@@ -834,7 +837,7 @@ class FloatingRingStateMachine(
             backend.retainPayload(output.slot, false)
             return
         }
-        stopOutput(output)
+        stopOutputNormally(output)
         if (backend.acquirePayload(output.slot, payload)) {
             output.payload = payload
             output.held = true
@@ -867,7 +870,7 @@ class FloatingRingStateMachine(
     private fun repeat(output: OutputAction, payload: String, pressMs: Long, gapMs: Long) {
         if (payload.isBlank() || output.slot in overridden) return
         if (output.repeating && output.payload == payload) return
-        stopOutput(output)
+        stopOutputNormally(output)
         if (!backend.reservePayload(output.slot, payload)) { overridden.add(output.slot); return }
         output.payload = payload
         output.pressMs = pressMs
@@ -898,7 +901,7 @@ class FloatingRingStateMachine(
                 if (output.repeating || output.queued) {
                     if (!output.repeating && output.queued) {
                         val payload = output.queuedPayload
-                        backend.endPayload(output.slot)
+                        backend.endPayloadNormally(output.slot)
                         if (!backend.reservePayload(output.slot, payload)) {
                             overridden.add(output.slot)
                             stopOutput(output)
@@ -916,7 +919,7 @@ class FloatingRingStateMachine(
                     runPulse(output, generation)
                 } else {
                     output.busy = false
-                    backend.endPayload(output.slot)
+                    backend.endPayloadNormally(output.slot)
                 }
                 publish()
             }
@@ -925,10 +928,18 @@ class FloatingRingStateMachine(
     }
 
     private fun stopOutput(output: OutputAction) {
+        stopOutput(output, normalRelease = false)
+    }
+
+    private fun stopOutputNormally(output: OutputAction) {
+        stopOutput(output, normalRelease = true)
+    }
+
+    private fun stopOutput(output: OutputAction, normalRelease: Boolean) {
         output.generation++
         output.task?.cancel()
         output.task = null
-        backend.endPayload(output.slot)
+        if (normalRelease) backend.endPayloadNormally(output.slot) else backend.endPayload(output.slot)
         output.held = false
         output.retained = false
         output.repeating = false
@@ -943,7 +954,7 @@ class FloatingRingStateMachine(
         if (retain && (output.held || output.repeating)) {
             output.retained = true
             backend.retainPayload(output.slot, true)
-        } else stopOutput(output)
+        } else stopOutputNormally(output)
     }
 
     private fun sendMovement(vector: RingPoint, retained: Boolean) {
@@ -986,8 +997,8 @@ class FloatingRingStateMachine(
                 backend.payloadIsOwned(it.output.slot)
         }))
 
-    private fun isAdsPayload(payload: String): Boolean = payload.uppercase().split(Regex("[,\\s]+" )).any {
-        it.startsWith("LT:") || it == "MOUSE_RIGHT_DOWN"
+    private fun isAdsPayload(payload: String): Boolean = PayloadModifiers.parse(payload).commands.any {
+        it.command.startsWith("LT:", ignoreCase = true) || it.command.equals("MOUSE_RIGHT_DOWN", ignoreCase = true)
     }
 
     private fun outputs() = listOf(ads, fire) + boosts.map { it.output }

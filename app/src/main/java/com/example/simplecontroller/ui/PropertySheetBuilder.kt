@@ -74,7 +74,7 @@ class PropertySheetBuilder(
         val nameField: EditText,
         val widthSeek: SeekBar,
         val heightSeek: SeekBar,
-        val sensitivitySeek: SeekBar?,
+        val sensitivityField: EditText?,
         val holdToggle: CheckBox,
         val autoTapEnabled: CheckBox,
         val autoTapIntervalMs: EditText,
@@ -122,6 +122,10 @@ class PropertySheetBuilder(
         val mediumAction: Spinner,
         val highAction: Spinner,
         val keepLowerHolds: CheckBox,
+        val aimOnlyTuning: TouchAimStageTuningComponents,
+        val lowTuning: TouchAimStageTuningComponents,
+        val mediumTuning: TouchAimStageTuningComponents,
+        val highTuning: TouchAimStageTuningComponents,
         val stickFullSpeed: EditText,
         val invertY: CheckBox,
         val useResponseCurve: CheckBox,
@@ -140,6 +144,11 @@ class PropertySheetBuilder(
         val twoStateSmoothing: EditText,
         val enterConfirmationMs: EditText,
         val returnConfirmationMs: EditText
+    )
+
+    private data class TouchAimStageTuningComponents(
+        val sensitivity: EditText,
+        val enterConfirmationMs: EditText
     )
 
     private data class ButtonAimComponents(
@@ -332,12 +341,6 @@ class PropertySheetBuilder(
         components.payloadField.setTextColor(ThemeManager.getTextColor(context))
         components.payloadField.setHintTextColor(ContextCompat.getColor(context, R.color.dark_text_secondary))
 
-        // Handle optional fields
-        components.sensitivitySeek?.progressTintList =
-            ContextCompat.getColorStateList(context, R.color.primary_blue)
-        components.sensitivitySeek?.thumbTintList =
-            ContextCompat.getColorStateList(context, R.color.accent_blue)
-
         // Style checkboxes
         components.holdToggle.setTextColor(ThemeManager.getTextColor(context))
         components.holdToggle.buttonTintList =
@@ -438,33 +441,22 @@ class PropertySheetBuilder(
                     model.buttonDirectional.enabled || Regex("(?i)(?:^|[,\\s])LS:").containsMatchIn(model.payload)))
         )
         
-        // Sensitivity (for stick/touchpad)
-        val sensitivitySeek = if (
+        // Text entry preserves fine sensitivity values without slider quantization.
+        val sensitivityField = if (
             model.type == ControlType.STICK ||
             model.type == ControlType.CURVED_STICK ||
             model.type == ControlType.RADIAL_CURVED_STICK ||
             model.type == ControlType.TOUCHPAD ||
             model.type == ControlType.TOUCH_AIM
         ) {
-            addSeekBarWithLabel(
-                container, 
+            addSensitivityField(
+                container,
                 when (model.type) {
-                    ControlType.CURVED_STICK ->
-                        "Curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
-                    ControlType.RADIAL_CURVED_STICK ->
-                        "Radial curve sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
-                    else -> "Sensitivity: ${(model.sensitivity * 100).roundToInt() / 100f}"
+                    ControlType.CURVED_STICK -> "Curve sensitivity"
+                    ControlType.RADIAL_CURVED_STICK -> "Radial curve sensitivity"
+                    else -> "Sensitivity"
                 },
-                500,
-                (model.sensitivity * 100).roundToInt(),
-                {
-                    when (model.type) {
-                        ControlType.CURVED_STICK -> "Curve sensitivity: ${it / 100f}"
-                        ControlType.RADIAL_CURVED_STICK ->
-                            "Radial curve sensitivity: ${it / 100f}"
-                        else -> "Sensitivity: ${it / 100f}"
-                    }
-                }
+                model.sensitivity
             )
         } else null
         
@@ -682,7 +674,7 @@ class PropertySheetBuilder(
         ) View.GONE else View.VISIBLE
         
         return UIComponents(
-            nameField, widthSeek, heightSeek, sensitivitySeek,
+            nameField, widthSeek, heightSeek, sensitivityField,
             holdToggle, autoTapEnabled, autoTapIntervalMs,
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
@@ -1501,17 +1493,35 @@ class PropertySheetBuilder(
             model.touchKeepLowerHolds
         )
 
+        threeStageContainer.addView(TextView(context).apply {
+            text = "Each stage can use its own aim sensitivity. Leave it blank to use the main Sensitivity. Enter Stage Confirmation requires that detected stage to remain steady before its actions and sensitivity apply; blank or 0 is immediate. HRD extends a held payload only after lifting your finger."
+        })
+        addSectionTitle(threeStageContainer, "Aim-only stage")
+        val aimOnlyTuning = addTouchAimStageTuning(
+            threeStageContainer, model.touchAimAimOnlySensitivity,
+            model.touchAimAimOnlyEnterConfirmationMs
+        )
+
         addSectionTitle(threeStageContainer, "Low level")
         val lowPayload = addCommandField(threeStageContainer, "Commands", model.touchLowPayload)
         val lowAction = addActionChoice(threeStageContainer, model.touchLowAction)
+        val lowTuning = addTouchAimStageTuning(
+            threeStageContainer, model.touchLowSensitivity, model.touchLowEnterConfirmationMs
+        )
 
         addSectionTitle(threeStageContainer, "Medium level")
         val mediumPayload = addCommandField(threeStageContainer, "Commands", model.touchMediumPayload)
         val mediumAction = addActionChoice(threeStageContainer, model.touchMediumAction)
+        val mediumTuning = addTouchAimStageTuning(
+            threeStageContainer, model.touchMediumSensitivity, model.touchMediumEnterConfirmationMs
+        )
 
         addSectionTitle(threeStageContainer, "High level")
         val highPayload = addCommandField(threeStageContainer, "Commands", model.touchHighPayload)
         val highAction = addActionChoice(threeStageContainer, model.touchHighAction)
+        val highTuning = addTouchAimStageTuning(
+            threeStageContainer, model.touchHighSensitivity, model.touchHighEnterConfirmationMs
+        )
 
         fun updateModeVisibility(position: Int) {
             twoStateContainer.visibility = if (position == 0) View.GONE else View.VISIBLE
@@ -1560,6 +1570,10 @@ class PropertySheetBuilder(
             mediumAction = mediumAction,
             highAction = highAction,
             keepLowerHolds = keepLowerHolds,
+            aimOnlyTuning = aimOnlyTuning,
+            lowTuning = lowTuning,
+            mediumTuning = mediumTuning,
+            highTuning = highTuning,
             stickFullSpeed = stickFullSpeed,
             invertY = invertY,
             useResponseCurve = useResponseCurve,
@@ -2244,6 +2258,56 @@ class PropertySheetBuilder(
             if (action == TouchStageAction.PRESS) 0 else 1
         )
 
+    private fun addSensitivityField(
+        container: LinearLayout,
+        label: String,
+        value: Float?,
+        inheritMain: Boolean = false
+    ): EditText {
+        container.addView(TextView(context).apply { text = label })
+        return EditText(context).apply {
+            setText(value?.toString().orEmpty())
+            hint = if (inheritMain) "Blank = main Sensitivity" else "0-5; e.g. 0.001"
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setSingleLine(true)
+            doAfterTextChanged {
+                val input = it.toString().trim()
+                val parsed = input.toFloatOrNull()
+                error = if (input.isNotEmpty() &&
+                    (parsed == null || !parsed.isFinite() || parsed !in 0f..5f)) {
+                    "Enter a number from 0 to 5, for example 0.001"
+                } else null
+            }
+            container.addView(this)
+            container.addView(createGap())
+        }
+    }
+
+    private fun addTouchAimStageTuning(
+        container: LinearLayout,
+        sensitivity: Float?,
+        confirmationMs: Long
+    ): TouchAimStageTuningComponents {
+        val sensitivityField = addSensitivityField(
+            container, "Stage aim sensitivity (optional)", sensitivity, inheritMain = true
+        )
+        container.addView(TextView(context).apply { text = "Enter Stage Confirmation (ms, optional)" })
+        val confirmationField = addTextField(
+            container, confirmationMs.takeIf { it != 0L }?.toString().orEmpty(),
+            "Blank or 0 = immediate", InputType.TYPE_CLASS_NUMBER
+        ).apply {
+            setSingleLine(true)
+            doAfterTextChanged {
+                val input = it.toString().trim()
+                val parsed = input.toLongOrNull()
+                error = if (input.isNotEmpty() && (parsed == null || parsed !in 0L..600_000L)) {
+                    "Enter whole milliseconds from 0 to 600000"
+                } else null
+            }
+        }
+        return TouchAimStageTuningComponents(sensitivityField, confirmationField)
+    }
+
     private fun addDecimalField(
         container: LinearLayout,
         label: String,
@@ -2806,7 +2870,9 @@ class PropertySheetBuilder(
         // Stick/Touchpad properties
         if (model.type != ControlType.BUTTON) {
             model.autoCenter = components.autoCenter.isChecked
-            components.sensitivitySeek?.let { model.sensitivity = it.progress / 100f }
+            components.sensitivityField?.let {
+                model.sensitivity = parseSensitivityInput(it.text.toString(), model.sensitivity)
+            }
         }
         
         // Touchpad-specific properties
@@ -2903,6 +2969,30 @@ class PropertySheetBuilder(
         model.touchMediumAction = fields.mediumAction.selectedAction()
         model.touchHighAction = fields.highAction.selectedAction()
         model.touchKeepLowerHolds = fields.keepLowerHolds.isChecked
+        model.touchAimAimOnlySensitivity = parseOptionalSensitivityInput(
+            fields.aimOnlyTuning.sensitivity.text.toString(), model.touchAimAimOnlySensitivity
+        )
+        model.touchLowSensitivity = parseOptionalSensitivityInput(
+            fields.lowTuning.sensitivity.text.toString(), model.touchLowSensitivity
+        )
+        model.touchMediumSensitivity = parseOptionalSensitivityInput(
+            fields.mediumTuning.sensitivity.text.toString(), model.touchMediumSensitivity
+        )
+        model.touchHighSensitivity = parseOptionalSensitivityInput(
+            fields.highTuning.sensitivity.text.toString(), model.touchHighSensitivity
+        )
+        model.touchAimAimOnlyEnterConfirmationMs = parseStageConfirmationInput(
+            fields.aimOnlyTuning.enterConfirmationMs.text.toString(), model.touchAimAimOnlyEnterConfirmationMs
+        )
+        model.touchLowEnterConfirmationMs = parseStageConfirmationInput(
+            fields.lowTuning.enterConfirmationMs.text.toString(), model.touchLowEnterConfirmationMs
+        )
+        model.touchMediumEnterConfirmationMs = parseStageConfirmationInput(
+            fields.mediumTuning.enterConfirmationMs.text.toString(), model.touchMediumEnterConfirmationMs
+        )
+        model.touchHighEnterConfirmationMs = parseStageConfirmationInput(
+            fields.highTuning.enterConfirmationMs.text.toString(), model.touchHighEnterConfirmationMs
+        )
         model.touchStickFullSpeed = fields.stickFullSpeed.floatValue(model.touchStickFullSpeed)
             .coerceAtLeast(1f)
         model.touchInvertY = fields.invertY.isChecked

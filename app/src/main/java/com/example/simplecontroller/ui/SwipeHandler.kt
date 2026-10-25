@@ -131,7 +131,7 @@ class SwipeHandler {
                 val wasOwnedBySwipe = swipeOwnsGesture
                 if (wasOwnedBySwipe) {
                     // Finalize the control only when Swipe owned this complete gesture.
-                    lastTouchedView?.forwardEvent(e, MotionEvent.ACTION_UP, clamp = true)
+                    lastTouchedView?.forwardEvent(e, e.actionMasked, clamp = true)
                 }
 
                 // Clean up

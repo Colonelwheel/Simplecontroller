@@ -31,11 +31,12 @@ data class StickDirectionalSettings(
         if (commands().any { it.length > MAX_COMMAND_LENGTH }) {
             return "A saved directional command is too long."
         }
+        commands().payloadModifiersValidationError()?.let { return it }
         extendedBoost.validationError(superBoostThreshold)?.let { return it }
         return null
     }
 
-    private fun commands(): List<String> = listOf(
+    fun commands(): List<String> = listOf(
         upCommand,
         downCommand,
         leftCommand,
@@ -48,7 +49,7 @@ data class StickDirectionalSettings(
         downSuperBoostCommand,
         leftSuperBoostCommand,
         rightSuperBoostCommand
-    )
+    ) + extendedBoost.outerCommands.values()
 
     private companion object {
         const val MAX_COMMAND_LENGTH = 1000
@@ -58,7 +59,7 @@ data class StickDirectionalSettings(
 
 @Serializable
 data class StickDirectionalProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -67,7 +68,8 @@ data class StickDirectionalProfile(
     val settings: StickDirectionalSettings
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val LEGACY_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
         const val MAX_NAME_LENGTH = 80
     }
 
@@ -75,11 +77,16 @@ data class StickDirectionalProfile(
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) {
             return "This profile version is not supported."
         }
+        if (schemaVersion < requiredSchemaVersion()) return "Payload modifiers require directional profile version 3."
         if (name.trim().isEmpty() || name.trim().length > MAX_NAME_LENGTH) {
             return "Choose a profile name from 1 to $MAX_NAME_LENGTH characters."
         }
         return settings.validationError()
     }
+
+    fun requiredSchemaVersion(): Int = if (settings.commands().any(PayloadModifiers::hasModifiers)) {
+        CURRENT_SCHEMA_VERSION
+    } else minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
 
     /** Copies shared directional commands and thresholds without changing the target's mode. */
     fun applyCommandsTo(control: Control): Boolean {
@@ -150,7 +157,7 @@ fun Control.captureStickDirectionalProfile(
             extendedBoost = extendedBoost
         )
     )
-    return profile.takeIf { it.validationError() == null }
+    return profile.copy(schemaVersion = profile.requiredSchemaVersion()).takeIf { it.validationError() == null }
 }
 
 private fun Control.isStickControl(): Boolean =

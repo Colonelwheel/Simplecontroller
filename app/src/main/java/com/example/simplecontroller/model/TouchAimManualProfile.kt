@@ -15,7 +15,15 @@ data class TouchAimManualThreeStageSettings(
     val lowAction: TouchStageAction,
     val mediumAction: TouchStageAction,
     val highAction: TouchStageAction,
-    val keepLowerHolds: Boolean
+    val keepLowerHolds: Boolean,
+    val aimOnlySensitivity: Float? = null,
+    val lowSensitivity: Float? = null,
+    val mediumSensitivity: Float? = null,
+    val highSensitivity: Float? = null,
+    val aimOnlyEnterConfirmationMs: Long = 0L,
+    val lowEnterConfirmationMs: Long = 0L,
+    val mediumEnterConfirmationMs: Long = 0L,
+    val highEnterConfirmationMs: Long = 0L
 )
 
 @Serializable
@@ -34,7 +42,7 @@ data class TouchAimManualTwoStateSettings(
 
 @Serializable
 data class TouchAimManualProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -56,13 +64,15 @@ data class TouchAimManualProfile(
     val twoState: TouchAimManualTwoStateSettings? = null
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val CURRENT_SCHEMA_VERSION = 2
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
     }
 
     fun validationError(): String? {
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) return "This profile version is not supported."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved stage tuning or payload modifiers require manual TouchAim profile version 2."
         if (name.trim().isEmpty() || name.trim().length > MAX_NAME_LENGTH) {
             return "Choose a profile name from 1 to $MAX_NAME_LENGTH characters."
         }
@@ -82,11 +92,22 @@ data class TouchAimManualProfile(
             twoState?.shootPayload
         )
         if (payloads.any { it.length > MAX_PAYLOAD_LENGTH }) return "A saved payload is too long."
+        payloads.payloadModifiersValidationError()?.let { return it }
         return when (mode) {
             TouchAimMode.MANUAL_THREE_STAGE -> {
                 val settings = threeStage
                     ?: return "The three-stage settings are missing."
                 if (twoState != null) return "This profile contains conflicting mode settings."
+                val stagePayloads = listOf(settings.lowPayload, settings.mediumPayload, settings.highPayload)
+                if (stagePayloads.any(PayloadModifiers::hasModifiers)) {
+                    stagePayloads.firstNotNullOfOrNull(ButtonAimPayloadPolicy::stateValidationError)?.let { return it }
+                }
+                if (listOf(settings.aimOnlySensitivity, settings.lowSensitivity, settings.mediumSensitivity,
+                        settings.highSensitivity).filterNotNull().any { !it.isFinite() || it !in 0f..5f } ||
+                    listOf(settings.aimOnlyEnterConfirmationMs, settings.lowEnterConfirmationMs,
+                        settings.mediumEnterConfirmationMs, settings.highEnterConfirmationMs).any { it !in 0L..600_000L }) {
+                    return "The saved stage sensitivity or confirmation timing is invalid."
+                }
                 if (!settings.scoreSmoothing.isFinite() || settings.scoreSmoothing !in .05f..1f ||
                     !settings.lowThreshold.isFinite() || settings.lowThreshold < 0f ||
                     !settings.mediumThreshold.isFinite() ||
@@ -121,6 +142,18 @@ data class TouchAimManualProfile(
         }
     }
 
+    fun requiredSchemaVersion(): Int {
+        val settings = threeStage
+        val hasTuning = settings != null &&
+            (listOf(settings.aimOnlySensitivity, settings.lowSensitivity, settings.mediumSensitivity,
+                settings.highSensitivity).any { it != null } ||
+                listOf(settings.aimOnlyEnterConfirmationMs, settings.lowEnterConfirmationMs,
+                    settings.mediumEnterConfirmationMs, settings.highEnterConfirmationMs).any { it != 0L })
+        val modifiers = listOfNotNull(settings?.lowPayload, settings?.mediumPayload, settings?.highPayload,
+            twoState?.aimPayload, twoState?.shootPayload).any(PayloadModifiers::hasModifiers)
+        return if (hasTuning || modifiers) CURRENT_SCHEMA_VERSION else LEGACY_SCHEMA_VERSION
+    }
+
     fun applyTo(control: Control): Boolean {
         if (control.type != ControlType.TOUCH_AIM || validationError() != null) return false
         control.touchAimOutput = aimOutput
@@ -149,6 +182,14 @@ data class TouchAimManualProfile(
                 control.touchMediumAction = settings.mediumAction
                 control.touchHighAction = settings.highAction
                 control.touchKeepLowerHolds = settings.keepLowerHolds
+                control.touchAimAimOnlySensitivity = settings.aimOnlySensitivity
+                control.touchLowSensitivity = settings.lowSensitivity
+                control.touchMediumSensitivity = settings.mediumSensitivity
+                control.touchHighSensitivity = settings.highSensitivity
+                control.touchAimAimOnlyEnterConfirmationMs = settings.aimOnlyEnterConfirmationMs
+                control.touchLowEnterConfirmationMs = settings.lowEnterConfirmationMs
+                control.touchMediumEnterConfirmationMs = settings.mediumEnterConfirmationMs
+                control.touchHighEnterConfirmationMs = settings.highEnterConfirmationMs
             }
 
             TouchAimMode.MANUAL_TWO_STATE -> checkNotNull(twoState).also { settings ->
@@ -212,7 +253,15 @@ fun Control.captureManualTouchAimProfile(
                 touchLowAction,
                 touchMediumAction,
                 touchHighAction,
-                touchKeepLowerHolds
+                touchKeepLowerHolds,
+                touchAimAimOnlySensitivity,
+                touchLowSensitivity,
+                touchMediumSensitivity,
+                touchHighSensitivity,
+                touchAimAimOnlyEnterConfirmationMs,
+                touchLowEnterConfirmationMs,
+                touchMediumEnterConfirmationMs,
+                touchHighEnterConfirmationMs
             )
         } else null,
         twoState = if (touchAimMode == TouchAimMode.MANUAL_TWO_STATE) {
@@ -232,5 +281,5 @@ fun Control.captureManualTouchAimProfile(
             )
         } else null
     )
-    return profile.takeIf { it.validationError() == null }
+    return profile.copy(schemaVersion = profile.requiredSchemaVersion()).takeIf { it.validationError() == null }
 }

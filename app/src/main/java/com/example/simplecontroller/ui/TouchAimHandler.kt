@@ -7,6 +7,7 @@ import android.view.MotionEvent
 import com.example.simplecontroller.model.ButtonAimMouseProfile
 import com.example.simplecontroller.model.ButtonAimStickProfile
 import com.example.simplecontroller.model.Control
+import com.example.simplecontroller.model.PayloadModifiers
 import com.example.simplecontroller.model.TouchAimOutput
 import com.example.simplecontroller.model.TouchAimMode
 import com.example.simplecontroller.model.TouchAimSensorSample
@@ -32,13 +33,6 @@ class TouchAimHandler(
     private val stateScopeProvider: () -> PhoneOutputScope? = scopeProvider,
     private val onMouseAimEngaged: () -> Unit = {}
 ) {
-    private data class StageConfig(
-        val level: TouchContactLevel,
-        val threshold: Float,
-        val payload: String,
-        val action: TouchStageAction
-    )
-
     private data class OutputCommand(val raw: String, val key: String)
 
     private val handler = Handler(Looper.getMainLooper())
@@ -68,10 +62,14 @@ class TouchAimHandler(
     private var shootPayloadLease: ButtonAimPayloadLease? = null
     private var touchSessionGeneration = 0
     private var confirmationRunnable: Runnable? = null
+    private val stageConfirmation = TouchAimStageConfirmation(::stageConfirmationMs)
+    private val stagePayloads = TouchAimStagePayloadController(payloadExecutor, onPayloadError)
+    private val finitePayloadLeases = linkedMapOf<Long, ButtonAimPayloadLease>()
+    private val finitePayloadStages = mutableMapOf<Long, TwoStateTouchAimState>()
 
     fun hasRuntimeState(): Boolean = activePointerId != MotionEvent.INVALID_POINTER_ID ||
         heldCommands.isNotEmpty() || pendingPresses.isNotEmpty() || aimPayloadLease != null ||
-        shootPayloadLease != null || aimOutput.isActive()
+        shootPayloadLease != null || aimOutput.isActive() || payloadExecutor.activeLeaseCount() > 0
 
     fun onTouch(event: MotionEvent) {
         when (event.actionMasked) {
@@ -81,23 +79,38 @@ class TouchAimHandler(
                 updateAim(event)
             }
             MotionEvent.ACTION_POINTER_UP -> {
-                if (event.getPointerId(event.actionIndex) == activePointerId) releaseAll()
+                if (event.getPointerId(event.actionIndex) == activePointerId) finishGesture()
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> releaseAll()
+            MotionEvent.ACTION_UP -> finishGesture()
+            MotionEvent.ACTION_CANCEL -> releaseAll()
         }
     }
 
-    fun releaseAll() {
+    fun releaseAll() = finishGesture(cancelled = true)
+
+    private fun finishGesture(cancelled: Boolean = false) {
         touchSessionGeneration++
         confirmationRunnable?.let(handler::removeCallbacks)
         confirmationRunnable = null
         handler.removeCallbacksAndMessages(null)
 
-        twoStateMachine?.terminate(TwoStateTouchAimTermination.CANCEL)
+        twoStateMachine?.terminate(
+            if (cancelled) TwoStateTouchAimTermination.CANCEL else TwoStateTouchAimTermination.FINGER_LIFT
+        )
+        if (!cancelled) {
+            payloadExecutor.releaseNormallyTogether(
+                aimPayloadLease, shootPayloadLease,
+                *finitePayloadLeases.values.toTypedArray()
+            )
+        }
+        stagePayloads.finish(cancelled)
         twoStateMachine = null
-        payloadExecutor.releaseAllLeases()
+        if (cancelled) payloadExecutor.releaseAllLeases()
         aimPayloadLease = null
         shootPayloadLease = null
+        finitePayloadLeases.clear()
+        finitePayloadStages.clear()
+        stageConfirmation.reset()
 
         val commandsToRelease = linkedMapOf<String, OutputCommand>()
         commandsToRelease.putAll(pendingPresses)
@@ -111,7 +124,9 @@ class TouchAimHandler(
         }
 
         aimOutput.finish(flushMouse = false)
-        stateOutputScope?.finish()
+        // Delayed modifier output owns the state scope independently of movement. Its executor
+        // timers survive natural UP and a later contact, but hard cancellation always closes it.
+        if (cancelled || payloadExecutor.activeLeaseCount() == 0) stateOutputScope?.finish()
         stateOutputScope = null
 
         activePointerId = MotionEvent.INVALID_POINTER_ID
@@ -134,22 +149,25 @@ class TouchAimHandler(
         activePointerId = event.getPointerId(event.actionIndex)
         stateOutputScope = stateScopeProvider()
         touchSessionGeneration++
-        if (isTwoStateMode()) {
-            val detectorError = twoStateDetectorError()
-            val payloadError = payloadExecutor.statePayloadValidationError(model.touchAimAimPayload)
+        val detectorError = if (isTwoStateMode()) twoStateDetectorError() else null
+        val payloadError = if (isTwoStateMode()) {
+            payloadExecutor.statePayloadValidationError(model.touchAimAimPayload)
                 ?: payloadExecutor.statePayloadValidationError(model.touchAimShootPayload)
-            if (detectorError != null || payloadError != null) {
-                onPayloadError(detectorError ?: payloadError!!)
-                releaseAll()
-                return
-            }
+        } else touchAimStagePayloadValidationError(stageConfigs())
+        if (detectorError != null || payloadError != null) {
+            onPayloadError(detectorError ?: payloadError!!)
+            releaseAll()
+            return
         }
         val aimStart = aimOutput.begin(
             pointerId = activePointerId,
             x = event.getX(event.actionIndex),
             y = event.getY(event.actionIndex),
             eventTime = event.eventTime,
-            newConfig = model.touchAimConfig(),
+            newConfig = model.touchAimConfig().copy(
+                sensitivity = if (isTwoStateMode()) model.sensitivity
+                else model.touchAimStageSensitivity(TouchContactLevel.AIM_ONLY)
+            ),
             allowRetainedTakeover = true
         )
         if (aimStart.started && model.touchAimOutput == TouchAimOutput.MOUSE) onMouseAimEngaged()
@@ -235,7 +253,9 @@ class TouchAimHandler(
             }
             val machine = twoStateMachine ?: return
             val previousState = machine.state
-            applyTwoStateActions(machine.onScore(rawScore, timeMs))
+            val actions = machine.onScore(rawScore, timeMs)
+            releaseDepartedTwoStatePresses(previousState, machine.state)
+            applyTwoStateActions(actions)
             applySensitivityTransition(previousState, machine.state)
             scheduleConfirmation(machine)
             currentScore = machine.filteredScore
@@ -262,8 +282,34 @@ class TouchAimHandler(
         hasScore = true
 
         val nextLevel = levelForScore(currentScore)
-        if (nextLevel != currentLevel) transitionTo(nextLevel)
+        stageConfirmation.onTarget(nextLevel, timeMs)?.let(::transitionTo)
+        scheduleStageConfirmation()
         onStateChanged()
+    }
+
+    private fun scheduleStageConfirmation() {
+        confirmationRunnable?.let(handler::removeCallbacks)
+        confirmationRunnable = null
+        val deadline = stageConfirmation.nextDeadlineMs() ?: return
+        val generation = touchSessionGeneration
+        val runnable = Runnable {
+            confirmationRunnable = null
+            if (generation != touchSessionGeneration ||
+                activePointerId == MotionEvent.INVALID_POINTER_ID || isTwoStateMode()
+            ) return@Runnable
+            stageConfirmation.onTime(SystemClock.uptimeMillis())?.let(::transitionTo)
+            onStateChanged()
+            scheduleStageConfirmation()
+        }
+        confirmationRunnable = runnable
+        handler.postDelayed(runnable, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L))
+    }
+
+    private fun stageConfirmationMs(level: TouchContactLevel): Long = when (level) {
+        TouchContactLevel.AIM_ONLY -> model.touchAimAimOnlyEnterConfirmationMs
+        TouchContactLevel.LOW -> model.touchLowEnterConfirmationMs
+        TouchContactLevel.MEDIUM -> model.touchMediumEnterConfirmationMs
+        TouchContactLevel.HIGH -> model.touchHighEnterConfirmationMs
     }
 
     private fun scheduleConfirmation(machine: TwoStateTouchAimStateMachine) {
@@ -275,7 +321,9 @@ class TouchAimHandler(
             confirmationRunnable = null
             if (generation != touchSessionGeneration || twoStateMachine !== machine) return@Runnable
             val previous = machine.state
-            applyTwoStateActions(machine.onTime(SystemClock.uptimeMillis()))
+            val actions = machine.onTime(SystemClock.uptimeMillis())
+            releaseDepartedTwoStatePresses(previous, machine.state)
+            applyTwoStateActions(actions)
             applySensitivityTransition(previous, machine.state)
             currentScore = machine.filteredScore
             onStateChanged()
@@ -297,6 +345,19 @@ class TouchAimHandler(
     }
 
     private fun isTwoStateMode(): Boolean = model.touchAimMode != TouchAimMode.MANUAL_THREE_STAGE
+
+    private fun releaseDepartedTwoStatePresses(
+        previous: TwoStateTouchAimState,
+        next: TwoStateTouchAimState
+    ) {
+        if (previous == next) return
+        finitePayloadStages.filterValues { it == previous }.keys.toList().forEach { id ->
+            payloadExecutor.releaseNormally(
+                finitePayloadLeases[id], applyHoldReleaseDelay = false, preserveFinitePress = true
+            )
+            finitePayloadStages.remove(id)
+        }
+    }
 
     private fun activeShootOnThreshold(): Float =
         if (model.touchAimMode == TouchAimMode.MANUAL_TWO_STATE) {
@@ -361,7 +422,7 @@ class TouchAimHandler(
                     )
                 }
                 TwoStateTouchAimAction.RELEASE_AIM_PAYLOAD -> {
-                    payloadExecutor.release(aimPayloadLease)
+                    payloadExecutor.releaseNormally(aimPayloadLease, applyHoldReleaseDelay = false)
                     aimPayloadLease = null
                 }
                 TwoStateTouchAimAction.HOLD_SHOOT_PAYLOAD -> {
@@ -371,17 +432,29 @@ class TouchAimHandler(
                     )
                 }
                 TwoStateTouchAimAction.RELEASE_SHOOT_PAYLOAD -> {
-                    payloadExecutor.release(shootPayloadLease)
+                    payloadExecutor.releaseNormally(shootPayloadLease, applyHoldReleaseDelay = false)
                     shootPayloadLease = null
                 }
                 TwoStateTouchAimAction.PRESS_SHOOT_PAYLOAD -> {
+                    val modified = PayloadModifiers.hasModifiers(model.touchAimShootPayload)
                     val lease = activatePayload(
                         ButtonAimPayloadOwner.ALTERNATE,
-                        model.touchAimShootPayload
+                        model.touchAimShootPayload,
+                        immediatePressDurationMs = if (modified) PRESS_DURATION_MS else null
                     )
+                    lease?.let { finitePayloadLeases[it.id] = it }
+                    if (modified) {
+                        lease?.let { active ->
+                            twoStateMachine?.state?.let { finitePayloadStages[active.id] = it }
+                        }
+                        return@forEach
+                    }
                     val generation = touchSessionGeneration
                     handler.postDelayed({
-                        if (generation == touchSessionGeneration) payloadExecutor.release(lease)
+                        if (generation == touchSessionGeneration) {
+                            lease?.let { finitePayloadLeases.remove(it.id) }
+                            payloadExecutor.release(lease)
+                        }
                     }, PRESS_DURATION_MS)
                 }
             }
@@ -390,9 +463,13 @@ class TouchAimHandler(
 
     private fun activatePayload(
         owner: ButtonAimPayloadOwner,
-        payload: String
+        payload: String,
+        immediatePressDurationMs: Long? = null
     ): ButtonAimPayloadLease? = when (
-        val result = payloadExecutor.activate(owner, payload, ButtonAimPulseMode.ONCE)
+        val result = payloadExecutor.activate(
+            owner, payload, ButtonAimPulseMode.ONCE,
+            immediatePressDurationMs = immediatePressDurationMs
+        )
     ) {
         is ButtonAimPayloadActivationResult.Activated -> result.lease
         is ButtonAimPayloadActivationResult.Invalid -> {
@@ -418,6 +495,12 @@ class TouchAimHandler(
 
     private fun transitionTo(nextLevel: TouchContactLevel) {
         val previousLevel = currentLevel
+        if (stageConfigs().any { PayloadModifiers.hasModifiers(it.payload) }) {
+            transitionLeasedStages(previousLevel, nextLevel)
+            currentLevel = nextLevel
+            updateStageSensitivity(previousLevel, nextLevel)
+            return
+        }
         val activeStages = if (model.touchKeepLowerHolds) {
             stageConfigs().filter { it.level.rank <= nextLevel.rank }
         } else {
@@ -444,28 +527,48 @@ class TouchAimHandler(
 
         if (nextLevel.rank > previousLevel.rank) {
             stageConfigs()
-                .filter { it.level.rank in (previousLevel.rank + 1)..nextLevel.rank }
+                .filter { it.level in enteredPressLevels(previousLevel, nextLevel) }
                 .filter { it.action == TouchStageAction.PRESS }
                 .flatMap { commands(it.payload) }
                 .forEach(::sendPress)
         }
 
         currentLevel = nextLevel
+        updateStageSensitivity(previousLevel, nextLevel)
     }
 
-    private fun stageConfigs(): List<StageConfig> {
-        val low = model.touchLowThreshold.coerceAtLeast(0f)
-        val medium = model.touchMediumThreshold.coerceAtLeast(low)
-        val high = model.touchHighThreshold.coerceAtLeast(medium)
+    private fun updateStageSensitivity(previous: TouchContactLevel, next: TouchContactLevel) {
+        val sensitivity = model.touchAimStageSensitivity(next)
+        if (sensitivity != model.touchAimStageSensitivity(previous)) {
+            aimOutput.updateSensitivity(sensitivity)
+        }
+    }
+
+    private fun enteredPressLevels(
+        previous: TouchContactLevel,
+        next: TouchContactLevel
+    ): Set<TouchContactLevel> = enteredTouchAimPressLevels(
+        previous, next,
+        hasStageConfirmation = TouchContactLevel.entries.any { stageConfirmationMs(it) > 0L }
+    )
+
+    /** Only controls opting into modifiers take this lease-backed path. Legacy controls above
+     * retain their command spelling, PRESS crossings, and hold reconciliation unchanged. */
+    private fun transitionLeasedStages(previous: TouchContactLevel, next: TouchContactLevel) {
+        stagePayloads.transition(
+            stageConfigs(), next, model.touchKeepLowerHolds, enteredPressLevels(previous, next)
+        )
+    }
+
+    private fun stageConfigs(): List<TouchAimPayloadStage> {
         return listOf(
-            StageConfig(TouchContactLevel.LOW, low, model.touchLowPayload, model.touchLowAction),
-            StageConfig(
+            TouchAimPayloadStage(TouchContactLevel.LOW, model.touchLowPayload, model.touchLowAction),
+            TouchAimPayloadStage(
                 TouchContactLevel.MEDIUM,
-                medium,
                 model.touchMediumPayload,
                 model.touchMediumAction
             ),
-            StageConfig(TouchContactLevel.HIGH, high, model.touchHighPayload, model.touchHighAction)
+            TouchAimPayloadStage(TouchContactLevel.HIGH, model.touchHighPayload, model.touchHighAction)
         )
     }
 
@@ -600,6 +703,13 @@ class TouchAimHandler(
         private const val MIN_HYSTERESIS_GAP = 0.01f
     }
 }
+
+internal fun Control.touchAimStageSensitivity(level: TouchContactLevel): Float = when (level) {
+    TouchContactLevel.AIM_ONLY -> touchAimAimOnlySensitivity
+    TouchContactLevel.LOW -> touchLowSensitivity
+    TouchContactLevel.MEDIUM -> touchMediumSensitivity
+    TouchContactLevel.HIGH -> touchHighSensitivity
+}?.takeIf { it.isFinite() && it >= 0f } ?: sensitivity
 
 internal fun Control.touchAimConfig(): AimOutputConfig = AimOutputConfig(
     output = touchAimOutput,

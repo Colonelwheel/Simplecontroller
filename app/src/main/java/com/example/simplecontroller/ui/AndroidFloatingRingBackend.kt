@@ -39,24 +39,19 @@ class AndroidFloatingRingBackend(
     private val fireKeys=config.knobs.flatMap {
         PhoneOutputCoordinator.payloadLogicalKeys(it.fire.firePayload,root.player).orEmpty()
     }.toSet()
+    private val payloadController=FloatingRingPayloadController(root,fireKeys,
+        HandlerButtonAimPayloadScheduler(),{ onOutputReplaced(it) },{ onFeedbackChanged() })
     override fun acquirePayload(slot:String,payload:String):Boolean {
         payloads[slot]=payload
-        val keys=PhoneOutputCoordinator.payloadLogicalKeys(payload,root.player).orEmpty()
-        val exclusiveKeys=when(slot) {
-            FloatingRingStateMachine.ADS -> emptySet()
-            FloatingRingStateMachine.FIRE -> keys
-            else -> keys.intersect(fireKeys)
-        }
-        return root.acquirePayload(slot,payload,exclusiveKeys=exclusiveKeys) {
-            onOutputReplaced(slot)
-        }
+        return payloadController.acquire(slot,payload)
     }
     override fun reservePayload(slot:String,payload:String,retained:Boolean,exclusive:Boolean):Boolean {
         payloads[slot]=payload
-        return root.reservePayload(slot,payload,retained,exclusive) { onOutputReplaced(slot) }
+        return payloadController.reserve(slot,payload,retained,exclusive)
     }
-    override fun releasePayload(slot:String)=root.releasePayload(slot)
-    override fun endPayload(slot:String) { root.endPayload(slot);payloads.remove(slot) }
+    override fun releasePayload(slot:String)=payloadController.release(slot)
+    override fun endPayload(slot:String) { payloadController.end(slot);payloads.remove(slot) }
+    override fun endPayloadNormally(slot:String)=payloadController.endNormally(slot)
     override fun payloadMasked(slot:String):Boolean =
         (pendingPayloads(slot)+payloads[slot].orEmpty()).any { payload ->
             PhoneOutputCoordinator.payloadLogicalKeys(payload,root.player).orEmpty().any(UdpClient::outputIsMasked)
@@ -120,6 +115,7 @@ class AndroidFloatingRingBackend(
     }
     override fun mouseSuppression(active:Boolean)=UdpClient.setMouseCameraSuppression(suppressionOwner,active)
     override fun closeScope() {
+        payloadController.close()
         feedbackJob?.cancel()
         root.finish { confirmed->
             if(!confirmed) Handler(Looper.getMainLooper()).post {

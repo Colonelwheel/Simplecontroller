@@ -247,6 +247,14 @@ private fun requireNestedVersions(objectValue: JsonObject) {
                 itemObject["schemaVersion"]?.jsonPrimitive?.intOrNull ?: current,
                 current
             )
+            when (key) {
+                "touchAimCalibrations" -> requirePayloadFeatureSchema(itemObject, label, current, current)
+                "touchAimManualProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current, stageTuning = true)
+                "buttonAimProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current,
+                    legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION)
+                "stickDirectionalProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current,
+                    legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION)
+            }
             if (key == "floatingRingPresets") {
                 requireFloatingRingPresetOptionsSchema(
                     itemObject,
@@ -296,9 +304,7 @@ fun validateControllerProfilesBackup(
     }
 
     validateReusableProfiles(decoded.touchAimCalibrations, "TouchAim calibration") {
-        require(it.schemaVersion in 1..TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION) {
-            "This calibration version is not supported."
-        }
+        it.versionValidationError()?.let { error -> throw IllegalArgumentException(error) }
         require(it.name.trim().isNotEmpty() && it.name.trim().length <= 80) {
             "Choose a calibration name from 1 to 80 characters."
         }
@@ -322,6 +328,9 @@ fun validateControllerProfilesBackup(
     return ControllerProfilesBackupLoadResult(
         decoded.copy(
             controllerProfiles = controllerProfiles,
+            touchAimCalibrations = decoded.touchAimCalibrations.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
+            touchAimManualProfiles = decoded.touchAimManualProfiles.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
+            stickDirectionalProfiles = decoded.stickDirectionalProfiles.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
             buttonAimProfiles = decoded.buttonAimProfiles.map {
                 it.copy(schemaVersion = it.requiredSchemaVersion())
             }

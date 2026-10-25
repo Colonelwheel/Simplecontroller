@@ -19,6 +19,7 @@ import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.io.detachedControlCopy
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ControlType
+import com.example.simplecontroller.model.PayloadModifiers
 import com.example.simplecontroller.net.NetworkClient
 import com.example.simplecontroller.net.UdpClient
 import kotlin.math.min
@@ -60,9 +61,13 @@ class ControlViewHelper(
     private var pendingPulseCallbacks = 0
     private var outputCallbackGeneration = 0
     private var pulseCallbackGeneration = 0
+    private var modifierExecutor: ButtonAimPayloadExecutor? = null
+    private var modifierLease: ButtonAimPayloadLease? = null
+    private val payloadScheduler = HandlerButtonAimPayloadScheduler()
 
     fun hasPendingOutputWork(): Boolean = repeater != null || pulseRepeater != null ||
-        isPulseLoopActive || activePulseTrigger != null || pendingOutputCallbacks > 0
+        isPulseLoopActive || activePulseTrigger != null || pendingOutputCallbacks > 0 ||
+        (modifierExecutor?.activeLeaseCount() ?: 0) > 0
 
     private fun postOutputRelease(handler: Handler, delayMs: Long, action: () -> Unit) {
         val generation = outputCallbackGeneration
@@ -155,7 +160,11 @@ class ControlViewHelper(
                     (context as? MainActivity)?.activateReleaseAll()
                 }
             },
-            scheduler = HandlerButtonAimPayloadScheduler()
+            scheduler = ButtonAimPayloadScheduler { delayMs, task ->
+                payloadScheduler.schedule(delayMs) {
+                    try { task() } finally { parentView.refreshLegacyOutputBusy() }
+                }
+            }
         )
 
     fun isCameraFollowAction(): Boolean = when (model.payload.trim().uppercase()) {
@@ -210,6 +219,31 @@ class ControlViewHelper(
      * Send the control's payload
      */
     fun firePayload() {
+        if (PayloadModifiers.hasModifiers(model.payload)) {
+            val executor = modifierExecutor ?: createButtonAimPayloadExecutor("ordinary-modifiers")
+                .also { modifierExecutor = it }
+            val turboPressMs = (GlobalSettings.turboSpeed / 2L).coerceIn(1L, 50L)
+            if (GlobalSettings.globalTurbo && !parentView.isLatched && modifierLease != null) {
+                executor.repeatImmediatePress(modifierLease, turboPressMs)
+                return
+            }
+            modifierLease?.let { executor.releaseNormally(it) }
+            when (val result = executor.activate(
+                ButtonAimPayloadOwner.BASE, model.payload,
+                if (parentView.isLatched) ButtonAimPulseMode.REPEAT else ButtonAimPulseMode.ONCE,
+                immediatePressDurationMs = if (GlobalSettings.globalTurbo && !parentView.isLatched) turboPressMs else null,
+                preserveAuthoredPulseOnRelease = true,
+                turboSession = GlobalSettings.globalTurbo && !parentView.isLatched
+            )) {
+                is ButtonAimPayloadActivationResult.Activated -> {
+                    modifierLease = result.lease
+                }
+                is ButtonAimPayloadActivationResult.Invalid -> Toast.makeText(context, result.reason, Toast.LENGTH_SHORT).show()
+                ButtonAimPayloadActivationResult.ReleaseAll -> Unit
+            }
+            parentView.refreshLegacyOutputBusy()
+            return
+        }
         Log.d("DEBUG_PULSE", "firePayload() called, isLatched=${(parentView as? ControlView)?.isLatched}, payload='${model.payload}'")
         Log.d("ControlViewHelper", "=== PAYLOAD DEBUG START ===")
         Log.d("ControlViewHelper", "Control ID: ${model.id}")
@@ -422,6 +456,10 @@ class ControlViewHelper(
 
     // Improved function to handle releasing held buttons
     fun releaseLatched() {
+        if (PayloadModifiers.hasModifiers(model.payload)) {
+            releaseModifiedPayload()
+            return
+        }
         Log.d("DEBUG_PULSE", "releaseLatched() CALLED")
         Log.d("ControlViewHelper", "releaseLatched() called for payload: '${model.payload}'")
         cameraFollowHandledForPress = false
@@ -507,6 +545,15 @@ class ControlViewHelper(
             }
     }
 
+    fun releaseModifiedPayload(suppressSendOnRelease: Boolean = false) {
+        modifierExecutor?.releaseNormally(modifierLease, suppressSendOnRelease = suppressSendOnRelease)
+        modifierLease = null
+        cameraFollowHandledForPress = false
+        parentView.refreshLegacyOutputBusy()
+    }
+
+    fun suppressModifiedSor() { modifierExecutor?.suppressSendOnRelease(modifierLease) }
+
     private fun parseStickDirectionCommand(command: String): StickDirectionCommand? {
         val match = Regex("""(?i)^(LS|RS):([A-Z]+)([0-9]{1,3})?$""")
             .matchEntire(command.trim())
@@ -553,6 +600,8 @@ class ControlViewHelper(
 
     /** Cancel every delayed/repeating action owned by this helper without changing settings. */
     fun cancelPendingActionsForReleaseAll() {
+        modifierExecutor?.releaseAllLeases()
+        modifierLease = null
         outputCallbackGeneration++
         pulseCallbackGeneration++
         pendingOutputCallbacks = 0

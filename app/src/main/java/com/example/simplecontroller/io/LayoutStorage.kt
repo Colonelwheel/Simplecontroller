@@ -8,6 +8,10 @@ import com.example.simplecontroller.model.FLOATING_RING_OPTIONS_CONTROLLER_PROFI
 import com.example.simplecontroller.model.FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.requiredFormatVersion
+import com.example.simplecontroller.model.PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.stageTouchAimTuningValidationError
+import com.example.simplecontroller.model.actionPayloads
+import com.example.simplecontroller.model.payloadModifiersValidationError
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
 import com.example.simplecontroller.model.ButtonDirectionalSettings
@@ -106,6 +110,10 @@ fun stableLegacyBasePageId(profileName: String): String = UUID.nameUUIDFromBytes
 fun decodeControllerProfile(text: String, profileName: String): ControllerProfileLoadResult {
     val normalizedText = text.removePrefix("\uFEFF")
     if (normalizedText.trimStart().startsWith("[")) {
+        val rawControls = json.parseToJsonElement(normalizedText)
+        require(!rawControls.hasPayloadModifierConfiguration() && !rawControls.hasStageTouchAimConfiguration()) {
+            "Payload modifiers and stage tuning require a versioned controller profile."
+        }
         val controls = json.decodeFromString<List<Control>>(normalizedText)
         val pageId = stableLegacyBasePageId(profileName)
         return validateControllerProfile(
@@ -143,6 +151,10 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
 
 /** Check new saved behavior before typed decoding, including settings on inactive zones. */
 internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
+    require(version >= PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        (!profile.hasPayloadModifierConfiguration() && !profile.hasStageTouchAimConfiguration())) {
+        "Payload modifiers and stage tuning require controller profile format $PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
     val zones = (profile["pages"] as? JsonArray).orEmpty().flatMap { page ->
         ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty()
     }
@@ -541,6 +553,8 @@ fun validateControllerProfile(
         val usedControlIds = mutableSetOf<String>()
         val controls = deepCopyControls(source.controls).mapIndexed { controlIndex, original ->
             var control = original
+            control.stageTouchAimTuningValidationError()?.let { throw IllegalArgumentException(it) }
+            control.actionPayloads().payloadModifiersValidationError()?.let { throw IllegalArgumentException(it) }
             floatingLocalActionError(control)?.let { throw IllegalArgumentException(it) }
             require(control.cameraFollowStrengthPercent.isFinite() &&
                 control.cameraFollowStrengthPercent in 0f..200f) {
@@ -671,6 +685,8 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
             validateOrientationGeometry(page.landscapeGeometry, "${page.name} Landscape")
         }.exceptionOrNull()?.let { return it.message ?: "Orientation geometry is invalid." }
         page.controls.forEach { control ->
+            control.stageTouchAimTuningValidationError()?.let { return it }
+            control.actionPayloads().payloadModifiersValidationError()?.let { return it }
             floatingLocalActionError(control)?.let { return it }
             if (!control.cameraFollowStrengthPercent.isFinite() ||
                 control.cameraFollowStrengthPercent !in 0f..200f) {
