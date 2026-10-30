@@ -139,6 +139,127 @@ class TouchAimStagePayloadControllerTest {
         assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
     }
 
+    @Test fun repeatCarryover_keepsCadenceAcrossHigherStage_andHrdStartsOnlyOnLift() {
+        val f = Fixture()
+        f.stages = listOf(
+            stage(TouchContactLevel.MEDIUM, "LT:1.0(R200)(HRD200)"),
+            stage(TouchContactLevel.HIGH, "RT:1.0")
+        )
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(100L)
+        f.transition(TouchContactLevel.HIGH)
+        assertEquals(listOf("LT:1.0", "LT:0.0", "RT:1.0"), f.events)
+        f.advance(100L)
+        assertEquals("LT:1.0", f.events.last())
+        f.advance(50L)
+        f.transition(TouchContactLevel.MEDIUM)
+        assertEquals("RT:0.0", f.events.last())
+        f.advance(150L)
+        assertEquals(3, f.events.count { it == "LT:1.0" })
+        assertEquals("LT:1.0", f.events.last())
+        f.advance(10L)
+        f.controller.finish(cancelled = false)
+        f.advance(199L, runCancelled = true)
+        assertEquals("LT:1.0", f.events.last())
+        f.advance(1L)
+        assertEquals("LT:0.0", f.events.last())
+        f.advance(1000L, runCancelled = true)
+        assertEquals(3, f.events.count { it == "LT:1.0" })
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatLiftDuringOff_doesNotReviveOutputForHrd() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(R200)(HRD200)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(75L)
+        f.controller.finish(cancelled = false)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatOnPressStage_overridesOnlyItsOwnFinitePressDuration() {
+        val f = Fixture()
+        f.stages = listOf(stage(
+            TouchContactLevel.MEDIUM, "LT:1.0(R200),RT:1.0", TouchStageAction.PRESS
+        ))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(90L)
+        assertEquals(listOf("LT:1.0", "RT:1.0", "LT:0.0", "RT:0.0"), f.events)
+        f.advance(110L)
+        assertEquals("LT:1.0", f.events.last())
+        assertEquals(1, f.events.count { it == "RT:1.0" })
+        f.controller.finish(cancelled = false)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(2, f.events.count { it == "LT:1.0" })
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatPressStageExit_stopsRepeatWhilePreservingOrdinaryFiniteCompanion() {
+        val f = Fixture()
+        f.stages = listOf(stage(
+            TouchContactLevel.MEDIUM, "LT:1.0(R200)(HRD200),RT:1.0", TouchStageAction.PRESS
+        ))
+        f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
+        f.advance(30L)
+        f.transition(TouchContactLevel.HIGH, keepLowerHolds = false)
+        assertEquals(listOf("LT:1.0", "RT:1.0", "LT:0.0"), f.events)
+        f.advance(59L, runCancelled = true)
+        assertEquals(3, f.events.size)
+        f.advance(1L)
+        assertEquals("RT:0.0", f.events.last())
+        f.controller.finish(cancelled = false)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(1, f.events.count { it == "LT:1.0" })
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatPressReentry_canceledOldCallbacksCannotOverlapNewSource() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(R200)", TouchStageAction.PRESS))
+        f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
+        f.advance(25L)
+        // PRESS activates on upward crossings, so return below Medium before re-entering it.
+        f.transition(TouchContactLevel.AIM_ONLY, keepLowerHolds = false)
+        f.advance(25L)
+        f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
+        f.advance(150L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0", "LT:1.0", "LT:0.0"), f.events)
+        f.advance(50L, runCancelled = true)
+        assertEquals("LT:1.0", f.events.last())
+        f.controller.finish(cancelled = false)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(3, f.events.count { it == "LT:1.0" })
+        assertEquals("LT:0.0", f.events.last())
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatPressDownwardReturn_doesNotChangeLegacyUpwardActivationRule() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(R200)", TouchStageAction.PRESS))
+        f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
+        f.advance(25L)
+        f.transition(TouchContactLevel.HIGH, keepLowerHolds = false)
+        f.advance(25L)
+        f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        f.controller.finish(cancelled = false)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatHardCancel_stopsCurrentPressAndAllCallbacks_andSuppressesSor() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(R200)(HRD200),RT:1.0(SOR)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(20L)
+        f.controller.finish(cancelled = true)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
     private fun stage(
         level: TouchContactLevel,
         payload: String,
@@ -173,14 +294,14 @@ class TouchAimStagePayloadControllerTest {
             previous = next
         }
 
-        fun advance(durationMs: Long) {
+        fun advance(durationMs: Long, runCancelled: Boolean = false) {
             val target = nowMs + durationMs
             while (true) {
-                val task = tasks.filter { !it.cancelled && it.deadline <= target }.minByOrNull { it.deadline }
+                val task = tasks.filter { it.deadline <= target }.minByOrNull { it.deadline }
                     ?: break
                 tasks.remove(task)
                 nowMs = task.deadline
-                task.action()
+                if (!task.cancelled || runCancelled) task.action()
             }
             nowMs = target
         }

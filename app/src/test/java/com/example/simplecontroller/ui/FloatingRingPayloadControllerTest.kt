@@ -142,6 +142,41 @@ class FloatingRingPayloadControllerTest {
         }
     }
 
+    @Test fun heldRingRepeat_keepsReservationAcrossOffGapAndStopsOnLift() {
+        val config = FloatingRingConfig(startRole = FloatingStartRole.AIM,
+            knobs = listOf(RingAimKnob(fire = RingFireSettings(mode = RingFireMode.HOLD,
+                adsPayload = "LT:1.0(HRD200)", firePayload = "RT:1.0(R100)"))))
+        val f = Fixture(config)
+        assertTrue(f.down())
+        f.clock.advance(75)
+        assertEquals("RT:0.0", f.lastTrigger("RT"))
+        val other = f.coordinator.beginScope("other", "player1")
+        assertFalse(other.acquirePayload("fire", "RT:1.0", exclusive = true))
+        f.clock.advance(45)
+        assertEquals("RT:1.0", f.lastTrigger("RT"))
+        f.up()
+        assertEquals("RT:0.0", f.lastTrigger("RT"))
+        assertEquals("LT:1.0", f.lastTrigger("LT"))
+        f.clock.advance(500)
+        assertEquals("LT:0.0", f.lastTrigger("LT"))
+        assertEquals(2, f.stateCommands().count { it == "RT:1.0" })
+        assertTrue(other.acquirePayload("fire", "RT:1.0", exclusive = true))
+        assertTrue(f.stateCommands().none { '(' in it || ')' in it })
+    }
+
+    @Test fun scopedFinishStopsHeldRepeatWithoutAffectingAnotherOwnersAds() {
+        val f = Fixture()
+        val other = f.coordinator.beginScope("other", "player1")
+        assertTrue(other.acquirePayload("ads", "LT:1.0"))
+        assertTrue(f.controller.acquire("ads", "LT:1.0(HRD200),RT:1.0(R100)"))
+        f.clock.advance(20)
+        f.controller.close()
+        f.clock.advance(500)
+        assertEquals("RT:0.0", f.lastTrigger("RT"))
+        assertEquals("LT:1.0", f.lastTrigger("LT"))
+        assertEquals(1, f.stateCommands().count { it == "RT:1.0" })
+    }
+
     @Test fun boostSourceExit_startsHrdWhilePointerRemainsDown() {
         val config = FloatingRingConfig(boost1 = RingBoostSettings(enabled = true,
             payload = "LT:1.0(HRD200)", action = RingAction.HOLD))

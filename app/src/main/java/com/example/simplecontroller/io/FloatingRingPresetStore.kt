@@ -27,7 +27,7 @@ fun requireSupportedFloatingRingPresetSchema(value: JsonObject) {
 
 internal fun requireFloatingRingPresetOptionsSchema(value: JsonObject, version: Int) {
     requirePayloadFeatureSchema(value, "ring preset", FloatingRingPreset.CURRENT_SCHEMA_VERSION,
-        FloatingRingPreset.PAYLOAD_MODIFIERS_SCHEMA_VERSION)
+        FloatingRingPreset.PAYLOAD_MODIFIERS_SCHEMA_VERSION, repeatVersion = FloatingRingPreset.REPEAT_PAYLOAD_SCHEMA_VERSION)
     val zone = value["zone"] as? JsonObject
     val required = when {
         zone != null && floatingZoneHasDirectTouchBoostDelayOption(zone) -> FloatingRingPreset.DIRECT_TOUCH_DELAY_SCHEMA_VERSION

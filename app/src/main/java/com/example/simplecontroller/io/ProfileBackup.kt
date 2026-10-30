@@ -248,12 +248,16 @@ private fun requireNestedVersions(objectValue: JsonObject) {
                 current
             )
             when (key) {
-                "touchAimCalibrations" -> requirePayloadFeatureSchema(itemObject, label, current, current)
-                "touchAimManualProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current, stageTuning = true)
-                "buttonAimProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current,
-                    legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION)
-                "stickDirectionalProfiles" -> requirePayloadFeatureSchema(itemObject, label, current, current,
-                    legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION)
+                "touchAimCalibrations" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    TouchAimCalibrationProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, repeatVersion = current)
+                "touchAimManualProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    TouchAimManualProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, stageTuning = true, repeatVersion = current)
+                "buttonAimProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                    legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION, repeatVersion = current)
+                "stickDirectionalProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    StickDirectionalProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                    legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION, repeatVersion = current)
             }
             if (key == "floatingRingPresets") {
                 requireFloatingRingPresetOptionsSchema(

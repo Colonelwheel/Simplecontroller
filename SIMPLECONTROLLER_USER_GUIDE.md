@@ -327,7 +327,7 @@ Important Pulse limits:
 - Keep Pulse by itself. Mixing it with another held action can make that other action remain owned longer than intended.
 - A delayed Button Aim or Auto-Tap interval can end a long Pulse before the Pulse timer finishes.
 
-## Three different ways to repeat or hold an action
+## Repeating and holding actions
 
 These features sound similar, but they solve different problems.
 
@@ -336,6 +336,21 @@ These features sound similar, but they solve different problems.
 | **Hold Toggle** | Hold until the threshold and vibration | Tap again | Keep sprint, aim, a direction, or another steady input held |
 | **Global Turbo** | Turn Turbo on, then keep a Button physically touched | Lift your finger | Repeat ordinary buttons only while touching them |
 | **Toggle Auto-Tap** | Tap a configured Button once | Tap it again | Start a persistent, evenly timed repeater without keeping your finger down |
+| **Per-command R** | Activate a held payload such as `RT:1.0(R100)` | Release its source or unlatch | Repeat one command at its own interval across Buttons, stick commands, and TouchAim |
+
+### Per-command R modifier
+
+`RT:1.0(R100)` fully presses RT for 50 ms, releases for 50 ms, and repeats every
+100 ms while its action remains held. It works without global Turbo and keeps its
+own interval when global Turbo is on. Use Hold mappings for TouchAim or ring
+actions; lower-stage Hold carryover preserves the repeat timer across stages.
+
+For steady aim with repeated firing, use
+`LT:1.0(I)(HRD200),RT:1.0(I)(R100)`. Release stops firing and keeps LT held for an
+extra 200 ms. With Hold Toggle, repetition continues until you unlatch.
+R and SOR cannot be put on the same command. See
+[payload modifiers](PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md) for pulse duration,
+finite-action boundaries, and combining R with HRD.
 
 ### Global Turbo
 

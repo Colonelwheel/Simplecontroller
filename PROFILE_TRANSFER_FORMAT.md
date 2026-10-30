@@ -10,6 +10,8 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested format `15` when an action payload stores a per-command `(Rmilliseconds)`
+  repeat modifier, including inactive selections;
 - nested format `14` when action payloads store timing modifiers or TouchAim stores
   per-stage sensitivity/confirmation tuning, including inactive settings;
 - nested `ControllerProfile` format version `10` for floating zones/groups/rings and stored scoped/suppression options, including disabled settings;
@@ -94,7 +96,9 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - Maximum backup version: `3`; writers use `3` when the full-ring preset library is present, `2` for boost profiles without full-ring presets, otherwise `1`. Historical backups 1 and 2 remain readable. Nonempty boost libraries require at least version 2; nonempty full-ring preset libraries require version 3. Future envelope and nested preset versions are rejected before decoding.
-- Maximum nested controller-profile format: `14` (formats `2` through `13` remain importable)
+- Maximum nested controller-profile format: `15` (formats `2` through `14` remain importable)
+- Writers use `15` only when an R repeat modifier is stored. Existing modifier
+  and stage-tuning profiles keep the format-14 rules below.
 - Writers use `14` for stored payload modifiers or nondefault per-stage TouchAim
   tuning; otherwise the existing conditional formats below remain unchanged.
 - Writers use `13` if a root or stored role-bank Boost 2 has `skipDelayOnDirectTouch: true`, even when disabled; otherwise `12` if a ring stores nonnull `boostBanks` (including disabled actions/geometry) or `directBoostStartsAim: true`; otherwise `11` if any floating zone stores `finishIgnoresSwipes`, `compactAimBoosts`, `adjacentMovementBoosts`, or an aim knob's `returnFire.startOnBoostEntry` as true, even inside disabled configuration; otherwise `10` when floating/scoped configuration is stored, even disabled; otherwise
@@ -135,6 +139,12 @@ times. Writers select those versions only when needed; historical schemas remain
 readable. Missing stage sensitivity overrides inherit the original sensitivity;
 missing confirmation times are zero. Unsupported or under-versioned nested
 features are rejected before application. See `PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md`.
+
+An R repeat modifier conditionally requires manual TouchAim/calibration schema 3,
+Button Aim schema 7, Directional/Stick+ schema 4, named floating boost schema 5,
+or complete ring preset schema 6, as applicable. Libraries without R retain their
+previous conditional schema selection. Both full profiles and library/backup
+readers reject under-versioned R syntax before typed decoding or application.
 
 ## Floating configuration and library contract
 

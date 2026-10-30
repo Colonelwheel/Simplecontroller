@@ -33,6 +33,21 @@ object ButtonAimPayloadPolicy {
     private fun classifyCommand(token: PayloadCommand): String? {
         val result = classify(token.command)
         result.error?.let { return it }
+        val repeatInterval = token.repeatIntervalMs
+        val repeatedTrigger = if (repeatInterval != null) TRIGGER_REGEX.matchEntire(token.command.uppercase()) else null
+        if (repeatedTrigger != null && repeatedTrigger.groupValues[2].toFloat() <= 0f) {
+            return "A repeating trigger command must use a positive trigger value: ${token.command}"
+        }
+        val authoredRepeatPulse = if (repeatInterval != null) {
+            repeatedTrigger?.groupValues?.get(3)
+                ?.takeIf(String::isNotEmpty)?.toFloatOrNull()
+        } else null
+        if (authoredRepeatPulse != null && (!authoredRepeatPulse.isFinite() || authoredRepeatPulse <= 0f)) {
+            return "A repeating command's P press duration must be positive: ${token.command}"
+        }
+        if (repeatInterval != null && checkNotNull(PayloadModifiers.repeatPressDurationMs(token)) >= repeatInterval) {
+            return "A repeating command's P press duration must be shorter than its R interval: ${token.command}"
+        }
         return if (token.hasModifiers && result.kind != TokenKind.OUTPUT) {
             "Payload modifiers require a releasable Xbox, trigger, mouse-button, keyboard, or stick-macro command: ${token.command}"
         } else null

@@ -141,6 +141,8 @@ class ButtonAimPayloadExecutor(
         var pressGeneration: Long = 0L,
         var sorSuppressed: Boolean = false,
         var pressTask: ButtonAimScheduledTask? = null,
+        var repeatTask: ButtonAimScheduledTask? = null,
+        var repeatGeneration: Long = 0L,
         var releaseTask: ButtonAimScheduledTask? = null
     )
 
@@ -258,6 +260,9 @@ class ButtonAimPayloadExecutor(
         commands.firstOrNull { parseToken(it.command) !is ParsedToken.Output }?.let {
             return ButtonAimPayloadActivationResult.Invalid("Timed payload commands must be releasable: ${it.command}")
         }
+        if (commands.any { it.repeatIntervalMs != null && (it.timing ?: defaultTiming) == PayloadCommandTiming.SEND_ON_RELEASE }) {
+            return ButtonAimPayloadActivationResult.Invalid("Repeating commands run while held; add (I) to override this control's Send on release timing.")
+        }
         val parent = ModifiedLeaseState(
             ButtonAimPayloadLease(nextLeaseId++, owner),
             commands.map { ModifiedTokenRuntime(it, it.timing ?: defaultTiming) },
@@ -274,6 +279,10 @@ class ButtonAimPayloadExecutor(
 
     private fun startModifiedImmediate(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime,
                                        pulseMode: ButtonAimPulseMode, pressDurationMs: Long?) {
+        if (runtime.command.repeatIntervalMs != null) {
+            startRepeatedPress(parent, runtime)
+            return
+        }
         runtime.child = (activate(parent.lease.owner, runtime.command.command, pulseMode)
             as ButtonAimPayloadActivationResult.Activated).lease
         val authoredPulse = (parseToken(runtime.command.command) as? ParsedToken.Output)
@@ -291,17 +300,50 @@ class ButtonAimPayloadExecutor(
         }
     }
 
+    /** One independent cadence per command, retaining its source lease across every OFF gap. */
+    private fun startRepeatedPress(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime) {
+        if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased) return
+        val interval = checkNotNull(runtime.command.repeatIntervalMs)
+        val onDuration = checkNotNull(PayloadModifiers.repeatPressDurationMs(runtime.command))
+        val authored = (parseToken(runtime.command.command) as ParsedToken.Output).desired
+        val desired = if (authored is DesiredOutput.Trigger) authored.copy(pulseDurationMs = null) else authored
+        val child = LeaseState(ButtonAimPayloadLease(nextLeaseId++, parent.lease.owner))
+        leases[child.lease.id] = child
+        // A repeated pulse may be masked by another legitimate hold; never force that hold OFF.
+        replaceLeaseOutput(child, desired, ButtonAimPulseMode.ONCE, allowDirectionalReplay = false)
+        runtime.child = child.lease
+        val pressGeneration = ++runtime.pressGeneration
+        runtime.pressTask = scheduler.schedule(onDuration) {
+            if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased ||
+                runtime.pressGeneration != pressGeneration) return@schedule
+            runtime.pressTask = null
+            release(runtime.child)
+            runtime.child = null
+        }
+        val repeatGeneration = ++runtime.repeatGeneration
+        runtime.repeatTask = scheduler.schedule(interval) {
+            if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased ||
+                runtime.repeatGeneration != repeatGeneration) return@schedule
+            runtime.repeatTask = null
+            startRepeatedPress(parent, runtime)
+        }
+    }
+
     /** Turbo repeats immediate components without completing the physical source's SOR arm. */
     fun repeatImmediatePress(lease: ButtonAimPayloadLease?, pressDurationMs: Long) {
         val parent = modifiedLeases[lease?.id] ?: return
         if (parent.sourceReleased) return
-        parent.tokens.filter { it.timing == PayloadCommandTiming.IMMEDIATE && !it.command.hasHoldReleaseDelay }.forEach { runtime ->
+        parent.tokens.filter { it.timing == PayloadCommandTiming.IMMEDIATE && !it.command.hasHoldReleaseDelay &&
+            it.command.repeatIntervalMs == null }.forEach { runtime ->
             runtime.pressTask?.cancel()
             runtime.pressGeneration++
             release(runtime.child)
             startModifiedImmediate(parent, runtime, ButtonAimPulseMode.ONCE, pressDurationMs)
         }
     }
+
+    fun leaseHasRepeat(lease: ButtonAimPayloadLease?): Boolean =
+        modifiedLeases[lease?.id]?.tokens?.any { it.command.repeatIntervalMs != null } == true
 
     fun suppressSendOnRelease(lease: ButtonAimPayloadLease?) {
         modifiedLeases[lease?.id]?.tokens?.filter { it.timing == PayloadCommandTiming.SEND_ON_RELEASE }
@@ -322,13 +364,17 @@ class ButtonAimPayloadExecutor(
         state.sourceReleased = true
         // Complete immediate components first so a same-key SOR never inherits an old Turbo ON.
         state.tokens.sortedBy { it.timing == PayloadCommandTiming.SEND_ON_RELEASE }.forEach { runtime ->
+            val repeating = runtime.command.repeatIntervalMs != null
+            runtime.repeatTask?.cancel()
+            runtime.repeatTask = null
+            runtime.repeatGeneration++
             val delay = if (applyHoldReleaseDelay) runtime.command.holdReleaseDelayMs else 0L
             val authoredPulse = (parseToken(runtime.command.command) as? ParsedToken.Output)
                 ?.desired.let { it as? DesiredOutput.Trigger }?.pulseDurationMs
-            if (preserveFinitePress && runtime.timing == PayloadCommandTiming.IMMEDIATE && runtime.pressTask != null) {
+            if (!repeating && preserveFinitePress && runtime.timing == PayloadCommandTiming.IMMEDIATE && runtime.pressTask != null) {
                 return@forEach
             }
-            if (state.preserveAuthoredPulseOnRelease && authoredPulse != null && delay == 0L &&
+            if (!repeating && state.preserveAuthoredPulseOnRelease && authoredPulse != null && delay == 0L &&
                 runtime.timing == PayloadCommandTiming.IMMEDIATE && runtime.pressTask != null
             ) return@forEach
             runtime.pressTask?.cancel()
@@ -345,8 +391,9 @@ class ButtonAimPayloadExecutor(
                     scheduleModifiedRelease(state, runtime, pulseMs + delay)
                 }
                 val inheritedDelay = if (runtime.command.timing == null) state.defaultReleaseDelayMs else 0L
-                val repeatsSameKey = state.turboSession && state.tokens.any { immediate ->
-                    immediate.timing == PayloadCommandTiming.IMMEDIATE && !immediate.command.hasHoldReleaseDelay &&
+                val repeatsSameKey = state.tokens.any { immediate ->
+                    immediate.timing == PayloadCommandTiming.IMMEDIATE &&
+                        (immediate.command.repeatIntervalMs != null || (state.turboSession && !immediate.command.hasHoldReleaseDelay)) &&
                         (parseToken(immediate.command.command) as? ParsedToken.Output)?.desired?.key == token.desired.key
                 }
                 // Keep the release revision visible before the new press revision is published.
@@ -395,7 +442,7 @@ class ButtonAimPayloadExecutor(
     }
 
     private fun finishModifiedIfIdle(state: ModifiedLeaseState) {
-        if (state.sourceReleased && state.tokens.all { it.pressTask == null && it.releaseTask == null && it.child == null }) {
+        if (state.sourceReleased && state.tokens.all { it.pressTask == null && it.repeatTask == null && it.releaseTask == null && it.child == null }) {
             modifiedLeases.remove(state.lease.id)
         }
     }
@@ -441,9 +488,10 @@ class ButtonAimPayloadExecutor(
     private fun replaceLeaseOutput(
         state: LeaseState,
         desired: DesiredOutput,
-        pulseMode: ButtonAimPulseMode
+        pulseMode: ButtonAimPulseMode,
+        allowDirectionalReplay: Boolean = true
     ) {
-        val repeatedDirectionOutput = state.lease.owner == ButtonAimPayloadOwner.DIRECTION_ADDITION &&
+        val repeatedDirectionOutput = allowDirectionalReplay && state.lease.owner == ButtonAimPayloadOwner.DIRECTION_ADDITION &&
             desired.key !in state.outputs && effectiveOutputs[desired.key] != null &&
             sameEffectiveOutput(effectiveOutputs[desired.key], desired)
         cancelPulse(state, desired.key)
@@ -511,6 +559,9 @@ class ButtonAimPayloadExecutor(
             modifiedLeases.remove(id)?.tokens?.forEach { runtime ->
                 runtime.pressTask?.cancel()
                 runtime.pressGeneration++
+                runtime.repeatTask?.cancel()
+                runtime.repeatTask = null
+                runtime.repeatGeneration++
                 runtime.releaseTask?.cancel()
                 runtime.child?.let { allIds += it.id }
             }
@@ -663,6 +714,7 @@ class ButtonAimPayloadExecutor(
     private fun clearWithoutSendingReleases() {
         modifiedLeases.values.flatMap { it.tokens }.forEach {
             it.pressTask?.cancel()
+            it.repeatTask?.cancel()
             it.releaseTask?.cancel()
         }
         modifiedLeases.clear()

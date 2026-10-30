@@ -42,7 +42,8 @@ data class FloatingRingPreset(
         const val ROLE_BOOST_SCHEMA_VERSION = 3
         const val DIRECT_TOUCH_DELAY_SCHEMA_VERSION = 4
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 5
-        const val CURRENT_SCHEMA_VERSION = PAYLOAD_MODIFIERS_SCHEMA_VERSION
+        const val REPEAT_PAYLOAD_SCHEMA_VERSION = 6
+        const val CURRENT_SCHEMA_VERSION = REPEAT_PAYLOAD_SCHEMA_VERSION
     }
 }
 
@@ -60,6 +61,7 @@ fun FloatingZone.captureRingPreset(id: String, name: String, nowMs: Long): Float
 }
 
 private fun FloatingZone.requiredRingPresetSchemaVersion(): Int = when {
+    ring?.actionPayloads()?.any(PayloadModifiers::hasRepeatModifiers) == true -> FloatingRingPreset.REPEAT_PAYLOAD_SCHEMA_VERSION
     ring?.actionPayloads()?.any(PayloadModifiers::hasModifiers) == true -> FloatingRingPreset.PAYLOAD_MODIFIERS_SCHEMA_VERSION
     hasDirectTouchBoostDelayConfiguration() -> FloatingRingPreset.DIRECT_TOUCH_DELAY_SCHEMA_VERSION
     hasRoleBoostConfiguration() -> FloatingRingPreset.ROLE_BOOST_SCHEMA_VERSION

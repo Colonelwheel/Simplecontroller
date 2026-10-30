@@ -11,6 +11,8 @@ LT:1.0(I)(HRD200),RT:1.0(SOR)
   press. The default press is 90 milliseconds.
 - `(HRD200)` keeps an already held output active for 200 milliseconds after its
   release. The number is whole milliseconds, from 0 to 600000.
+- `(R100)` repeatedly presses and releases that command while its action source
+  stays held. The number is the interval between press starts, in milliseconds.
 
 Commands without modifiers retain their existing behavior. An explicit `(I)` or
 `(SOR)` overrides Button Aim's whole-payload timing for that command; undecorated
@@ -55,6 +57,49 @@ second owner can keep a shared output held after the first owner's delay ends.
 
 ## Existing pulse syntax
 
+### Per-command repeat
+
+```text
+LT:1.0(I)(HRD200),RT:1.0(I)(R100)
+```
+
+This holds LT steadily while RT repeats. RT starts pressed immediately, releases
+after 50 ms, and starts its next press at 100 ms, then 200 ms, and so on. Lifting
+stops RT and leaves LT held for its configured extra 200 ms. With Hold Toggle,
+the action stays active until unlatching. No global Turbo is required.
+
+R controls each command's cadence independently. Global Turbo does not restart
+it or shorten its presses; unrelated commands keep their existing behavior.
+The default press duration is half the R interval, capped at 50 ms. Whole repeat
+intervals from 2 to 600000 ms are accepted. Actual device/network timing remains
+best effort, particularly at very short intervals.
+
+An existing trigger P suffix can explicitly choose each press's duration:
+`RT:1.0P0.03(R100)` uses 30 ms pressed and 70 ms released. The authored press must
+be shorter than the repeat interval so a release interval remains.
+
+Use a Hold mapping for continuous repetition on TouchAim, stick directions,
+boosts and ring actions. TouchAim lower-stage Hold carryover keeps the same R
+timer through higher stages and back. Leaving the eligible stage or direction
+stops repetition. Existing finite Tap/Auto-Tap/native ring Repeat windows still
+bound their individual activations; R does not convert those modes into latches.
+
+R and HRD can be combined. On release, repetition stops immediately; HRD can
+extend the final press only if it is currently ON. An OFF-phase release does
+not reactivate an output. TouchAim stage exits still bypass HRD, and hard cleanup
+always stops both the timer and output immediately.
+
+R repeats while held, so `(R100)(SOR)` on the same command is rejected. Separate
+commands can repeat RT and arm an RT release shot independently. When those
+commands use the same output, the release shot follows a 35 ms release gap.
+If Button Aim's overall timing is Send on release, add `(I)` to the R command
+to explicitly select held repetition. Repeating commands are limited to the
+same reversible gamepad, trigger, keyboard, mouse-button and stick-macro outputs
+as the other timing modifiers. Other legitimate held owners can mask a pulse;
+R never forces their output to release.
+
+### One finite trigger pulse
+
 `P` remains part of the trigger command, before the modifiers:
 
 ```text
@@ -97,7 +142,7 @@ are shown only for Manual three-stage mode.
 Old layouts default to inherited sensitivities and zero new confirmations.
 Full layouts, duplicate controls/pages, portable transfers, backups and reusable
 manual profiles preserve the new settings. Profiles with new tuning or modifier
-syntax require controller format 14. Reusable libraries use conditional schema
+syntax require controller format 14, or format 15 when R is stored. Reusable libraries use conditional schema
 versions so older apps reject unsupported features before silently dropping them.
 
 Modifiers execute in Android. Receivers receive the existing plain commands;
@@ -119,3 +164,21 @@ byte-identical after installation. The installed APK matched the delivered APK:
 The previous installed APK and read-only native app snapshots remain in the
 separate local build records. No uninstall, clear-data command, connected Gradle
 test, backup restore, automatic app launch or live game-input test was performed.
+
+## October 30 repeat modifier verification and delivery
+
+Both Android variants passed all 581 JVM tests with no failures, errors or skips.
+Coverage includes independent repeat intervals, ON/OFF release, HRD, global Turbo,
+same-output SOR, shared owners, canceled callbacks, directional reentry, TouchAim
+Hold carryover and PRESS entry rules, ring ownership and profile compatibility.
+The Sideload Debug APK and Play Release AAB built successfully. Lint reported zero
+errors in both variants, with the existing 208 and 206 warnings respectively.
+
+The signing-compatible `adb install -r` update succeeded on the Galaxy S22.
+Two fresh pre-install snapshots matched, and all 127 app-data files remained
+byte-identical after installation. The installed APK matched the tested APK:
+`2C145B1964D991E5A597526A04C439C4C80F583077A9487797D4E309225F15B2`.
+The working October 25 APK, native app snapshots and new delivery artifacts are
+preserved in separate local build records. No uninstall, clear-data command,
+connected Gradle test, backup restore, automatic app launch or live game-input
+test was performed.

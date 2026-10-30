@@ -69,7 +69,8 @@ data class StickDirectionalProfile(
 ) {
     companion object {
         const val LEGACY_SCHEMA_VERSION = 2
-        const val CURRENT_SCHEMA_VERSION = 3
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 3
+        const val CURRENT_SCHEMA_VERSION = 4
         const val MAX_NAME_LENGTH = 80
     }
 
@@ -77,16 +78,18 @@ data class StickDirectionalProfile(
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) {
             return "This profile version is not supported."
         }
-        if (schemaVersion < requiredSchemaVersion()) return "Payload modifiers require directional profile version 3."
+        if (schemaVersion < requiredSchemaVersion()) return "Payload modifiers require directional profile version ${requiredSchemaVersion()}."
         if (name.trim().isEmpty() || name.trim().length > MAX_NAME_LENGTH) {
             return "Choose a profile name from 1 to $MAX_NAME_LENGTH characters."
         }
         return settings.validationError()
     }
 
-    fun requiredSchemaVersion(): Int = if (settings.commands().any(PayloadModifiers::hasModifiers)) {
-        CURRENT_SCHEMA_VERSION
-    } else minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
+    fun requiredSchemaVersion(): Int = when {
+        settings.commands().any(PayloadModifiers::hasRepeatModifiers) -> CURRENT_SCHEMA_VERSION
+        settings.commands().any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
+        else -> minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
+    }
 
     /** Copies shared directional commands and thresholds without changing the target's mode. */
     fun applyCommandsTo(control: Control): Boolean {

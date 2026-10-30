@@ -153,7 +153,8 @@ object TouchAimCalibrationStore {
             val text = it.readText()
             val value = json.parseToJsonElement(text) as? JsonObject ?: error("Invalid calibration profile.")
             requirePayloadFeatureSchema(value, "calibration profile", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION,
-                TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION)
+                TouchAimCalibrationProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                repeatVersion = TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION)
             TouchAimCalibrationCatalog.migrated(
                 json.decodeFromString<TouchAimCalibrationProfile>(text)
             )?.takeIf { profile -> profile.id.equals(fileId, ignoreCase = true) }

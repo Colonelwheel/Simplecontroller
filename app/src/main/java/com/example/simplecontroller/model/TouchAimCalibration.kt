@@ -113,16 +113,19 @@ data class TouchAimCalibrationProfile(
 ) {
     companion object {
         const val LEGACY_SCHEMA_VERSION = 1
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
     }
 
-    fun requiredSchemaVersion(): Int = if (listOf(aimPayload, shootPayload).any(PayloadModifiers::hasModifiers)) {
-        CURRENT_SCHEMA_VERSION
-    } else LEGACY_SCHEMA_VERSION
+    fun requiredSchemaVersion(): Int = when {
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasRepeatModifiers) -> CURRENT_SCHEMA_VERSION
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
+        else -> LEGACY_SCHEMA_VERSION
+    }
 
     fun versionValidationError(): String? = when {
         schemaVersion !in 1..CURRENT_SCHEMA_VERSION -> "This calibration version is not supported."
-        schemaVersion < requiredSchemaVersion() -> "Payload modifiers require calibration profile version 2."
+        schemaVersion < requiredSchemaVersion() -> "Payload modifiers require calibration profile version ${requiredSchemaVersion()}."
         listOf(aimPayload, shootPayload).payloadModifiersValidationError() != null ->
             listOf(aimPayload, shootPayload).payloadModifiersValidationError()
         else -> null

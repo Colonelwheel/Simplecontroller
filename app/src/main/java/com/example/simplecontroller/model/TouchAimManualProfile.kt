@@ -65,14 +65,15 @@ data class TouchAimManualProfile(
 ) {
     companion object {
         const val LEGACY_SCHEMA_VERSION = 1
-        const val CURRENT_SCHEMA_VERSION = 2
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 2
+        const val CURRENT_SCHEMA_VERSION = 3
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
     }
 
     fun validationError(): String? {
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) return "This profile version is not supported."
-        if (schemaVersion < requiredSchemaVersion()) return "The saved stage tuning or payload modifiers require manual TouchAim profile version 2."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved stage tuning or payload modifiers require manual TouchAim profile version ${requiredSchemaVersion()}."
         if (name.trim().isEmpty() || name.trim().length > MAX_NAME_LENGTH) {
             return "Choose a profile name from 1 to $MAX_NAME_LENGTH characters."
         }
@@ -149,9 +150,13 @@ data class TouchAimManualProfile(
                 settings.highSensitivity).any { it != null } ||
                 listOf(settings.aimOnlyEnterConfirmationMs, settings.lowEnterConfirmationMs,
                     settings.mediumEnterConfirmationMs, settings.highEnterConfirmationMs).any { it != 0L })
-        val modifiers = listOfNotNull(settings?.lowPayload, settings?.mediumPayload, settings?.highPayload,
-            twoState?.aimPayload, twoState?.shootPayload).any(PayloadModifiers::hasModifiers)
-        return if (hasTuning || modifiers) CURRENT_SCHEMA_VERSION else LEGACY_SCHEMA_VERSION
+        val payloads = listOfNotNull(settings?.lowPayload, settings?.mediumPayload, settings?.highPayload,
+            twoState?.aimPayload, twoState?.shootPayload)
+        return when {
+            payloads.any(PayloadModifiers::hasRepeatModifiers) -> CURRENT_SCHEMA_VERSION
+            hasTuning || payloads.any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
+            else -> LEGACY_SCHEMA_VERSION
+        }
     }
 
     fun applyTo(control: Control): Boolean {
