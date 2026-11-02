@@ -1494,7 +1494,7 @@ class PropertySheetBuilder(
         )
 
         threeStageContainer.addView(TextView(context).apply {
-            text = "Each stage can use its own aim sensitivity. Leave it blank to use the main Sensitivity. Enter Stage Confirmation requires that detected stage to remain steady before its actions and sensitivity apply; blank or 0 is immediate. HRD extends a held payload only after lifting your finger."
+            text = "Each stage can use its own aim sensitivity. Leave it blank to use the main Sensitivity. Enter Stage Confirmation requires that detected stage to remain steady before its actions and sensitivity apply; blank or 0 is immediate. HRD extends an active held payload after leaving its stage or lifting your finger. D delays each command's activation independently."
         })
         addSectionTitle(threeStageContainer, "Aim-only stage")
         val aimOnlyTuning = addTouchAimStageTuning(

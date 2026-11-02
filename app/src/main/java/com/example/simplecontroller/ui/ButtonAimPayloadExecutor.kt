@@ -143,7 +143,13 @@ class ButtonAimPayloadExecutor(
         var pressTask: ButtonAimScheduledTask? = null,
         var repeatTask: ButtonAimScheduledTask? = null,
         var repeatGeneration: Long = 0L,
-        var releaseTask: ButtonAimScheduledTask? = null
+        var releaseTask: ButtonAimScheduledTask? = null,
+        var releaseGeneration: Long = 0L,
+        var activationTask: ButtonAimScheduledTask? = null,
+        var activationGeneration: Long = 0L,
+        var initialActivationStarted: Boolean = false,
+        var delayedInitialPress: Boolean = false,
+        var sourceReleased: Boolean = false
     )
 
     private data class ModifiedLeaseState(
@@ -176,12 +182,13 @@ class ButtonAimPayloadExecutor(
         immediatePressDurationMs: Long? = null,
         defaultReleaseDelayMs: Long = 0L,
         preserveAuthoredPulseOnRelease: Boolean = false,
-        turboSession: Boolean = false
+        turboSession: Boolean = false,
+        resumeHoldReleaseFrom: ButtonAimPayloadLease? = null
     ): ButtonAimPayloadActivationResult {
         if (PayloadModifiers.hasModifiers(payload) || defaultTiming != PayloadCommandTiming.IMMEDIATE ||
             immediatePressDurationMs != null
         ) return activateModified(owner, payload, pulseMode, defaultTiming, immediatePressDurationMs,
-            defaultReleaseDelayMs, preserveAuthoredPulseOnRelease, turboSession)
+            defaultReleaseDelayMs, preserveAuthoredPulseOnRelease, turboSession, resumeHoldReleaseFrom)
         val rawTokens = tokenize(payload)
         if (rawTokens.isEmpty()) {
             return ButtonAimPayloadActivationResult.Invalid("Payload is blank")
@@ -252,7 +259,8 @@ class ButtonAimPayloadExecutor(
         immediatePressDurationMs: Long?,
         defaultReleaseDelayMs: Long,
         preserveAuthoredPulseOnRelease: Boolean,
-        turboSession: Boolean
+        turboSession: Boolean,
+        resumeHoldReleaseFrom: ButtonAimPayloadLease?
     ): ButtonAimPayloadActivationResult {
         validationError(payload)?.let { return ButtonAimPayloadActivationResult.Invalid(it) }
         val commands = PayloadModifiers.parse(payload).commands
@@ -269,12 +277,64 @@ class ButtonAimPayloadExecutor(
             defaultReleaseDelayMs.coerceAtLeast(0L), preserveAuthoredPulseOnRelease, turboSession
         )
         modifiedLeases[parent.lease.id] = parent
+        val previous = modifiedLeases[resumeHoldReleaseFrom?.id]?.takeIf {
+            it.sourceReleased && it.lease.owner == owner
+        }
         parent.tokens.forEach { runtime ->
             if (runtime.timing == PayloadCommandTiming.IMMEDIATE) {
-                startModifiedImmediate(parent, runtime, pulseMode, immediatePressDurationMs)
+                if (!transferLiveHoldRelease(previous, parent, runtime, pulseMode, immediatePressDurationMs)) {
+                    startInitialImmediate(parent, runtime, pulseMode, immediatePressDurationMs)
+                }
             }
         }
+        previous?.let(::finishModifiedIfIdle)
         return ButtonAimPayloadActivationResult.Activated(parent.lease, commands.size, 0)
+    }
+
+    private fun startInitialImmediate(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime,
+                                      pulseMode: ButtonAimPulseMode, pressDurationMs: Long?) {
+        val delay = runtime.command.activationDelayMs
+        val start = {
+            runtime.initialActivationStarted = true
+            startModifiedImmediate(parent, runtime, pulseMode, pressDurationMs)
+        }
+        if (delay == 0L) start() else {
+            val generation = ++runtime.activationGeneration
+            runtime.activationTask = scheduler.schedule(delay) {
+                if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased || runtime.sourceReleased ||
+                    runtime.activationGeneration != generation) return@schedule
+                runtime.activationTask = null
+                runtime.delayedInitialPress = true
+                start()
+            }
+        }
+    }
+
+    /** Move only matching live HRD claims; pending D, completed pulses and SOR stay independent. */
+    private fun transferLiveHoldRelease(previous: ModifiedLeaseState?, parent: ModifiedLeaseState,
+                                       runtime: ModifiedTokenRuntime, pulseMode: ButtonAimPulseMode,
+                                       pressDurationMs: Long?): Boolean {
+        if (previous == null || !runtime.command.hasHoldReleaseDelay) return false
+        val old = previous.tokens.firstOrNull {
+            it.timing == PayloadCommandTiming.IMMEDIATE && it.sourceReleased &&
+                it.command == runtime.command && it.releaseTask != null &&
+                leases[it.child?.id]?.outputs?.isNotEmpty() == true
+        } ?: return false
+        val oldChild = leases[old.child?.id] ?: return false
+        old.releaseTask?.cancel()
+        old.releaseTask = null
+        old.releaseGeneration++
+        old.child = null
+        val child = LeaseState(ButtonAimPayloadLease(nextLeaseId++, parent.lease.owner))
+        child.outputs.putAll(oldChild.outputs)
+        leases.remove(oldChild.lease.id)
+        leases[child.lease.id] = child
+        runtime.child = child.lease
+        runtime.initialActivationStarted = true
+        child.outputs.values.toList().forEach { replaceLeaseOutput(child, it, pulseMode, allowDirectionalReplay = false) }
+        if (runtime.command.repeatIntervalMs != null) scheduleRepeatedTimers(parent, runtime)
+        else scheduleModifiedPressEnd(parent, runtime, pulseMode, pressDurationMs)
+        return true
     }
 
     private fun startModifiedImmediate(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime,
@@ -285,6 +345,11 @@ class ButtonAimPayloadExecutor(
         }
         runtime.child = (activate(parent.lease.owner, runtime.command.command, pulseMode)
             as ButtonAimPayloadActivationResult.Activated).lease
+        scheduleModifiedPressEnd(parent, runtime, pulseMode, pressDurationMs)
+    }
+
+    private fun scheduleModifiedPressEnd(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime,
+                                         pulseMode: ButtonAimPulseMode, pressDurationMs: Long?) {
         val authoredPulse = (parseToken(runtime.command.command) as? ParsedToken.Output)
             ?.desired.let { it as? DesiredOutput.Trigger }?.pulseDurationMs
         val finitePressMs = pressDurationMs.takeUnless { parent.turboSession && runtime.command.hasHoldReleaseDelay }
@@ -293,6 +358,7 @@ class ButtonAimPayloadExecutor(
             runtime.pressTask = scheduler.schedule((authoredPulse ?: checkNotNull(finitePressMs)).coerceAtLeast(1L)) {
                 if (modifiedLeases[parent.lease.id] !== parent || runtime.pressGeneration != generation) return@schedule
                 runtime.pressTask = null
+                runtime.delayedInitialPress = false
                 release(runtime.child)
                 runtime.child = null
                 finishModifiedIfIdle(parent)
@@ -303,8 +369,6 @@ class ButtonAimPayloadExecutor(
     /** One independent cadence per command, retaining its source lease across every OFF gap. */
     private fun startRepeatedPress(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime) {
         if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased) return
-        val interval = checkNotNull(runtime.command.repeatIntervalMs)
-        val onDuration = checkNotNull(PayloadModifiers.repeatPressDurationMs(runtime.command))
         val authored = (parseToken(runtime.command.command) as ParsedToken.Output).desired
         val desired = if (authored is DesiredOutput.Trigger) authored.copy(pulseDurationMs = null) else authored
         val child = LeaseState(ButtonAimPayloadLease(nextLeaseId++, parent.lease.owner))
@@ -312,6 +376,12 @@ class ButtonAimPayloadExecutor(
         // A repeated pulse may be masked by another legitimate hold; never force that hold OFF.
         replaceLeaseOutput(child, desired, ButtonAimPulseMode.ONCE, allowDirectionalReplay = false)
         runtime.child = child.lease
+        scheduleRepeatedTimers(parent, runtime)
+    }
+
+    private fun scheduleRepeatedTimers(parent: ModifiedLeaseState, runtime: ModifiedTokenRuntime) {
+        val interval = checkNotNull(runtime.command.repeatIntervalMs)
+        val onDuration = checkNotNull(PayloadModifiers.repeatPressDurationMs(runtime.command))
         val pressGeneration = ++runtime.pressGeneration
         runtime.pressTask = scheduler.schedule(onDuration) {
             if (modifiedLeases[parent.lease.id] !== parent || parent.sourceReleased ||
@@ -335,6 +405,9 @@ class ButtonAimPayloadExecutor(
         if (parent.sourceReleased) return
         parent.tokens.filter { it.timing == PayloadCommandTiming.IMMEDIATE && !it.command.hasHoldReleaseDelay &&
             it.command.repeatIntervalMs == null }.forEach { runtime ->
+            // D is an initial deadline, never restarted by global Turbo ticks. Preserve the
+            // first delayed finite pulse when a tick coincides with its activation.
+            if (!runtime.initialActivationStarted || (runtime.delayedInitialPress && runtime.pressTask != null)) return@forEach
             runtime.pressTask?.cancel()
             runtime.pressGeneration++
             release(runtime.child)
@@ -359,11 +432,11 @@ class ButtonAimPayloadExecutor(
             release(lease)
             return
         }
-        val alreadyReleased = state.sourceReleased
-        if (alreadyReleased && !state.tokens.any { it.pressTask != null }) return
+        if (state.sourceReleased && state.tokens.all { it.sourceReleased }) return
         state.sourceReleased = true
         // Complete immediate components first so a same-key SOR never inherits an old Turbo ON.
         state.tokens.sortedBy { it.timing == PayloadCommandTiming.SEND_ON_RELEASE }.forEach { runtime ->
+            if (runtime.sourceReleased) return@forEach
             val repeating = runtime.command.repeatIntervalMs != null
             runtime.repeatTask?.cancel()
             runtime.repeatTask = null
@@ -377,11 +450,15 @@ class ButtonAimPayloadExecutor(
             if (!repeating && state.preserveAuthoredPulseOnRelease && authoredPulse != null && delay == 0L &&
                 runtime.timing == PayloadCommandTiming.IMMEDIATE && runtime.pressTask != null
             ) return@forEach
+            runtime.sourceReleased = true
+            runtime.activationTask?.cancel()
+            runtime.activationTask = null
+            runtime.activationGeneration++
             runtime.pressTask?.cancel()
             runtime.pressGeneration++
             runtime.pressTask = null
             if (runtime.timing == PayloadCommandTiming.SEND_ON_RELEASE) {
-                if (alreadyReleased || suppressSendOnRelease || runtime.sorSuppressed) return@forEach
+                if (suppressSendOnRelease || runtime.sorSuppressed) return@forEach
                 val token = parseToken(runtime.command.command) as ParsedToken.Output
                 val pulseMs = (token.desired as? DesiredOutput.Trigger)?.pulseDurationMs
                     ?: PayloadModifiers.RELEASE_PRESS_DURATION_MS
@@ -397,10 +474,14 @@ class ButtonAimPayloadExecutor(
                         (parseToken(immediate.command.command) as? ParsedToken.Output)?.desired?.key == token.desired.key
                 }
                 // Keep the release revision visible before the new press revision is published.
-                val activationDelay = maxOf(inheritedDelay, if (repeatsSameKey) DIRECTION_REPLAY_GAP_MS else 0L)
+                val activationDelay = maxOf(inheritedDelay + runtime.command.activationDelayMs,
+                    if (repeatsSameKey) DIRECTION_REPLAY_GAP_MS else 0L)
                 if (activationDelay > 0L) {
+                    val generation = ++runtime.releaseGeneration
                     runtime.releaseTask = scheduler.schedule(activationDelay) {
-                        if (modifiedLeases[state.lease.id] === state) fire()
+                        if (modifiedLeases[state.lease.id] !== state || runtime.releaseGeneration != generation) return@schedule
+                        runtime.releaseTask = null
+                        fire()
                     }
                 } else fire()
             } else if (runtime.child?.id in leases) {
@@ -432,8 +513,9 @@ class ButtonAimPayloadExecutor(
     }
 
     private fun scheduleModifiedRelease(state: ModifiedLeaseState, runtime: ModifiedTokenRuntime, delayMs: Long) {
+        val generation = ++runtime.releaseGeneration
         runtime.releaseTask = scheduler.schedule(delayMs.coerceAtLeast(1L)) {
-            if (modifiedLeases[state.lease.id] !== state) return@schedule
+            if (modifiedLeases[state.lease.id] !== state || runtime.releaseGeneration != generation) return@schedule
             runtime.releaseTask = null
             release(runtime.child)
             runtime.child = null
@@ -442,7 +524,8 @@ class ButtonAimPayloadExecutor(
     }
 
     private fun finishModifiedIfIdle(state: ModifiedLeaseState) {
-        if (state.sourceReleased && state.tokens.all { it.pressTask == null && it.repeatTask == null && it.releaseTask == null && it.child == null }) {
+        if (state.sourceReleased && state.tokens.all { it.activationTask == null && it.pressTask == null &&
+                it.repeatTask == null && it.releaseTask == null && it.child == null }) {
             modifiedLeases.remove(state.lease.id)
         }
     }
@@ -557,12 +640,15 @@ class ButtonAimPayloadExecutor(
         val allIds = ids.toMutableSet()
         ids.forEach { id ->
             modifiedLeases.remove(id)?.tokens?.forEach { runtime ->
+                runtime.activationTask?.cancel()
+                runtime.activationGeneration++
                 runtime.pressTask?.cancel()
                 runtime.pressGeneration++
                 runtime.repeatTask?.cancel()
                 runtime.repeatTask = null
                 runtime.repeatGeneration++
                 runtime.releaseTask?.cancel()
+                runtime.releaseGeneration++
                 runtime.child?.let { allIds += it.id }
             }
         }
@@ -713,6 +799,7 @@ class ButtonAimPayloadExecutor(
 
     private fun clearWithoutSendingReleases() {
         modifiedLeases.values.flatMap { it.tokens }.forEach {
+            it.activationTask?.cancel()
             it.pressTask?.cancel()
             it.repeatTask?.cancel()
             it.releaseTask?.cancel()

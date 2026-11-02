@@ -48,6 +48,15 @@ internal fun JsonElement.hasRepeatPayloadConfiguration(): Boolean = when (this) 
     else -> false
 }
 
+internal fun JsonElement.hasDelayPayloadConfiguration(): Boolean = when (this) {
+    is JsonArray -> any { it.hasDelayPayloadConfiguration() }
+    is JsonObject -> any { (key, value) ->
+        (key in actionFields && (value as? JsonPrimitive)?.contentOrNull?.let(PayloadModifiers::hasDelayModifiers) == true) ||
+            value.hasDelayPayloadConfiguration()
+    }
+    else -> false
+}
+
 internal fun JsonElement.hasStageTouchAimConfiguration(): Boolean = when (this) {
     is JsonArray -> any { it.hasStageTouchAimConfiguration() }
     is JsonObject -> any { (key, value) ->
@@ -65,10 +74,14 @@ internal fun requirePayloadFeatureSchema(
     featureVersion: Int,
     legacyVersion: Int = 1,
     stageTuning: Boolean = false,
-    repeatVersion: Int? = null
+    repeatVersion: Int? = null,
+    delayVersion: Int? = null
 ) {
     val version = (value["schemaVersion"] as? JsonPrimitive)?.intOrNull ?: legacyVersion
     require(version in 1..maxVersion) { "$label version $version is newer than supported version $maxVersion or invalid." }
+    require(delayVersion == null || version >= delayVersion || !value.hasDelayPayloadConfiguration()) {
+        "The saved delay payload modifier requires $label version $delayVersion."
+    }
     require(repeatVersion == null || version >= repeatVersion || !value.hasRepeatPayloadConfiguration()) {
         "The saved repeat payload modifier requires $label version $repeatVersion."
     }

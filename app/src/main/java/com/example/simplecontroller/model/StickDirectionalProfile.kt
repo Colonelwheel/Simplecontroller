@@ -70,7 +70,9 @@ data class StickDirectionalProfile(
     companion object {
         const val LEGACY_SCHEMA_VERSION = 2
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 3
-        const val CURRENT_SCHEMA_VERSION = 4
+        const val REPEAT_PAYLOAD_SCHEMA_VERSION = 4
+        const val DELAY_PAYLOAD_SCHEMA_VERSION = 5
+        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
         const val MAX_NAME_LENGTH = 80
     }
 
@@ -86,7 +88,8 @@ data class StickDirectionalProfile(
     }
 
     fun requiredSchemaVersion(): Int = when {
-        settings.commands().any(PayloadModifiers::hasRepeatModifiers) -> CURRENT_SCHEMA_VERSION
+        settings.commands().any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
+        settings.commands().any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
         settings.commands().any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
         else -> minOf(schemaVersion, LEGACY_SCHEMA_VERSION)
     }

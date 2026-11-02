@@ -352,6 +352,22 @@ R and SOR cannot be put on the same command. See
 [payload modifiers](PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md) for pulse duration,
 finite-action boundaries, and combining R with HRD.
 
+### Per-command Delay and Hold Release Delay
+
+`LT:1.0,RT:1.0(D100)` presses LT immediately and RT 100 ms later. Delays belong
+to each individual command: `LT:1.0(D100),RT:1.0(D100)` presses both at 100 ms.
+Each timer starts with the action source, so the delays run in parallel.
+
+`LT:1.0(D100)(HRD200)` waits 100 ms before pressing LT, then keeps an active LT
+held for 200 ms after release. Releasing before the initial delay ends cancels
+the pending press. With Hold Toggle, unlatching ends the source.
+
+In TouchAim, a held Medium payload carried through High stays active. Returning
+below Medium starts its HRD timer, as does lifting directly from Medium or High.
+Lifting during an already-running tail leaves that deadline unchanged. Returning
+to the eligible stage before the held output expires resumes it without a gap
+or another D delay. Hard cancellation and Release All still release immediately.
+
 ### Global Turbo
 
 The Turbo value is the interval between repeats, in milliseconds. The current default is 16 ms, and the allowed range is 10–1000 ms. It affects ordinary Buttons globally while Turbo is switched on.
@@ -636,9 +652,11 @@ override and **Enter Stage Confirmation** in milliseconds. Blank sensitivity
 inherits the main value; blank or zero confirmation enters immediately.
 Confirmation keeps the previous stage active until the destination remains steady.
 
-Action commands also accept `(I)`, `(SOR)` and `(HRD200)`. HRD extends a held
-TouchAim output only after finger lift; it does not change Hold carryover between
-stages. On Buttons it starts on release, or on actual unlatch for Hold Toggle.
+Action commands also accept `(I)`, `(SOR)`, `(HRD200)`, `(R100)` and `(D100)`.
+HRD extends an active held TouchAim output when its stage stops being eligible
+or the finger lifts. Existing lower-Hold carryover through higher stages remains
+in force, and lifting during a running tail keeps its original deadline.
+On Buttons HRD starts on release, or on actual unlatch for Hold Toggle.
 See [payload modifiers and stage tuning](PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md)
 for exact timing, pulse syntax and cleanup behavior.
 

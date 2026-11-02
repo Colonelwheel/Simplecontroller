@@ -58,7 +58,7 @@ class PayloadModifiersTest {
         assertEquals("200:X360A_RELEASE", f.events.last())
     }
 
-    @Test fun thresholdExit_ignoresHrdButFiresSorOnce() {
+    @Test fun explicitHrdBypass_releasesImmediatelyButFiresSorOnce() {
         val f = Fixture()
         val lease = f.activate("LT:1.0(HRD200),RT:1.0(SOR)")
         f.clock.advance(10)

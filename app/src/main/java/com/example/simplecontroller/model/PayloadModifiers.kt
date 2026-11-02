@@ -8,7 +8,9 @@ data class PayloadCommand(
     val holdReleaseDelayMs: Long = 0L,
     val hasModifiers: Boolean = false,
     val hasHoldReleaseDelay: Boolean = false,
-    val repeatIntervalMs: Long? = null
+    val repeatIntervalMs: Long? = null,
+    val activationDelayMs: Long = 0L,
+    val hasActivationDelay: Boolean = false
 )
 
 /** Android-local, per-command suffixes. Receivers only ever see [PayloadCommand.command]. */
@@ -17,6 +19,7 @@ object PayloadModifiers {
     const val MAX_HOLD_RELEASE_DELAY_MS = 600_000L
     const val MIN_REPEAT_INTERVAL_MS = 2L
     const val MAX_REPEAT_INTERVAL_MS = 600_000L
+    const val MAX_ACTIVATION_DELAY_MS = 600_000L
 
     data class Result(val commands: List<PayloadCommand>, val error: String? = null)
 
@@ -24,6 +27,9 @@ object PayloadModifiers {
 
     /** Includes malformed attempted R suffixes so old readers cannot silently accept them. */
     fun hasRepeatModifiers(payload: String): Boolean = REPEAT_SUFFIX_START.containsMatchIn(payload)
+
+    /** Includes malformed attempted D suffixes for forward-compatible profile rejection. */
+    fun hasDelayModifiers(payload: String): Boolean = DELAY_SUFFIX_START.containsMatchIn(payload)
 
     /** Trigger P remains an authored ON duration; otherwise use the existing finite-tap duty. */
     fun repeatPressDurationMs(command: PayloadCommand): Long? {
@@ -47,6 +53,7 @@ object PayloadModifiers {
             var timing: PayloadCommandTiming? = null
             var delay: Long? = null
             var repeatInterval: Long? = null
+            var activationDelay: Long? = null
             var remaining = raw.substring(suffixStart)
             while (remaining.isNotEmpty()) {
                 val match = Regex("^\\(([^()]*)\\)").find(remaining)
@@ -74,6 +81,14 @@ object PayloadModifiers {
                                 }
                                 repeatInterval = value
                             }
+                            modifier.startsWith("D") -> {
+                                if (activationDelay != null) return Result(emptyList(), "Use (Dmilliseconds) once per command: $raw")
+                                val value = wholeMilliseconds(modifier.substring(1))
+                                if (value == null || value !in 0..MAX_ACTIVATION_DELAY_MS) {
+                                    return Result(emptyList(), "D must be whole milliseconds from 0 to $MAX_ACTIVATION_DELAY_MS: $raw")
+                                }
+                                activationDelay = value
+                            }
                             else -> return Result(emptyList(), "Unknown payload modifier: ${match.value}")
                         }
                     }
@@ -84,7 +99,8 @@ object PayloadModifiers {
                 return Result(emptyList(), "(Rmilliseconds) repeats while held and cannot be combined with (SOR): $raw")
             }
             result += PayloadCommand(command, timing, delay ?: 0L, hasModifiers = true,
-                hasHoldReleaseDelay = delay != null, repeatIntervalMs = repeatInterval)
+                hasHoldReleaseDelay = delay != null, repeatIntervalMs = repeatInterval,
+                activationDelayMs = activationDelay ?: 0L, hasActivationDelay = activationDelay != null)
         }
         return Result(result)
     }
@@ -93,5 +109,6 @@ object PayloadModifiers {
         number.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toLongOrNull()
 
     private val REPEAT_SUFFIX_START = Regex("\\(R", RegexOption.IGNORE_CASE)
+    private val DELAY_SUFFIX_START = Regex("\\(D", RegexOption.IGNORE_CASE)
     private val TRIGGER_PULSE = Regex("^(?:LT|RT):[01](?:\\.[0-9]+)?P([0-9]+(?:\\.[0-9]+)?)$", RegexOption.IGNORE_CASE)
 }

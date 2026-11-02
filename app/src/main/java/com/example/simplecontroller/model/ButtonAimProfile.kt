@@ -87,7 +87,9 @@ data class ButtonAimProfile(
         const val GAME_MOUSE_SCHEMA_VERSION = 4
         const val BOUNDARY_SCHEMA_VERSION = 5
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 6
-        const val CURRENT_SCHEMA_VERSION = 7
+        const val REPEAT_PAYLOAD_SCHEMA_VERSION = 7
+        const val DELAY_PAYLOAD_SCHEMA_VERSION = 8
+        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
         const val MAX_DISPLAY_NAME_LENGTH = 120
@@ -95,7 +97,8 @@ data class ButtonAimProfile(
 
     /** New action behavior and mouse selections each require a compatible reader. */
     fun requiredSchemaVersion(): Int = when {
-        listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> CURRENT_SCHEMA_VERSION
+        listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
+        listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
         listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
         actions.cancelOnBoundaryExit || actions.rearmOnBoundaryReturn -> BOUNDARY_SCHEMA_VERSION
         base.output == ButtonAimOutput.GAME_MOUSE || alternate.output == ButtonAimOutput.GAME_MOUSE ->
@@ -105,9 +108,13 @@ data class ButtonAimProfile(
 
     fun validationError(): String? {
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) return "This profile version is not supported."
-        if (schemaVersion < CURRENT_SCHEMA_VERSION &&
+        if (schemaVersion < DELAY_PAYLOAD_SCHEMA_VERSION &&
+            listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasDelayModifiers)) {
+            return "Delay payload modifiers require Button Aim profile version $DELAY_PAYLOAD_SCHEMA_VERSION."
+        }
+        if (schemaVersion < REPEAT_PAYLOAD_SCHEMA_VERSION &&
             listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasRepeatModifiers)) {
-            return "Repeat payload modifiers require Button Aim profile version $CURRENT_SCHEMA_VERSION."
+            return "Repeat payload modifiers require Button Aim profile version $REPEAT_PAYLOAD_SCHEMA_VERSION."
         }
         if (schemaVersion < PAYLOAD_MODIFIERS_SCHEMA_VERSION &&
             listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasModifiers)) {
@@ -197,7 +204,8 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
     if (type != ControlType.BUTTON) return null
     val profile = ButtonAimProfile(
         schemaVersion = when {
-            listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> ButtonAimProfile.CURRENT_SCHEMA_VERSION
+            listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasDelayModifiers) -> ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION
+            listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION
             listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasModifiers) -> ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION
             buttonAimCancelOnBoundaryExit || buttonAimRearmOnBoundaryReturn -> ButtonAimProfile.BOUNDARY_SCHEMA_VERSION
             buttonAimOutput == ButtonAimOutput.GAME_MOUSE ||

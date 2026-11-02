@@ -15,7 +15,8 @@ const val FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION = 12
 const val FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION = 13
 const val PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION = 14
 const val REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION = 15
-const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
+const val DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION = 16
+const val MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION = DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
 
 @Serializable
 data class ControllerPage(
@@ -36,6 +37,10 @@ data class ControllerProfile(
 
 /** Keep legacy-only files readable by earlier apps; new mouse controls require an aware reader. */
 fun ControllerProfile.requiredFormatVersion(): Int = when {
+    pages.any { page -> page.controls.any { control ->
+        control.actionPayloads().any(PayloadModifiers::hasDelayModifiers)
+    } || page.floatingZones.any { it.ring?.actionPayloads()?.any(PayloadModifiers::hasDelayModifiers) == true } } ->
+        DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
     pages.any { page -> page.controls.any { control ->
         control.actionPayloads().any(PayloadModifiers::hasRepeatModifiers)
     } || page.floatingZones.any { it.ring?.actionPayloads()?.any(PayloadModifiers::hasRepeatModifiers) == true } } ->

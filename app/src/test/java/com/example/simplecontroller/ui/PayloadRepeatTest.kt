@@ -76,7 +76,7 @@ class PayloadRepeatTest {
         assertEquals(listOf("0:RT:1.0", "50:RT:0.0", "100:RT:1.0", "120:RT:0.0"), f.events)
     }
 
-    @Test fun thresholdExit_ignoresHrdAndNeverPreservesRepeatingFinitePress() {
+    @Test fun explicitHrdBypass_stopsRepeatEvenWhenPreserveFinitePressIsRequested() {
         val f = Fixture()
         val lease = f.activate("RT:1.0(R100)(HRD200)", finitePress = 90)
         f.clock.advance(25)

@@ -96,8 +96,10 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - Maximum backup version: `3`; writers use `3` when the full-ring preset library is present, `2` for boost profiles without full-ring presets, otherwise `1`. Historical backups 1 and 2 remain readable. Nonempty boost libraries require at least version 2; nonempty full-ring preset libraries require version 3. Future envelope and nested preset versions are rejected before decoding.
-- Maximum nested controller-profile format: `15` (formats `2` through `14` remain importable)
-- Writers use `15` only when an R repeat modifier is stored. Existing modifier
+- Maximum nested controller-profile format: `16` (formats `2` through `15` remain importable)
+- Writers use `16` only when a D activation-delay modifier is stored, including
+  `(D0)`. R-only profiles retain format 15 and earlier conditional rules remain.
+- Writers use `15` when an R repeat modifier is stored without D. Existing modifier
   and stage-tuning profiles keep the format-14 rules below.
 - Writers use `14` for stored payload modifiers or nondefault per-stage TouchAim
   tuning; otherwise the existing conditional formats below remain unchanged.
@@ -145,6 +147,13 @@ Button Aim schema 7, Directional/Stick+ schema 4, named floating boost schema 5,
 or complete ring preset schema 6, as applicable. Libraries without R retain their
 previous conditional schema selection. Both full profiles and library/backup
 readers reject under-versioned R syntax before typed decoding or application.
+
+A D activation-delay modifier conditionally requires manual TouchAim/calibration
+schema 4, Button Aim schema 8, Directional/Stick+ schema 5, named floating boost
+schema 6, or complete ring preset schema 7, as applicable. D and R can coexist;
+the required version is the newest stored feature's version. Libraries without
+D keep their earlier conditional schemas. Raw preflight includes malformed D
+attempts and inactive settings, before typed decoding or any application writes.
 
 ## Floating configuration and library contract
 

@@ -4,6 +4,40 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class RepeatDirectionalPayloadTest {
+    @Test fun delayedDirectionCommand_keepsOriginalDeadlineAcrossMovesAndAppliesHrdOnExit() {
+        val f = Fixture()
+        val held = mapOf(DirectionalCommandSlot.UP to "LT:1.0(D100)(HRD200),RT:1.0")
+        f.controller.reconcile(held)
+        f.clock.advance(75)
+        f.controller.reconcile(held)
+        assertEquals(listOf("0:RT:1.0"), f.events)
+        f.clock.advance(45)
+        f.controller.reconcile(emptyMap())
+        f.clock.advance(199, runCanceled = true)
+        assertEquals(listOf("0:RT:1.0", "100:LT:1.0", "120:RT:0.0"), f.events)
+        f.clock.advance(1)
+        assertEquals("320:LT:0.0", f.events.last())
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun delayedDirectionExitAndReentry_canceledOldDeadlineCannotStartNewPressEarly() {
+        val f = Fixture()
+        val held = mapOf(DirectionalCommandSlot.UP to "LT:1.0(D100)(HRD200)")
+        f.controller.reconcile(held)
+        f.clock.advance(75)
+        f.controller.reconcile(emptyMap())
+        f.clock.advance(5)
+        f.controller.reconcile(held)
+        f.clock.advance(99, runCanceled = true)
+        assertEquals(emptyList<String>(), f.events)
+        f.clock.advance(1)
+        assertEquals(listOf("180:LT:1.0"), f.events)
+        f.controller.clear()
+        f.clock.advance(1000, runCanceled = true)
+        assertEquals(listOf("180:LT:1.0", "180:LT:0.0"), f.events)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
     @Test fun heldZoneRepeatsWithoutRestartingOnMoveAndStopsOnExit() {
         val f = Fixture()
         val held = mapOf(DirectionalCommandSlot.UP to "RT:1.0(R100),LT:1.0")

@@ -66,6 +66,7 @@ class TouchAimHandler(
     private val stagePayloads = TouchAimStagePayloadController(payloadExecutor, onPayloadError)
     private val finitePayloadLeases = linkedMapOf<Long, ButtonAimPayloadLease>()
     private val finitePayloadStages = mutableMapOf<Long, TwoStateTouchAimState>()
+    private val retiredTwoStateHolds = mutableMapOf<ButtonAimPayloadOwner, TouchAimReleasedPayload>()
 
     fun hasRuntimeState(): Boolean = activePointerId != MotionEvent.INVALID_POINTER_ID ||
         heldCommands.isNotEmpty() || pendingPresses.isNotEmpty() || aimPayloadLease != null ||
@@ -102,10 +103,15 @@ class TouchAimHandler(
                 aimPayloadLease, shootPayloadLease,
                 *finitePayloadLeases.values.toTypedArray()
             )
+            rememberReleasedHold(ButtonAimPayloadOwner.BASE, model.touchAimAimPayload, aimPayloadLease)
+            rememberReleasedHold(ButtonAimPayloadOwner.ALTERNATE, model.touchAimShootPayload, shootPayloadLease)
         }
         stagePayloads.finish(cancelled)
         twoStateMachine = null
-        if (cancelled) payloadExecutor.releaseAllLeases()
+        if (cancelled) {
+            payloadExecutor.releaseAllLeases()
+            retiredTwoStateHolds.clear()
+        }
         aimPayloadLease = null
         shootPayloadLease = null
         finitePayloadLeases.clear()
@@ -353,7 +359,7 @@ class TouchAimHandler(
         if (previous == next) return
         finitePayloadStages.filterValues { it == previous }.keys.toList().forEach { id ->
             payloadExecutor.releaseNormally(
-                finitePayloadLeases[id], applyHoldReleaseDelay = false, preserveFinitePress = true
+                finitePayloadLeases[id], preserveFinitePress = true
             )
             finitePayloadStages.remove(id)
         }
@@ -416,23 +422,25 @@ class TouchAimHandler(
         actions.forEach { action ->
             when (action) {
                 TwoStateTouchAimAction.HOLD_AIM_PAYLOAD -> {
-                    aimPayloadLease = activatePayload(
+                    aimPayloadLease = activateHeldPayload(
                         ButtonAimPayloadOwner.BASE,
                         model.touchAimAimPayload
                     )
                 }
                 TwoStateTouchAimAction.RELEASE_AIM_PAYLOAD -> {
-                    payloadExecutor.releaseNormally(aimPayloadLease, applyHoldReleaseDelay = false)
+                    payloadExecutor.releaseNormally(aimPayloadLease)
+                    rememberReleasedHold(ButtonAimPayloadOwner.BASE, model.touchAimAimPayload, aimPayloadLease)
                     aimPayloadLease = null
                 }
                 TwoStateTouchAimAction.HOLD_SHOOT_PAYLOAD -> {
-                    shootPayloadLease = activatePayload(
+                    shootPayloadLease = activateHeldPayload(
                         ButtonAimPayloadOwner.ALTERNATE,
                         model.touchAimShootPayload
                     )
                 }
                 TwoStateTouchAimAction.RELEASE_SHOOT_PAYLOAD -> {
-                    payloadExecutor.releaseNormally(shootPayloadLease, applyHoldReleaseDelay = false)
+                    payloadExecutor.releaseNormally(shootPayloadLease)
+                    rememberReleasedHold(ButtonAimPayloadOwner.ALTERNATE, model.touchAimShootPayload, shootPayloadLease)
                     shootPayloadLease = null
                 }
                 TwoStateTouchAimAction.PRESS_SHOOT_PAYLOAD -> {
@@ -461,14 +469,30 @@ class TouchAimHandler(
         }
     }
 
+    private fun rememberReleasedHold(
+        owner: ButtonAimPayloadOwner,
+        payload: String,
+        lease: ButtonAimPayloadLease?
+    ) {
+        if (lease != null) retiredTwoStateHolds[owner] = TouchAimReleasedPayload(payload, lease)
+    }
+
+    private fun activateHeldPayload(owner: ButtonAimPayloadOwner, payload: String): ButtonAimPayloadLease? =
+        activatePayload(
+            owner, payload,
+            resumeHoldReleaseFrom = retiredTwoStateHolds.remove(owner)?.takeIf { it.payload == payload }?.lease
+        )
+
     private fun activatePayload(
         owner: ButtonAimPayloadOwner,
         payload: String,
-        immediatePressDurationMs: Long? = null
+        immediatePressDurationMs: Long? = null,
+        resumeHoldReleaseFrom: ButtonAimPayloadLease? = null
     ): ButtonAimPayloadLease? = when (
         val result = payloadExecutor.activate(
             owner, payload, ButtonAimPulseMode.ONCE,
-            immediatePressDurationMs = immediatePressDurationMs
+            immediatePressDurationMs = immediatePressDurationMs,
+            resumeHoldReleaseFrom = resumeHoldReleaseFrom
         )
     ) {
         is ButtonAimPayloadActivationResult.Activated -> result.lease

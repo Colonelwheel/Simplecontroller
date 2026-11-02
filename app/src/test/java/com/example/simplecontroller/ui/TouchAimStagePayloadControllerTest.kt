@@ -46,7 +46,7 @@ class TouchAimStagePayloadControllerTest {
         assertEquals("LT:0.0", f.events.last())
     }
 
-    @Test fun ineligibleHold_releasesOnStageChangeWithoutStartingHrd() {
+    @Test fun ineligibleHold_startsHrdAtOrdinaryStageRelease() {
         val f = Fixture()
         f.stages = listOf(
             stage(TouchContactLevel.MEDIUM, "LT:1.0(HRD200)"),
@@ -54,9 +54,11 @@ class TouchAimStagePayloadControllerTest {
         )
         f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
         f.transition(TouchContactLevel.HIGH, keepLowerHolds = false)
-        assertEquals(listOf("LT:1.0", "RT:1.0", "LT:0.0"), f.events)
-        f.advance(500L)
-        assertEquals(3, f.events.size)
+        assertEquals(listOf("LT:1.0", "RT:1.0"), f.events)
+        f.advance(199L)
+        assertEquals(2, f.events.size)
+        f.advance(1L)
+        assertEquals("LT:0.0", f.events.last())
         f.controller.finish(cancelled = false)
         assertEquals("RT:0.0", f.events.last())
     }
@@ -204,12 +206,16 @@ class TouchAimStagePayloadControllerTest {
         f.transition(TouchContactLevel.MEDIUM, keepLowerHolds = false)
         f.advance(30L)
         f.transition(TouchContactLevel.HIGH, keepLowerHolds = false)
-        assertEquals(listOf("LT:1.0", "RT:1.0", "LT:0.0"), f.events)
+        assertEquals(listOf("LT:1.0", "RT:1.0"), f.events)
         f.advance(59L, runCancelled = true)
-        assertEquals(3, f.events.size)
+        assertEquals(2, f.events.size)
         f.advance(1L)
         assertEquals("RT:0.0", f.events.last())
         f.controller.finish(cancelled = false)
+        f.advance(139L, runCancelled = true)
+        assertEquals("RT:0.0", f.events.last())
+        f.advance(1L)
+        assertEquals("LT:0.0", f.events.last())
         f.advance(1000L, runCancelled = true)
         assertEquals(1, f.events.count { it == "LT:1.0" })
         assertEquals(0, f.executor.activeLeaseCount())
@@ -258,6 +264,181 @@ class TouchAimStagePayloadControllerTest {
         f.advance(1000L, runCancelled = true)
         assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
         assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun thresholdDrop_thenLift_doesNotRestartRunningHoldReleaseDelay() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(HRD200)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(10L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(50L)
+        f.controller.finish(cancelled = false)
+        f.advance(149L, runCancelled = true)
+        assertEquals(listOf("LT:1.0"), f.events)
+        f.advance(1L)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun holdReentryDuringTail_resumesWithoutDelayOrStaleRelease() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(100L)
+        assertEquals(listOf("LT:1.0"), f.events)
+        f.advance(50L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(50L)
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(150L, runCancelled = true)
+        assertEquals(listOf("LT:1.0"), f.events)
+        f.advance(50L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(50L)
+        f.controller.finish(cancelled = false)
+        f.advance(149L, runCancelled = true)
+        assertEquals(listOf("LT:1.0"), f.events)
+        f.advance(1L)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+    }
+
+    @Test fun delayedHold_keepsOriginalDeadlineThroughHigherStageCarryover() {
+        val f = Fixture()
+        f.stages = listOf(
+            stage(TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200)"),
+            stage(TouchContactLevel.HIGH, "RT:1.0")
+        )
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(40L)
+        f.transition(TouchContactLevel.HIGH)
+        f.advance(59L)
+        assertEquals(listOf("RT:1.0"), f.events)
+        f.advance(1L)
+        assertEquals(listOf("RT:1.0", "LT:1.0"), f.events)
+        f.transition(TouchContactLevel.MEDIUM)
+        assertEquals("RT:0.0", f.events.last())
+        f.controller.finish(cancelled = false)
+        f.advance(200L)
+        assertEquals("LT:0.0", f.events.last())
+    }
+
+    @Test fun returnDirectlyToHigherStage_resumesCarriedLowerTailWithoutDelay() {
+        val f = Fixture()
+        f.stages = listOf(
+            stage(TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200)"),
+            stage(TouchContactLevel.HIGH, "RT:1.0")
+        )
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(100L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(50L)
+        f.transition(TouchContactLevel.HIGH)
+        assertEquals(listOf("LT:1.0", "RT:1.0"), f.events)
+        f.advance(200L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "RT:1.0"), f.events)
+        f.controller.finish(cancelled = true)
+        assertEquals(listOf("LT:1.0", "RT:1.0", "LT:0.0", "RT:0.0"), f.events)
+    }
+
+    @Test fun delayedHold_departureBeforeActivation_cancelsWithoutSynthesizingHrdHold() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(50L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(100L, runCancelled = true)
+        assertTrue(f.events.isEmpty())
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(99L)
+        assertTrue(f.events.isEmpty())
+        f.advance(1L)
+        assertEquals(listOf("LT:1.0"), f.events)
+        f.controller.finish(cancelled = true)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+    }
+
+    @Test fun expiredTailReentry_waitsForFreshActivationDelay() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(100L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(200L)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(99L)
+        assertEquals(2, f.events.size)
+        f.advance(1L)
+        assertEquals(listOf("LT:1.0", "LT:0.0", "LT:1.0"), f.events)
+        f.controller.finish(cancelled = true)
+    }
+
+    @Test fun mixedHoldReentry_resumesOnlyLiveTail_whileOtherCommandsDelayAndSorRearms() {
+        val f = Fixture()
+        f.stages = listOf(stage(
+            TouchContactLevel.MEDIUM, "LT:1.0(D100)(HRD200),RT:1.0(D50),X360A(SOR)"
+        ))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(120L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(30L)
+        f.transition(TouchContactLevel.MEDIUM)
+        assertEquals(listOf("RT:1.0", "LT:1.0", "RT:0.0", "X360A_HOLD"), f.events)
+        f.advance(49L)
+        assertEquals(4, f.events.size)
+        f.advance(1L)
+        assertEquals("RT:1.0", f.events.last())
+        f.advance(10L)
+        assertEquals("X360A_RELEASE", f.events.last())
+        f.advance(10L)
+        f.transition(TouchContactLevel.LOW)
+        assertEquals("X360A_HOLD", f.events.last())
+        f.advance(10L)
+        f.controller.finish(cancelled = false)
+        f.advance(80L)
+        assertEquals("X360A_RELEASE", f.events.last())
+        f.advance(109L, runCancelled = true)
+        assertEquals("X360A_RELEASE", f.events.last())
+        f.advance(1L)
+        assertEquals("LT:0.0", f.events.last())
+        assertEquals(1, f.events.count { it == "LT:1.0" })
+        assertEquals(2, f.events.count { it == "RT:1.0" })
+        assertEquals(2, f.events.count { it == "X360A_HOLD" })
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun hardCancel_clearsRetiredHoldTailAndDeferredReleaseShot() {
+        val f = Fixture()
+        f.stages = listOf(stage(TouchContactLevel.MEDIUM, "LT:1.0(HRD200),RT:1.0(SOR)(D100)"))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(10L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(20L)
+        f.controller.finish(cancelled = true)
+        f.advance(1000L, runCancelled = true)
+        assertEquals(listOf("LT:1.0", "LT:0.0"), f.events)
+        assertEquals(0, f.executor.activeLeaseCount())
+    }
+
+    @Test fun repeatStageTail_andPreservedFiniteSibling_liftDoesNotRetimeTail() {
+        val f = Fixture()
+        f.stages = listOf(stage(
+            TouchContactLevel.MEDIUM, "LT:1.0(R200)(HRD200),RT:1.0", TouchStageAction.PRESS
+        ))
+        f.transition(TouchContactLevel.MEDIUM)
+        f.advance(30L)
+        f.transition(TouchContactLevel.LOW)
+        f.advance(20L)
+        f.controller.finish(cancelled = false)
+        assertEquals(listOf("LT:1.0", "RT:1.0", "RT:0.0"), f.events)
+        f.advance(179L, runCancelled = true)
+        assertEquals("RT:0.0", f.events.last())
+        f.advance(1L)
+        assertEquals("LT:0.0", f.events.last())
+        f.advance(1000L, runCancelled = true)
+        assertEquals(1, f.events.count { it == "LT:1.0" })
     }
 
     private fun stage(

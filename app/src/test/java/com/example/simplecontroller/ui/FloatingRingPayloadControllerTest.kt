@@ -191,4 +191,50 @@ class FloatingRingPayloadControllerTest {
         f.clock.advance(1)
         assertEquals("LT:0.0", f.lastTrigger("LT"))
     }
+
+    @Test fun delayedRingHold_reservesPendingFireAndReleasesAdsWithHrd() {
+        val f = Fixture()
+        val other = f.coordinator.beginScope("other", "player1")
+        assertTrue(f.controller.acquire("fire", "LT:1.0(D100)(HRD200),RT:1.0(D100)"))
+        assertNull(f.lastTrigger("LT"))
+        assertNull(f.lastTrigger("RT"))
+        assertFalse(other.acquirePayload("fire", "RT:1.0", exclusive = true))
+        f.clock.advance(100)
+        assertEquals("LT:1.0", f.lastTrigger("LT"))
+        assertEquals("RT:1.0", f.lastTrigger("RT"))
+        f.controller.endNormally("fire")
+        assertEquals("RT:0.0", f.lastTrigger("RT"))
+        assertEquals("LT:1.0", f.lastTrigger("LT"))
+        f.clock.advance(199)
+        assertTrue(f.root.payloadIsOwned("fire"))
+        f.clock.advance(1)
+        assertEquals("LT:0.0", f.lastTrigger("LT"))
+        assertFalse(f.root.payloadIsOwned("fire"))
+        assertTrue(other.acquirePayload("fire", "RT:1.0", exclusive = true))
+        assertTrue(f.stateCommands().none { '(' in it || ')' in it })
+    }
+
+    @Test fun ringLiftBeforeDelay_cancelsPendingPressAndReleasesReservation() {
+        val f = Fixture()
+        assertTrue(f.controller.acquire("fire", "LT:1.0(D100)(HRD200),RT:1.0(D100)"))
+        f.clock.advance(75)
+        f.controller.endNormally("fire")
+        f.clock.advance(1000)
+        assertTrue(f.stateCommands().none { it == "LT:1.0" || it == "RT:1.0" })
+        assertFalse(f.root.payloadIsOwned("fire"))
+    }
+
+    @Test fun scopedFinishBeforeDelay_neverStartsOutputAndPreservesAnotherAdsOwner() {
+        val f = Fixture()
+        val other = f.coordinator.beginScope("other", "player1")
+        assertTrue(other.acquirePayload("ads", "LT:1.0"))
+        assertTrue(f.controller.acquire("ads", "LT:1.0(D100)(HRD200)"))
+        assertTrue(f.controller.acquire("fire", "RT:1.0(D100)"))
+        f.clock.advance(75)
+        f.controller.close()
+        f.clock.advance(1000)
+        assertEquals("LT:1.0", f.lastTrigger("LT"))
+        assertTrue(f.stateCommands().none { it == "LT:0.0" || it == "RT:1.0" })
+        assertFalse(f.root.payloadIsOwned("fire"))
+    }
 }

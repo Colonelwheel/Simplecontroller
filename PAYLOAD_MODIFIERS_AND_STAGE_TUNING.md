@@ -13,6 +13,8 @@ LT:1.0(I)(HRD200),RT:1.0(SOR)
   release. The number is whole milliseconds, from 0 to 600000.
 - `(R100)` repeatedly presses and releases that command while its action source
   stays held. The number is the interval between press starts, in milliseconds.
+- `(D100)` delays that command's activation by 100 milliseconds. The number is
+  whole milliseconds, from 0 to 600000. Each command's delay runs independently.
 
 Commands without modifiers retain their existing behavior. An explicit `(I)` or
 `(SOR)` overrides Button Aim's whole-payload timing for that command; undecorated
@@ -39,11 +41,16 @@ When Turbo and SOR use the same output, Turbo ends first and the SOR pulse start
 after a 35 ms release gap. Other legitimate owners still retain their normal
 shared-output ownership; the modifier cannot force their held input to release.
 
-On TouchAim, HRD applies only to intentional finger lift. Existing cumulative
-Hold behavior remains in force: with lower-hold carryover enabled, a held Medium
-payload stays held through High and back to Medium. Stage changes do not start
-or restart HRD. If a stage ceases to be eligible under the existing threshold and
-carryover settings, its ordinary stage release still happens without HRD.
+On TouchAim, HRD starts when a held stage stops being eligible or when the finger
+lifts. Existing cumulative Hold behavior remains in force: with lower-hold
+carryover enabled, a held Medium payload stays held through High and back to
+Medium, without starting its timer. Returning below Medium starts its HRD timer;
+lifting while that timer is running leaves the original deadline unchanged.
+For example, returning to Low with `(HRD2000)` and lifting 500 ms later leaves
+1500 ms of the hold remaining. Re-entering the eligible Hold stage during a live
+HRD tail resumes that hold without a release gap or another activation delay.
+After the tail has expired, a later activation starts normally, including D.
+Normal two-state Aim/Shoot threshold exits use the same HRD release rule.
 
 TouchAim `(SOR)` can fire on a normal stage exit or finger lift, once per stage
 activation. The existing two-state **Press when returning to Aim** choice keeps
@@ -55,7 +62,36 @@ disconnect and scoped Finish are hard cleanup. They bypass HRD and cancel armed
 SOR actions. A stale callback cannot release a newer activation. A legitimate
 second owner can keep a shared output held after the first owner's delay ends.
 
-## Existing pulse syntax
+## Activation delay and pulse syntax
+
+### Per-command activation delay
+
+```text
+LT:1.0(D100)(HRD200),RT:1.0
+```
+
+RT activates immediately. LT activates 100 ms after the action source starts,
+provided that source is still active. Once LT is pressed, leaving its eligible
+TouchAim stage or lifting starts its 200 ms HRD tail. A lower Hold carried into
+a higher stage keeps its original activation deadline and its held output.
+
+Delays run in parallel. `LT:1.0(D100),RT:1.0(D100)` activates both at 100 ms;
+`LT:1.0,RT:1.0(D100)` activates LT immediately and RT at 100 ms. Command order
+does not create a sequence of waits. Modifier order does not change their meaning.
+
+Leaving an immediate command's source before D expires cancels its pending press.
+HRD cannot turn a canceled pending press into a new hold. Re-entry after that
+cancellation starts a fresh delay. Hard cleanup cancels pending delays and live
+outputs immediately, with stale callbacks unable to activate or release a newer
+source. Other legitimate owners of the same output remain independent.
+
+D combines with `(I)`, `(SOR)`, `(R...)`, HRD and existing trigger P syntax.
+With R, D delays the first press, then the command follows its own R cadence.
+With SOR, D delays the finite release shot after normal source release. The P
+press duration begins when the delayed output actually activates. Global Turbo
+waits for the command's initial D once, then keeps its normal repeat behavior;
+HRD and explicit R commands retain their existing Turbo exclusions. Existing
+finite Tap/Auto-Tap/ring action windows still bound their activations.
 
 ### Per-command repeat
 
@@ -86,8 +122,8 @@ bound their individual activations; R does not convert those modes into latches.
 
 R and HRD can be combined. On release, repetition stops immediately; HRD can
 extend the final press only if it is currently ON. An OFF-phase release does
-not reactivate an output. TouchAim stage exits still bypass HRD, and hard cleanup
-always stops both the timer and output immediately.
+not reactivate an output. A normal TouchAim stage exit also starts this tail;
+hard cleanup always stops both the timer and output immediately.
 
 R repeats while held, so `(R100)(SOR)` on the same command is rejected. Separate
 commands can repeat RT and arm an RT release shot independently. When those
@@ -142,7 +178,8 @@ are shown only for Manual three-stage mode.
 Old layouts default to inherited sensitivities and zero new confirmations.
 Full layouts, duplicate controls/pages, portable transfers, backups and reusable
 manual profiles preserve the new settings. Profiles with new tuning or modifier
-syntax require controller format 14, or format 15 when R is stored. Reusable libraries use conditional schema
+syntax require controller format 14, format 15 when R is stored, or format 16
+when D is stored. Reusable libraries use conditional schema
 versions so older apps reject unsupported features before silently dropping them.
 
 Modifiers execute in Android. Receivers receive the existing plain commands;
@@ -182,3 +219,21 @@ The working October 25 APK, native app snapshots and new delivery artifacts are
 preserved in separate local build records. No uninstall, clear-data command,
 connected Gradle test, backup restore, automatic app launch or live game-input
 test was performed.
+
+## November 2 Delay and TouchAim HRD verification and delivery
+
+Both Android variants passed all 626 JVM tests with no failures, errors or skips.
+The added checks cover parallel command delays, early release, pulse/repeat/Turbo
+timing, HRD threshold exit and reentry, stale callbacks, shared owners, ring
+reservations, directional sources and conditional profile/library versions.
+The Sideload Debug APK and Play Release AAB built successfully. Lint reported
+zero errors, with the existing 208 Sideload and 206 Play warnings.
+
+The signing-compatible `adb install -r` update succeeded on the Galaxy S22.
+Two fresh pre-install snapshots matched, and all 127 app-data files remained
+byte-identical after installation. The installed APK matched the tested APK:
+`9C378F407503FBA6D161B5C4384BA15D6DA4A8518A72BA5FB90B5CE264E28B3B`.
+The previous working APK, native app snapshots and new delivery artifacts remain
+in separate local build records. No uninstall, clear-data command, connected
+Gradle test, backup restore, automatic app launch or live game-input test was
+performed. Receiver command syntax and receiver executables are unchanged.
