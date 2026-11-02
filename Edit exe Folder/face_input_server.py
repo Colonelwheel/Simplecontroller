@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 import uuid
+from receiver_timing import recorder as timing_recorder
 
 FACE_INPUT_TAG = 0x46474933
 KEY_NAMES = frozenset(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -66,8 +67,20 @@ def synchronized(lock):
     def decorate(fn):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
-            with lock:
-                return fn(*args, **kwargs)
+            if not timing_recorder.enabled:
+                with lock:
+                    return fn(*args, **kwargs)
+            requested_at = time.perf_counter_ns()
+            acquired_at = None
+            try:
+                with lock:
+                    acquired_at = time.perf_counter_ns()
+                    return fn(*args, **kwargs)
+            finally:
+                if acquired_at is not None:
+                    released_at = time.perf_counter_ns()
+                    timing_recorder.record("lock_wait", acquired_at - requested_at)
+                    timing_recorder.record("lock_hold", released_at - acquired_at)
         return wrapped
     return decorate
 
@@ -305,7 +318,7 @@ class MergedGamepad:
         with self.lock:
             self.face_left = tuple(vector)
             self._left_output()
-            self.raw.update()
+            self._native_update()
 
     def right_joystick_float(self, x_value_float, y_value_float):
         with self.lock:
@@ -313,7 +326,11 @@ class MergedGamepad:
 
     def update(self):
         with self.lock:
-            self.raw.update()
+            self._native_update()
+
+    def _native_update(self):
+        with timing_recorder.span("native_gamepad_update"):
+            return self.raw.update()
 
     def reset(self):
         with self.lock:
@@ -337,7 +354,7 @@ class MergedGamepad:
                 self._trigger(button, 1.0 if pressed else 0.0, "face")
             else:
                 self._button(self.button_map[button], pressed, "face")
-            self.raw.update()
+            self._native_update()
 
     def face_clear(self):
         with self.lock:
@@ -366,7 +383,7 @@ class MergedGamepad:
                 except Exception as exc:
                     if failure is None:
                         failure = exc
-            self.raw.update()
+            self._native_update()
             if failure is not None:
                 raise failure
 
@@ -376,7 +393,7 @@ class MergedGamepad:
                 self._trigger(button, float(value), "voice")
             else:
                 self._button(self.button_map[button], bool(value), "voice")
-            self.raw.update()
+            self._native_update()
 
     def voice_clear(self):
         with self.lock:
@@ -385,7 +402,7 @@ class MergedGamepad:
             for button in ("LT", "RT"):
                 if self.voice_triggers[button]:
                     self._trigger(button, 0.0, "voice")
-            self.raw.update()
+            self._native_update()
 
 
 class ProtocolError(ValueError):

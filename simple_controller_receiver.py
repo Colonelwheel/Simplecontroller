@@ -29,6 +29,7 @@ from face_input_server import (FaceInputState, FaceInputServer, MergedGamepad, M
 from voice_input_server import VoiceInputState, VoiceInputServer
 from relative_mouse import send_relative_mouse
 from phone_output_protocol import PhoneOutputProtocolState, state_key as phone_state_key, inactive_command
+from receiver_timing import recorder as timing_recorder
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
@@ -208,6 +209,7 @@ def is_space_key(key):
     return key.lower() in ('space', 'spacebar', 'space bar', ' ')
 
 
+@timing_recorder.measure("desktop_output")
 def write_desktop_input(target, pressed):
     if target == 'SPACE' or target.startswith('KEY:'):
         (keyboard.press if pressed else keyboard.release)(keyboard_name(target))
@@ -219,6 +221,7 @@ def write_desktop_input(target, pressed):
 _tagged_keyboard_api = None
 
 
+@timing_recorder.measure("desktop_output")
 def send_tagged_key(target, pressed):
     """V3 facial keyboard output has provenance for the re-center key hook.
 
@@ -656,6 +659,7 @@ def parse_float(value):
         logger.error(f"Failed to convert value: {value}")
         return 0.0
 
+@timing_recorder.measure("game_mouse_output")
 def handle_game_mouse_delta(command):
     """Opt-in relative SendInput movement; preserve the legacy mouse paths."""
     try:
@@ -669,6 +673,7 @@ def handle_game_mouse_delta(command):
     except OSError as error:
         logger.error(f"Game mouse movement failed: {error}")
 
+@timing_recorder.measure("legacy_mouse_output")
 def handle_touchpad(command):
     """Handle touchpad input with stability smoother from first file"""
     # ---------- quick DELTA path ----------
@@ -724,6 +729,7 @@ def handle_mouse_buttons(command):
     except Exception as e:
         logger.error(f"Error handling button command: {e}")
         
+@timing_recorder.measure("scroll_output")
 def handle_scroll(command):
     # SCROLL:+/-n   → one notch ≈ 120 units on Windows
     try:
@@ -1355,6 +1361,7 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
     except Exception as e:
         logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
 
+@timing_recorder.measure("command")
 def process_command(data, addr, player_id='player1', phone_guard=None):
     """Process incoming command from the Android app"""
     data = data.strip()
@@ -1385,7 +1392,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
         player_id, data = data.split(":", 1)       # now data begins with DELTA:/TOUCHPAD:/POS:
         active_connections[addr_key]['player_id'] = player_id
 
-    handled, response = phone_output_protocol.process(data, player_id)
+    with timing_recorder.span("phone_protocol"):
+        handled, response = phone_output_protocol.process(data, player_id)
     if handled:
         if response and data.startswith(("PHONE_STATE_V1:", "PHONE_EVENT_V1:")):
             camera_follow_last_input_at[player_id] = time.monotonic()
@@ -1789,7 +1797,9 @@ def udp_server():
         
         while True:
             try:
-                data, addr = sock.recvfrom(1024)
+                with timing_recorder.span("udp_receive_wait"):
+                    data, addr = sock.recvfrom(1024)
+                received_at = time.perf_counter_ns() if timing_recorder.enabled else 0
                 
                 try:
                     decoded_data = data.decode('utf-8').strip()
@@ -1798,10 +1808,14 @@ def udp_server():
                     addr_key = f"{addr[0]}:{addr[1]}"
                     player_id = active_connections.get(addr_key, {}).get('player_id', 'player1')
                     
-                    response = process_command(decoded_data, addr, player_id)
+                    if timing_recorder.enabled:
+                        timing_recorder.record("udp_dispatch", time.perf_counter_ns() - received_at)
+                    with timing_recorder.span("udp_process"):
+                        response = process_command(decoded_data, addr, player_id)
                     
                     if response:
-                        sock.sendto(response.encode('utf-8'), addr)
+                        with timing_recorder.span("udp_reply"):
+                            sock.sendto(response.encode('utf-8'), addr)
                         
                 except UnicodeDecodeError:
                     logger.warning(f"Received invalid data from {addr}")
@@ -1816,6 +1830,7 @@ def udp_server():
         logger.info("UDP server stopped")
 
 if __name__ == "__main__":
+    timing_recorder.start()
     logger.info("=== Complete Controller Server ===")
     logger.info("UDP Controller Server starting up...")
     logger.info(f"Listening on {HOST}:{PORT}")
@@ -1857,6 +1872,7 @@ if __name__ == "__main__":
         voice_input_server.stop()
         face_input_server.stop()
         stop_camera_follow_worker()
+        timing_recorder.close()
         print("Server stopped")
         logger.info("Server stopped")
         
