@@ -70,7 +70,7 @@ data class TouchAimPassSummary(
 
 @Serializable
 data class TouchAimCalibrationProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -112,7 +112,26 @@ data class TouchAimCalibrationProfile(
     val shootBehavior: TouchAimShootBehavior
 ) {
     companion object {
-        const val CURRENT_SCHEMA_VERSION = 1
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 2
+        const val REPEAT_PAYLOAD_SCHEMA_VERSION = 3
+        const val DELAY_PAYLOAD_SCHEMA_VERSION = 4
+        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+    }
+
+    fun requiredSchemaVersion(): Int = when {
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
+        else -> LEGACY_SCHEMA_VERSION
+    }
+
+    fun versionValidationError(): String? = when {
+        schemaVersion !in 1..CURRENT_SCHEMA_VERSION -> "This calibration version is not supported."
+        schemaVersion < requiredSchemaVersion() -> "Payload modifiers require calibration profile version ${requiredSchemaVersion()}."
+        listOf(aimPayload, shootPayload).payloadModifiersValidationError() != null ->
+            listOf(aimPayload, shootPayload).payloadModifiersValidationError()
+        else -> null
     }
 }
 
@@ -123,7 +142,8 @@ data class TouchAimCalibrationCollection(
 )
 
 fun TouchAimCalibrationProfile.isApplicable(allowUnreliableBestGuess: Boolean = false): Boolean =
-    (quality != TouchAimCalibrationQuality.UNRELIABLE || allowUnreliableBestGuess) &&
+    versionValidationError() == null &&
+        (quality != TouchAimCalibrationQuality.UNRELIABLE || allowUnreliableBestGuess) &&
         validationCompleted &&
         sensors.isNotEmpty() &&
         sensors.map { it.sensor }.distinct().size == sensors.size &&

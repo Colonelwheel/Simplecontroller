@@ -22,6 +22,23 @@ fun requireSupportedFloatingRingPresetSchema(value: JsonObject) {
     require(version in 1..FloatingRingPreset.CURRENT_SCHEMA_VERSION) {
         "Ring preset version $version is newer than supported version ${FloatingRingPreset.CURRENT_SCHEMA_VERSION} or invalid."
     }
+    requireFloatingRingPresetOptionsSchema(value, version)
+}
+
+internal fun requireFloatingRingPresetOptionsSchema(value: JsonObject, version: Int) {
+    requirePayloadFeatureSchema(value, "ring preset", FloatingRingPreset.CURRENT_SCHEMA_VERSION,
+        FloatingRingPreset.PAYLOAD_MODIFIERS_SCHEMA_VERSION, repeatVersion = FloatingRingPreset.REPEAT_PAYLOAD_SCHEMA_VERSION,
+        delayVersion = FloatingRingPreset.DELAY_PAYLOAD_SCHEMA_VERSION)
+    val zone = value["zone"] as? JsonObject
+    val required = when {
+        zone != null && floatingZoneHasDirectTouchBoostDelayOption(zone) -> FloatingRingPreset.DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+        zone != null && floatingZoneHasRoleBoostOptions(zone) -> FloatingRingPreset.ROLE_BOOST_SCHEMA_VERSION
+        zone != null && floatingZoneHasExtendedOptions(zone) -> FloatingRingPreset.RING_OPTIONS_SCHEMA_VERSION
+        else -> FloatingRingPreset.LEGACY_SCHEMA_VERSION
+    }
+    require(version >= required) {
+        "The saved ring options require ring preset version $required."
+    }
 }
 
 fun encodeFloatingRingPreset(preset: FloatingRingPreset): String {

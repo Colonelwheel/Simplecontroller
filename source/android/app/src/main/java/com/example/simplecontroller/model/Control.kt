@@ -238,6 +238,16 @@ data class Control(
     var touchMediumAction: TouchStageAction = TouchStageAction.HOLD,
     var touchHighAction: TouchStageAction = TouchStageAction.HOLD,
     var touchKeepLowerHolds: Boolean = true,
+    /** Null inherits the original shared sensitivity, preserving existing layouts. */
+    var touchAimAimOnlySensitivity: Float? = null,
+    var touchLowSensitivity: Float? = null,
+    var touchMediumSensitivity: Float? = null,
+    var touchHighSensitivity: Float? = null,
+    /** Zero enters immediately; timers are runtime state and are never persisted. */
+    var touchAimAimOnlyEnterConfirmationMs: Long = 0L,
+    var touchLowEnterConfirmationMs: Long = 0L,
+    var touchMediumEnterConfirmationMs: Long = 0L,
+    var touchHighEnterConfirmationMs: Long = 0L,
     var touchStickFullSpeed: Float = 900f,
     var touchInvertY: Boolean = false,
     var touchUseResponseCurve: Boolean = false,

@@ -19,6 +19,9 @@ enum class FloatingStartRole { MOVEMENT, AIM, BOOST_ONE, BOOST_TWO }
 enum class RingBoostStage { ONE, TWO }
 
 @Serializable
+enum class RingBoostBank { MOVEMENT, AIM }
+
+@Serializable
 enum class RingAction { TAP, HOLD, REPEAT }
 
 @Serializable
@@ -47,7 +50,9 @@ data class FloatingZone(
     val portraitRestorationGeometry: Map<String, ControlGeometry> = emptyMap(),
     val landscapeRestorationGeometry: Map<String, ControlGeometry> = emptyMap(),
     val groupSwipe: Boolean = false,
-    val ring: FloatingRingConfig? = null
+    val ring: FloatingRingConfig? = null,
+    /** Finish remains directly tappable; this only rejects entry from another captured target. */
+    val finishIgnoresSwipes: Boolean = false
 ) {
     fun geometryFor(orientation: LayoutOrientation): FloatingZoneGeometry? = when (orientation) {
         LayoutOrientation.PORTRAIT -> portraitGeometry
@@ -123,7 +128,9 @@ data class RingReturnFireSettings(
     val enabled: Boolean = false,
     val qualifyingStages: Set<RingBoostStage> = setOf(RingBoostStage.ONE),
     val delayMs: Long = 0L,
-    val cancelOnExit: Boolean = true
+    val cancelOnExit: Boolean = true,
+    /** AIM gestures may count from qualifying boost entry and become due before returning inside. */
+    val startOnBoostEntry: Boolean = false
 )
 
 @Serializable
@@ -172,10 +179,67 @@ data class RingBoostSettings(
     val hysteresisDp: Float = 2f,
     val directTapEnabled: Boolean = false,
     val directInnerDistanceDp: Float = 120f,
-    val directOuterDistanceDp: Float = 144f
+    val directOuterDistanceDp: Float = 144f,
+    val skipDelayOnDirectTouch: Boolean = false
 ) {
     fun payloadFor(direction: StickDirection): String =
         directionalPayloads.forDirection(direction).ifBlank { payload }
+}
+
+/** Independent swipe entry and finite direct bands, in dp from the ring center. */
+@Serializable
+data class RingBoostBandLayout(
+    val enabled: Boolean = false,
+    val boost1DistanceDp: Float = 120f,
+    val boost1ThicknessDp: Float = 40f,
+    val boost2ThicknessDp: Float = 24f,
+    val directStartDistanceDp: Float = 120f
+) {
+    fun validationError(): String? {
+        val swipeSecond = boost1DistanceDp + boost1ThicknessDp
+        val swipeEnd = swipeSecond + boost2ThicknessDp
+        val directSecond = directStartDistanceDp + boost1ThicknessDp
+        val directEnd = directSecond + boost2ThicknessDp
+        return if (
+            !boost1DistanceDp.isFinite() || boost1DistanceDp < 0f ||
+            !boost1ThicknessDp.isFinite() || boost1ThicknessDp <= 0f ||
+            !boost2ThicknessDp.isFinite() || boost2ThicknessDp <= 0f ||
+            !directStartDistanceDp.isFinite() || directStartDistanceDp < 0f ||
+            !swipeEnd.isFinite() || !directEnd.isFinite() ||
+            swipeSecond <= boost1DistanceDp || swipeEnd <= swipeSecond ||
+            directSecond <= directStartDistanceDp || directEnd <= directSecond
+        ) "Boost band positions and positive thicknesses must have finite endpoints." else null
+    }
+}
+
+@Serializable
+data class RingBoostBankSettings(
+    val boost1: RingBoostSettings = RingBoostSettings(),
+    val boost2: RingBoostSettings = RingBoostSettings(
+        distanceDp = 160f, directInnerDistanceDp = 160f, directOuterDistanceDp = 184f
+    ),
+    val geometry: RingBoostBandLayout = RingBoostBandLayout()
+) {
+    fun validationError(): String? = boostPairValidationError(boost1, boost2) ?: geometry.validationError()
+}
+
+@Serializable
+data class RingBoostBanks(
+    /** Geometry has its own independent enabled switches. */
+    val enabled: Boolean = false,
+    val movement: RingBoostBankSettings = RingBoostBankSettings(),
+    val aim: RingBoostBankSettings = RingBoostBankSettings(),
+    val directStartBank: RingBoostBank = RingBoostBank.MOVEMENT
+) {
+    fun settings(bank: RingBoostBank): RingBoostBankSettings = when (bank) {
+        RingBoostBank.MOVEMENT -> movement
+        RingBoostBank.AIM -> aim
+    }
+
+    fun withBank(bank: RingBoostBank, value: RingBoostBankSettings): RingBoostBanks = when (bank) {
+        RingBoostBank.MOVEMENT -> copy(movement = value)
+        RingBoostBank.AIM -> copy(aim = value)
+    }
 }
 
 @Serializable
@@ -193,16 +257,68 @@ data class FloatingRingConfig(
     val startKnobId: String = "aim_1",
     val directBoostToAim: Boolean = false,
     val directBoostAimKnobId: String = "aim_1",
-    val directBoostTwoToOne: Boolean = false
+    val directBoostTwoToOne: Boolean = false,
+    /** AIM captures may use adjacent boost bands without changing saved movement/boost radii. */
+    val compactAimBoosts: Boolean = false,
+    /** MOVEMENT captures may start boost bands immediately outside the saved movement radius. */
+    val adjacentMovementBoosts: Boolean = false,
+    val boostBanks: RingBoostBanks? = null,
+    /** Direct boost DOWN starts the configured aim destination immediately, with fine tuning. */
+    val directBoostStartsAim: Boolean = false
 ) {
-    fun boost(stage: RingBoostStage): RingBoostSettings = when (stage) {
-        RingBoostStage.ONE -> boost1
-        RingBoostStage.TWO -> boost2
+    fun boost(stage: RingBoostStage, bank: RingBoostBank? = null): RingBoostSettings {
+        val selected = if (bank != null) boostBanks?.takeIf { it.enabled }?.settings(bank) else null
+        return when (stage) {
+            RingBoostStage.ONE -> selected?.boost1 ?: boost1
+            RingBoostStage.TWO -> selected?.boost2 ?: boost2
+        }
+    }
+
+    fun directBoostBank(): RingBoostBank = when (startRole) {
+        FloatingStartRole.AIM -> RingBoostBank.AIM
+        FloatingStartRole.MOVEMENT -> RingBoostBank.MOVEMENT
+        else -> boostBanks?.directStartBank ?: RingBoostBank.MOVEMENT
+    }
+
+    fun boostBankForRole(role: FloatingStartRole): RingBoostBank = when (role) {
+        FloatingStartRole.AIM -> RingBoostBank.AIM
+        FloatingStartRole.MOVEMENT -> RingBoostBank.MOVEMENT
+        else -> directBoostBank()
+    }
+
+    /** Calling this does not enable either feature or rewrite a legacy saved pair. */
+    fun seedBoostBanks(): RingBoostBanks {
+        boostBanks?.let { return it }
+        val savedGap = boost2.distanceDp - boost1.distanceDp
+        val directStart = if (compactAimBoosts || adjacentMovementBoosts) {
+            if (movement.enabled) movementRadiusDp else innerRadiusDp
+        } else boost1.directInnerDistanceDp
+        fun seeded(bank: RingBoostBank): RingBoostBankSettings {
+            val compact = bank == RingBoostBank.AIM && compactAimBoosts
+            val adjacent = bank == RingBoostBank.MOVEMENT && adjacentMovementBoosts
+            return RingBoostBankSettings(
+                boost1 = boost1.copy(directionalPayloads = boost1.directionalPayloads.copy()),
+                boost2 = boost2.copy(directionalPayloads = boost2.directionalPayloads.copy()),
+                geometry = RingBoostBandLayout(
+                    boost1DistanceDp = if (compact) innerRadiusDp else if (adjacent) movementRadiusDp else boost1.distanceDp,
+                    boost1ThicknessDp = if (compact) movementRadiusDp - innerRadiusDp else savedGap,
+                    boost2ThicknessDp = boost2.directOuterDistanceDp - boost2.directInnerDistanceDp,
+                    directStartDistanceDp = directStart
+                )
+            )
+        }
+        return RingBoostBanks(movement = seeded(RingBoostBank.MOVEMENT), aim = seeded(RingBoostBank.AIM))
     }
 
     fun knob(id: String): RingAimKnob? = knobs.firstOrNull { it.id == id }
 
-    val isActive: Boolean get() = movement.enabled || aim.enabled || boost1.enabled || boost2.enabled
+    val isActive: Boolean get() {
+        if (movement.enabled || aim.enabled) return true
+        val banks = boostBanks
+        return if (banks?.enabled == true) {
+            listOf(banks.movement, banks.aim).any { it.boost1.enabled || it.boost2.enabled }
+        } else boost1.enabled || boost2.enabled
+    }
 
     fun validationError(): String? {
         if (!innerRadiusDp.isFinite() || innerRadiusDp <= 0f ||
@@ -233,24 +349,48 @@ data class FloatingRingConfig(
             }
             knob.fire.validationError()?.let { return it }
         }
-        boost1.validationError()?.let { return it }
-        boost2.validationError()?.let { return it }
-        if (boost1.distanceDp <= movementRadiusDp || boost2.distanceDp <= boost1.distanceDp ||
-            boost1.directOuterDistanceDp > boost2.directInnerDistanceDp) {
-            return "Boost distances and finite direct areas must be ordered beyond movement."
+        boostPairValidationError(boost1, boost2)?.let { return it }
+        if (boostBanks?.enabled != true) {
+            val banks = boostBanks
+            // Profiles without a wrapper retain the format-10/11 fallback bounds.
+            if ((banks == null || (!banks.movement.geometry.enabled && !adjacentMovementBoosts)) &&
+                boost1.distanceDp <= movementRadiusDp) {
+                return "Boost distances and finite direct areas must be ordered beyond movement."
+            }
+            if (banks != null && !banks.aim.geometry.enabled && !compactAimBoosts &&
+                boost1.distanceDp <= innerRadiusDp) {
+                return "Shared boost thresholds must start beyond the Aim area."
+            }
         }
-        if (boost1.activationDelayMs != 0L) return "Only Boost 2 supports an activation delay."
+        boostBanks?.let { banks ->
+            RingBoostBank.entries.forEach { role ->
+                val bank = banks.settings(role)
+                bank.validationError()?.let { return it }
+                val geometry = bank.geometry
+                if (geometry.enabled) {
+                    val minimum = if (role == RingBoostBank.AIM) innerRadiusDp else movementRadiusDp
+                    if (geometry.boost1DistanceDp < minimum) return "Custom boost bands must start outside their Aim or Movement area."
+                    val directMinimum = if (movement.enabled) movementRadiusDp else innerRadiusDp
+                    if (geometry.directStartDistanceDp < directMinimum) return "Direct boost bands must start outside the visible Aim and Movement areas."
+                } else if (banks.enabled) {
+                    val derived = if (role == RingBoostBank.AIM) compactAimBoosts else adjacentMovementBoosts
+                    val minimum = if (role == RingBoostBank.AIM) innerRadiusDp else movementRadiusDp
+                    if (!derived && bank.boost1.distanceDp <= minimum) return "Boost thresholds must start beyond the selected bank's base area."
+                }
+            }
+        }
         // An entirely disabled template remains savable, including its configured starting role.
         if (isActive) {
             val validStart = when (startRole) {
                 FloatingStartRole.MOVEMENT -> movement.enabled
                 FloatingStartRole.AIM -> aim.enabled && knob(startKnobId)?.enabled == true
-                FloatingStartRole.BOOST_ONE -> boost1.enabled && boost1.directTapEnabled
-                FloatingStartRole.BOOST_TWO -> boost2.enabled && boost2.directTapEnabled
+                FloatingStartRole.BOOST_ONE -> boost(RingBoostStage.ONE, directBoostBank()).let { it.enabled && it.directTapEnabled }
+                FloatingStartRole.BOOST_TWO -> boost(RingBoostStage.TWO, directBoostBank()).let { it.enabled && it.directTapEnabled }
             }
             if (!validStart) return "The starting role is disabled; select an enabled role explicitly."
         }
-        if (isActive && directBoostToAim && (!aim.enabled || knob(directBoostAimKnobId)?.enabled != true)) {
+        if (isActive && (directBoostToAim || directBoostStartsAim) &&
+            (!aim.enabled || knob(directBoostAimKnobId)?.enabled != true)) {
             return "Direct boost aiming needs an enabled destination aim knob."
         }
         outputConflictError()?.let { return it }
@@ -258,6 +398,21 @@ data class FloatingRingConfig(
     }
 
     private fun outputConflictError(): String? {
+        if (boostBanks?.enabled != true) outputConflictError(boost1, boost2)?.let { return it }
+        boostBanks?.takeIf { it.enabled }?.let { banks ->
+            RingBoostBank.entries.forEach { role ->
+                val bank = banks.settings(role)
+                val canAim = role == RingBoostBank.AIM ||
+                    (role == directBoostBank() && (directBoostToAim || directBoostStartsAim))
+                outputConflictError(bank.boost1, bank.boost2, canAim)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun outputConflictError(
+        boost1: RingBoostSettings, boost2: RingBoostSettings, canUseAimTimer: Boolean = true
+    ): String? {
         fun RingBoostSettings.keys(): Set<String> =
             (directionalPayloads.values() + payload).flatMap { PhoneOutputCoordinator.payloadLogicalKeys(it).orEmpty() }.toSet()
         val stages = listOf(boost1, boost2).filter { it.enabled }
@@ -272,7 +427,7 @@ data class FloatingRingConfig(
             val fireKeys = if (fire.mode == RingFireMode.NONE) emptySet() else
                 PhoneOutputCoordinator.payloadLogicalKeys(fire.firePayload).orEmpty()
             if (adsKeys.intersect(fireKeys).isNotEmpty()) return "ADS and firing must use independent logical outputs."
-            if (fire.returnFire.enabled && boost2.enabled && boost2.activationDelayMs > 0L &&
+            if (canUseAimTimer && fire.returnFire.enabled && boost2.enabled && boost2.activationDelayMs > 0L &&
                 fireKeys.intersect(boost2.keys()).isNotEmpty()) {
                 return "Choose one delayed firing source for each logical output: Boost 2 or return to aim."
             }
@@ -296,6 +451,17 @@ data class FloatingRingConfig(
 }
 
 private fun Float.validSensitivity(): Boolean = isFinite() && this in 0f..5f
+
+private fun boostPairValidationError(first: RingBoostSettings, second: RingBoostSettings): String? {
+    first.validationError()?.let { return it }
+    second.validationError()?.let { return it }
+    if (first.activationDelayMs != 0L) return "Only Boost 2 supports an activation delay."
+    if (first.skipDelayOnDirectTouch) return "Only Boost 2 supports skipping delay on direct touch."
+    if (second.distanceDp <= first.distanceDp || first.directOuterDistanceDp > second.directInnerDistanceDp) {
+        return "Boost distances and finite direct areas must be ordered."
+    }
+    return null
+}
 
 fun RingFireSettings.validationError(): String? {
     validateRingPayloads(listOf(adsPayload, firePayload))?.let { return it }
@@ -352,7 +518,7 @@ data class RingAimActionPreset(
 
 @Serializable
 data class FloatingBoostProfile(
-    val schemaVersion: Int = CURRENT_SCHEMA_VERSION,
+    val schemaVersion: Int = LEGACY_SCHEMA_VERSION,
     val id: String,
     val name: String,
     val createdAtEpochMs: Long,
@@ -362,18 +528,30 @@ data class FloatingBoostProfile(
     val ringAimActions: RingAimActionPreset? = null
 ) {
     fun validationError(): String? {
-        if (schemaVersion != CURRENT_SCHEMA_VERSION) return "This boost profile version is not supported."
+        if (schemaVersion !in LEGACY_SCHEMA_VERSION..CURRENT_SCHEMA_VERSION) return "This boost profile version is not supported."
+        if (schemaVersion < requiredSchemaVersion()) return "The saved ring actions require boost profile version ${requiredSchemaVersion()}."
         if (name.trim().length !in 1..80) return "Choose a boost profile name from 1 to 80 characters."
         boost1.validationError()?.let { return it }
         boost2.validationError()?.let { return it }
+        if (boost1.skipDelayOnDirectTouch) return "Only Boost 2 supports skipping delay on direct touch."
         if (boost1.activationDelayMs != 0L || boost2.distanceDp <= boost1.distanceDp ||
             boost1.directOuterDistanceDp > boost2.directInnerDistanceDp) return "The saved boost stages are not ordered."
         return ringAimActions?.validationError()
     }
 
     /** A detached snapshot; target enable choices and all non-boost tuning are preserved. */
-    fun applyBoostSettingsOnlyTo(target: FloatingRingConfig): FloatingRingConfig? {
+    fun applyBoostSettingsOnlyTo(target: FloatingRingConfig, bank: RingBoostBank? = null): FloatingRingConfig? {
         if (validationError() != null) return null
+        if (bank != null) {
+            val banks = target.seedBoostBanks()
+            val previous = banks.settings(bank)
+            val selected = previous.copy(
+                boost1 = boost1.copy(enabled = previous.boost1.enabled),
+                boost2 = boost2.copy(enabled = previous.boost2.enabled)
+            )
+            return target.copy(boostBanks = banks.withBank(bank, selected)).takeIf { it.validationError() == null }
+        }
+        if (target.boostBanks?.enabled == true) return null
         return target.copy(
             boost1 = boost1.copy(enabled = target.boost1.enabled),
             boost2 = boost2.copy(enabled = target.boost2.enabled)
@@ -391,16 +569,62 @@ data class FloatingBoostProfile(
         ).takeIf { it.validationError() == null }
     }
 
-    companion object { const val CURRENT_SCHEMA_VERSION = 1 }
+    fun requiredSchemaVersion(): Int = when {
+        (boost1.actionPayloads() + boost2.actionPayloads() +
+            ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
+            .any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
+        (boost1.actionPayloads() + boost2.actionPayloads() +
+            ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
+            .any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
+        (boost1.actionPayloads() + boost2.actionPayloads() +
+            ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
+            .any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
+        boost1.skipDelayOnDirectTouch || boost2.skipDelayOnDirectTouch -> DIRECT_TOUCH_DELAY_SCHEMA_VERSION
+        ringAimActions?.knobActions.orEmpty().any { it.returnFire.startOnBoostEntry } -> RING_OPTIONS_SCHEMA_VERSION
+        else -> LEGACY_SCHEMA_VERSION
+    }
+
+    companion object {
+        const val LEGACY_SCHEMA_VERSION = 1
+        const val RING_OPTIONS_SCHEMA_VERSION = 2
+        const val DIRECT_TOUCH_DELAY_SCHEMA_VERSION = 3
+        const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 4
+        const val REPEAT_PAYLOAD_SCHEMA_VERSION = 5
+        const val DELAY_PAYLOAD_SCHEMA_VERSION = 6
+        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+    }
 }
 
 fun FloatingRingConfig.captureBoostProfile(
-    id: String, name: String, nowMs: Long, includeRingAimActions: Boolean = false
-): FloatingBoostProfile? = FloatingBoostProfile(
-    id = id, name = name.trim(), createdAtEpochMs = nowMs, updatedAtEpochMs = nowMs,
-    boost1 = boost1, boost2 = boost2,
-    ringAimActions = if (includeRingAimActions) RingAimActionPreset(aim, knobs.map { it.fire }) else null
-).takeIf { it.validationError() == null }
+    id: String, name: String, nowMs: Long, includeRingAimActions: Boolean = false,
+    bank: RingBoostBank? = null
+): FloatingBoostProfile? {
+    if (boostBanks?.enabled == true && bank == null) return null
+    val selected = bank?.let { seedBoostBanks().settings(it) }
+    return FloatingBoostProfile(
+        id = id, name = name.trim(), createdAtEpochMs = nowMs, updatedAtEpochMs = nowMs,
+        boost1 = selected?.boost1 ?: boost1, boost2 = selected?.boost2 ?: boost2,
+        ringAimActions = if (includeRingAimActions) RingAimActionPreset(aim, knobs.map { it.fire }) else null
+    ).let { it.copy(schemaVersion = it.requiredSchemaVersion()) }.takeIf { it.validationError() == null }
+}
+
+/** Even an inactive stored stage needs a reader that can retain this opt-in behavior. */
+fun FloatingZone.hasDirectTouchBoostDelayConfiguration(): Boolean = ring?.let { config ->
+    config.boost1.skipDelayOnDirectTouch || config.boost2.skipDelayOnDirectTouch ||
+        config.boostBanks?.let { banks ->
+            listOf(banks.movement, banks.aim).any { it.boost1.skipDelayOnDirectTouch || it.boost2.skipDelayOnDirectTouch }
+        } == true
+} == true
+
+/** Presence is meaningful even when separate actions and both custom layouts are switched off. */
+fun FloatingZone.hasRoleBoostConfiguration(): Boolean = ring?.let {
+    it.boostBanks != null || it.directBoostStartsAim
+} == true
+
+/** Inactive selections still need a reader that can preserve their behavior. */
+fun FloatingZone.hasExtendedFloatingConfiguration(): Boolean =
+    finishIgnoresSwipes || ring?.compactAimBoosts == true || ring?.adjacentMovementBoosts == true ||
+        ring?.knobs.orEmpty().any { it.fire.returnFire.startOnBoostEntry }
 
 fun ControllerPage.floatingValidationError(): String? {
     val controlById = controls.associateBy { it.id }

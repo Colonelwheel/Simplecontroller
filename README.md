@@ -81,13 +81,13 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Facial-input setup, matching source and packaging recipe | [facial-input](facial-input/README.md) |
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
 
-The APK uses Android source commit `71a647c`. The receiver's six source modules and bundled ViGEm client DLLs match the source supplied here. The APK baseline passed 360 JVM tests in each Android variant and lint with zero errors. Compilation and package checks do not establish compatibility with every game, webcam or network.
+The APK uses Android source commit `d6e20f6`, including per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, and per-stage aim tuning. Both Android variants passed 626 JVM tests each and lint with zero errors; the APK and Play AAB builds passed. The supplied receiver EXE and receiver source remain unchanged and already support floating controls. Compilation and package checks do not establish compatibility with every game, webcam or network. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
 
 SHA-256 checksums:
 
 ```text
 SimpleController.apk
-894c0f0a723a5644f2e8dbf2c4802bd0420de3a550a73ce99c0a006e19de2481
+9c378f407503fba6d161b5c4384ba15d6da4a8518a72ba5fb90b5ce264e28b3b
 
 SimpleControllerReceiver.exe
 4cbf88f909e38eda70acea63517d720820ffa31530e2e02d9f6eb10835bfcf18

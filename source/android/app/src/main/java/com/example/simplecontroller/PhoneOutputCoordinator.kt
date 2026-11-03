@@ -1,5 +1,7 @@
 package com.example.simplecontroller.net
 
+import com.example.simplecontroller.model.PayloadModifiers
+
 import java.net.URLEncoder
 import java.net.URLDecoder
 
@@ -185,14 +187,15 @@ class PhoneOutputCoordinator(
 
     @Synchronized
     internal fun reserve(scope: PhoneOutputScope, values: List<PhoneValue>, retained: Boolean,
-                         exclusive: Boolean, onReplaced: () -> Unit): Boolean {
-        if (!canAcquire(scope, values, exclusive)) return false
+                         exclusive: Boolean, onReplaced: () -> Unit, exclusiveKeys: Set<String>? = null): Boolean {
+        if (!canAcquire(scope, values, exclusive, exclusiveKeys)) return false
         values.forEach { value ->
-            val previous = claims[value.key].orEmpty().values.filter { it.scope !== scope && it.retained && exclusive }
-            val oldLocks = reservations[value.key].orEmpty().values.filter { it.scope !== scope && it.retained && exclusive }
+            val keyExclusive = exclusiveKeys?.contains(value.key) ?: exclusive
+            val previous = claims[value.key].orEmpty().values.filter { it.scope !== scope && it.retained && keyExclusive }
+            val oldLocks = reservations[value.key].orEmpty().values.filter { it.scope !== scope && it.retained && keyExclusive }
             previous.forEach { claims[value.key]?.remove(it.scope) }
             oldLocks.forEach { reservations[value.key]?.remove(it.scope) }
-            reservations.getOrPut(value.key) { linkedMapOf() }[scope] = Reservation(scope, retained, exclusive, onReplaced)
+            reservations.getOrPut(value.key) { linkedMapOf() }[scope] = Reservation(scope, retained, keyExclusive, onReplaced)
             scope.touched[value.key] = value
             (previous.map { it.scope to it.onReplaced } + oldLocks.map { it.scope to it.onReplaced })
                 .distinctBy { it.first }.forEach { it.second() }
@@ -285,12 +288,16 @@ class PhoneOutputCoordinator(
                     it != "RELEASE_ALL" && it != "CAMERA_FOLLOW"
             }?.let { parse("KEY_DOWN:$it", player) }
 
-        fun logicalKeyForPayloadToken(token: String, player: String = "player1"): String? =
-            parsePayloadToken(token, player)?.first?.key
+        fun logicalKeyForPayloadToken(token: String, player: String = "player1"): String? {
+            val parsed = PayloadModifiers.parse(token)
+            if (parsed.error != null || parsed.commands.size != 1) return null
+            return parsePayloadToken(parsed.commands.single().command, player)?.first?.key
+        }
 
         fun payloadLogicalKeys(payload: String, player: String = "player1"): Set<String>? {
-            val tokens = payload.split(Regex("[,\\s]+" )).filter { it.isNotBlank() }
-            return tokens.map { logicalKeyForPayloadToken(it, player) ?: return null }.toSet()
+            val parsed = PayloadModifiers.parse(payload)
+            if (parsed.error != null) return null
+            return parsed.commands.map { parsePayloadToken(it.command, player)?.first?.key ?: return null }.toSet()
         }
 
         internal fun parse(command: String, player: String): Pair<PhoneValue, Boolean>? {
@@ -406,7 +413,7 @@ class PhoneOutputScope internal constructor(
     internal fun allScopes(): List<PhoneOutputScope> = listOf(this) + children.values.flatMap { it.allScopes() }
 
     fun sendCommand(command: String): Boolean {
-        if (!isActive) return false
+        if (!isActive || PayloadModifiers.hasModifiers(command)) return false
         val parsed = PhoneOutputCoordinator.parse(command, player)
         if (parsed != null) {
             val (value, pressed) = parsed
@@ -451,12 +458,14 @@ class PhoneOutputScope internal constructor(
         return true
     }
     fun reservePayload(slot: String, payload: String, retained: Boolean = false, exclusive: Boolean = true,
+                       exclusiveKeys: Set<String>? = null,
                        onReplaced: () -> Unit = {}): Boolean {
         if (!isActive) return false
         val owner = child("payload:$slot")
-        val tokens = payload.split(Regex("[,\\s]+" )).filter { it.isNotBlank() }
-        val values = tokens.map { PhoneOutputCoordinator.parsePayloadToken(it, player)?.takeIf { p -> p.second }?.first ?: return false }
-        return coordinator.reserve(owner, values, retained, exclusive, onReplaced)
+        val parsed = PayloadModifiers.parse(payload)
+        if (parsed.error != null) return false
+        val values = parsed.commands.map { PhoneOutputCoordinator.parsePayloadToken(it.command, player)?.takeIf { p -> p.second }?.first ?: return false }
+        return coordinator.reserve(owner, values, retained, exclusive, onReplaced, exclusiveKeys)
     }
     fun releasePayload(slot: String) { children["payload:$slot"]?.let { coordinator.release(it, false) } }
     fun endPayload(slot: String) { children["payload:$slot"]?.releaseAllClaims() }

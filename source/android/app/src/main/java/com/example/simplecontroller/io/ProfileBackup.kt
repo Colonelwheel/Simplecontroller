@@ -229,6 +229,7 @@ private fun requireNestedVersions(objectValue: JsonObject) {
             profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2,
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
         )
+        requireFloatingOptionsFormat(profile, profile["formatVersion"]?.jsonPrimitive?.intOrNull ?: 2)
     }
     listOf(
         Triple("touchAimCalibrations", "TouchAim calibration", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION),
@@ -246,6 +247,34 @@ private fun requireNestedVersions(objectValue: JsonObject) {
                 itemObject["schemaVersion"]?.jsonPrimitive?.intOrNull ?: current,
                 current
             )
+            when (key) {
+                "touchAimCalibrations" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    TouchAimCalibrationProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                    repeatVersion = TouchAimCalibrationProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+                    delayVersion = TouchAimCalibrationProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                "touchAimManualProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    TouchAimManualProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, stageTuning = true,
+                    repeatVersion = TouchAimManualProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+                    delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                "buttonAimProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                    legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION,
+                    repeatVersion = ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+                    delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                "stickDirectionalProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
+                    StickDirectionalProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
+                    legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION,
+                    repeatVersion = StickDirectionalProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+                    delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+            }
+            if (key == "floatingRingPresets") {
+                requireFloatingRingPresetOptionsSchema(
+                    itemObject,
+                    itemObject["schemaVersion"]?.jsonPrimitive?.intOrNull ?: FloatingRingPreset.LEGACY_SCHEMA_VERSION
+                )
+            } else if (key == "floatingBoostProfiles") {
+                requireSupportedFloatingBoostSchema(itemObject)
+            }
         }
     }
 }
@@ -287,9 +316,7 @@ fun validateControllerProfilesBackup(
     }
 
     validateReusableProfiles(decoded.touchAimCalibrations, "TouchAim calibration") {
-        require(it.schemaVersion in 1..TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION) {
-            "This calibration version is not supported."
-        }
+        it.versionValidationError()?.let { error -> throw IllegalArgumentException(error) }
         require(it.name.trim().isNotEmpty() && it.name.trim().length <= 80) {
             "Choose a calibration name from 1 to 80 characters."
         }
@@ -313,6 +340,9 @@ fun validateControllerProfilesBackup(
     return ControllerProfilesBackupLoadResult(
         decoded.copy(
             controllerProfiles = controllerProfiles,
+            touchAimCalibrations = decoded.touchAimCalibrations.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
+            touchAimManualProfiles = decoded.touchAimManualProfiles.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
+            stickDirectionalProfiles = decoded.stickDirectionalProfiles.map { it.copy(schemaVersion = it.requiredSchemaVersion()) },
             buttonAimProfiles = decoded.buttonAimProfiles.map {
                 it.copy(schemaVersion = it.requiredSchemaVersion())
             }

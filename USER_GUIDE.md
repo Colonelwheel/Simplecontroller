@@ -102,6 +102,24 @@ LT:1.0,RT:1.0
 
 Combinations are not guaranteed timed scripts. Do not use `WAIT:` or `DELAY:` commands. Although the receiver recognizes `WAIT_150`, Android normally sends split commands separately, so a Button payload does not guarantee an ordered press-wait-press sequence. Do not put mouse DOWN and UP together on a normal hold Button. Keep Release All, Camera Follow, and Scroll Mode toggles on dedicated Buttons.
 
+### Per-command timing modifiers
+
+Modifiers follow the individual command. For example, `LT:1.0,RT:1.0(D100)` presses LT immediately and RT 100 ms later while the source stays active. `LT:1.0(D100),RT:1.0(D100)` presses both at 100 ms: their delays run in parallel. These examples assume Immediate whole-payload timing; add `(I)` to select activation-time behavior for an individual command when the control uses Send on release.
+
+| Modifier | Meaning |
+| --- | --- |
+| `(I)` | Start from source activation, overriding whole-payload Send on release timing. D still applies if present. |
+| `(SOR)` | Send one finite press after normal source release; the default press lasts 90 ms. |
+| `(D100)` | Wait 100 ms before activating this command. |
+| `(HRD200)` | Keep an already pressed output held for 200 ms after its source ends. |
+| `(R100)` | Repeat this command every 100 ms while held, normally 50 ms pressed and 50 ms released. |
+
+Use Hold mappings for sustained TouchAim or ring actions. With lower-Hold carryover enabled, Medium `LT:1.0(D100)(HRD200)` stays active through High and back to Medium. Returning below Medium or lifting starts its 200 ms release tail. Lifting during a running tail keeps the original deadline; re-entering the eligible stage while the hold is live resumes it without a gap or another Delay. An immediate command released before D expires is canceled without pressing. With Hold Toggle, unlatching ends the source.
+
+D delays only the first R press, or delays a SOR shot after release. R does not require global Turbo. Global Turbo preserves explicit R cadence and keeps HRD commands steady. R and SOR cannot decorate the same command. Hard cancellation, Release All, disconnect and lifecycle cleanup cancel pending modifiers and release outputs immediately. See [modifier details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md) for limits and finite-action timing.
+
+TouchAim sensitivity accepts numeric values such as `0.001`. Manual three-stage mode also offers optional sensitivity and Enter Stage Confirmation milliseconds for Aim-only, Low, Medium and High; blank sensitivity inherits the main value, and blank or zero confirmation preserves immediate entry.
+
 ## Holding, repeating, and sliding
 
 **Hold Toggle** keeps one Button's action held after lift. Enable it in the Button's properties and set its hold time. Hold until the threshold and vibration, then lift; tap again to release. A short touch ending before the threshold does nothing. The default threshold is 500 ms; adjust it to your comfortable timing.

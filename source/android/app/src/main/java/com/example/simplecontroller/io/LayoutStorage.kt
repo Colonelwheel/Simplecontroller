@@ -4,7 +4,16 @@ import android.content.Context
 import android.util.AtomicFile
 import android.util.Log
 import com.example.simplecontroller.model.MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.requiredFormatVersion
+import com.example.simplecontroller.model.PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.stageTouchAimTuningValidationError
+import com.example.simplecontroller.model.actionPayloads
+import com.example.simplecontroller.model.payloadModifiersValidationError
 import com.example.simplecontroller.model.Control
 import com.example.simplecontroller.model.ButtonAimPayloadPolicy
 import com.example.simplecontroller.model.ButtonDirectionalSettings
@@ -26,6 +35,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
@@ -100,6 +112,10 @@ fun stableLegacyBasePageId(profileName: String): String = UUID.nameUUIDFromBytes
 fun decodeControllerProfile(text: String, profileName: String): ControllerProfileLoadResult {
     val normalizedText = text.removePrefix("\uFEFF")
     if (normalizedText.trimStart().startsWith("[")) {
+        val rawControls = json.parseToJsonElement(normalizedText)
+        require(!rawControls.hasPayloadModifierConfiguration() && !rawControls.hasStageTouchAimConfiguration()) {
+            "Payload modifiers and stage tuning require a versioned controller profile."
+        }
         val controls = json.decodeFromString<List<Control>>(normalizedText)
         val pageId = stableLegacyBasePageId(profileName)
         return validateControllerProfile(
@@ -122,6 +138,7 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
         "Profile format $encodedVersion is newer than supported format " +
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
+    requireFloatingOptionsFormat(element.jsonObject, encodedVersion)
     val decoded = json.decodeFromJsonElement<ControllerProfile>(element)
         .copy(formatVersion = encodedVersion)
     val result = validateControllerProfile(decoded, profileName)
@@ -133,6 +150,71 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
         }
     return result.copy(warnings = (result.warnings + missingFieldWarnings).distinct())
 }
+
+/** Check new saved behavior before typed decoding, including settings on inactive zones. */
+internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
+    require(version >= DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION || !profile.hasDelayPayloadConfiguration()) {
+        "Delay payload modifiers require controller profile format $DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+    require(version >= REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION || !profile.hasRepeatPayloadConfiguration()) {
+        "Repeat payload modifiers require controller profile format $REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+    require(version >= PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        (!profile.hasPayloadModifierConfiguration() && !profile.hasStageTouchAimConfiguration())) {
+        "Payload modifiers and stage tuning require controller profile format $PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+    val zones = (profile["pages"] as? JsonArray).orEmpty().flatMap { page ->
+        ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty()
+    }
+    require(version >= FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        zones.none { (it as? JsonObject)?.let(::floatingZoneHasDirectTouchBoostDelayOption) == true }) {
+        "The saved direct-touch boost delay option requires controller profile format $FLOATING_DIRECT_TOUCH_BOOST_DELAY_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+    require(version >= FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        zones.none { (it as? JsonObject)?.let(::floatingZoneHasRoleBoostOptions) == true }) {
+        "The saved per-role boost options require controller profile format $FLOATING_ROLE_BOOST_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+    val hasNewOptions = (profile["pages"] as? JsonArray).orEmpty().any { page ->
+        ((page as? JsonObject)?.get("floatingZones") as? JsonArray).orEmpty().any { zone ->
+            (zone as? JsonObject)?.let(::floatingZoneHasExtendedOptions) == true
+        }
+    }
+    require(!hasNewOptions || version >= FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION) {
+        "The saved floating options require controller profile format $FLOATING_RING_OPTIONS_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
+}
+
+internal fun floatingZoneHasDirectTouchBoostDelayOption(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject ?: return false
+    val banks = ring["boostBanks"] as? JsonObject
+    return boostPairHasDirectTouchDelayOption(ring) || listOf("movement", "aim").any { role ->
+        (banks?.get(role) as? JsonObject)?.let(::boostPairHasDirectTouchDelayOption) == true
+    }
+}
+
+internal fun boostPairHasDirectTouchDelayOption(value: JsonObject): Boolean =
+    listOf("boost1", "boost2").any { stage ->
+        (((value[stage] as? JsonObject)?.get("skipDelayOnDirectTouch")) as? JsonPrimitive)?.booleanOrNull == true
+    }
+
+internal fun floatingZoneHasRoleBoostOptions(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject ?: return false
+    return (ring["directBoostStartsAim"] as? JsonPrimitive)?.booleanOrNull == true ||
+        ring["boostBanks"]?.let { it != JsonNull } == true
+}
+
+internal fun floatingZoneHasExtendedOptions(zone: JsonObject): Boolean {
+    val ring = zone["ring"] as? JsonObject
+    return (zone["finishIgnoresSwipes"] as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("compactAimBoosts") as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("adjacentMovementBoosts") as? JsonPrimitive)?.booleanOrNull == true ||
+        (ring?.get("knobs") as? JsonArray).orEmpty().any { knob ->
+            ((knob as? JsonObject)?.get("fire") as? JsonObject)?.let(::ringFireHasExtendedOptions) == true
+        }
+}
+
+internal fun ringFireHasExtendedOptions(fire: JsonObject): Boolean =
+    (((fire["returnFire"] as? JsonObject)?.get("startOnBoostEntry")) as? JsonPrimitive)?.booleanOrNull == true
 
 fun encodeControllerProfile(profile: ControllerProfile): String {
     validateControllerProfileForSave(profile)?.let { throw IllegalArgumentException(it) }
@@ -206,6 +288,7 @@ fun decodeControllerProfileTransfer(
         "Profile format $profileFormatVersion is newer than supported format " +
             MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION
     }
+    requireFloatingOptionsFormat(encodedProfile, profileFormatVersion)
 
     val transfer = json.decodeFromJsonElement<ControllerProfileTransferFile>(element)
 
@@ -478,6 +561,8 @@ fun validateControllerProfile(
         val usedControlIds = mutableSetOf<String>()
         val controls = deepCopyControls(source.controls).mapIndexed { controlIndex, original ->
             var control = original
+            control.stageTouchAimTuningValidationError()?.let { throw IllegalArgumentException(it) }
+            control.actionPayloads().payloadModifiersValidationError()?.let { throw IllegalArgumentException(it) }
             floatingLocalActionError(control)?.let { throw IllegalArgumentException(it) }
             require(control.cameraFollowStrengthPercent.isFinite() &&
                 control.cameraFollowStrengthPercent in 0f..200f) {
@@ -608,6 +693,8 @@ fun validateControllerProfileForSave(profile: ControllerProfile): String? {
             validateOrientationGeometry(page.landscapeGeometry, "${page.name} Landscape")
         }.exceptionOrNull()?.let { return it.message ?: "Orientation geometry is invalid." }
         page.controls.forEach { control ->
+            control.stageTouchAimTuningValidationError()?.let { return it }
+            control.actionPayloads().payloadModifiersValidationError()?.let { return it }
             floatingLocalActionError(control)?.let { return it }
             if (!control.cameraFollowStrengthPercent.isFinite() ||
                 control.cameraFollowStrengthPercent !in 0f..200f) {

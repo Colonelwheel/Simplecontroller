@@ -542,7 +542,7 @@ class TouchAimCalibrationWizard(
             keepAimPayloadWhileShooting = existingProfile?.keepAimPayloadWhileShooting
                 ?: model.touchAimKeepAimPayloadWhileShooting,
             shootBehavior = existingProfile?.shootBehavior ?: model.touchAimShootBehavior
-        )
+        ).let { it.copy(schemaVersion = it.requiredSchemaVersion()) }
     }
 
     private fun handleCaptureTouch(event: MotionEvent) {

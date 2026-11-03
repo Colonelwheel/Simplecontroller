@@ -71,12 +71,14 @@ internal class ButtonDirectionalGestureHandler(
     private var secondLease: ButtonAimPayloadLease? = null
 
     fun hasRuntimeState(): Boolean = pointerId != MotionEvent.INVALID_POINTER_ID ||
-        baseLease != null || firstLease != null || secondLease != null
+        baseLease != null || firstLease != null || secondLease != null ||
+        executor.activeLeaseCount(ButtonAimPayloadOwner.DIRECTION_ADDITION) > 0 ||
+        executor.activeLeaseCount(ButtonAimPayloadOwner.DIRECTION_BASE) > 0
 
     fun onTouch(event: MotionEvent, baseOwnedByAim: Boolean) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                releaseAll()
+                if (pointerId != MotionEvent.INVALID_POINTER_ID) releaseAll()
                 val index = event.actionIndex
                 pointerId = event.getPointerId(index)
                 originX = event.getX(index)
@@ -122,22 +124,24 @@ internal class ButtonDirectionalGestureHandler(
             MotionEvent.ACTION_POINTER_UP -> {
                 if (event.getPointerId(event.actionIndex) == pointerId) releaseAll()
             }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> releaseAll()
+            MotionEvent.ACTION_UP -> releaseAll(natural = true)
+            MotionEvent.ACTION_CANCEL -> releaseAll()
         }
     }
 
-    fun releaseAll() {
+    fun releaseAll(natural: Boolean = false) {
         val wasActive = hasRuntimeState()
-        executor.release(secondLease)
-        executor.release(firstLease)
-        executor.release(baseLease)
+        if (natural) executor.releaseNormallyTogether(secondLease, firstLease, baseLease)
+        else executor.releaseTogether(secondLease, firstLease, baseLease)
         secondLease = null
         firstLease = null
         baseLease = null
         selection = ButtonDirectionalSelection()
         pointerId = MotionEvent.INVALID_POINTER_ID
-        executor.releaseOwner(ButtonAimPayloadOwner.DIRECTION_ADDITION)
-        executor.releaseOwner(ButtonAimPayloadOwner.DIRECTION_BASE)
+        if (!natural) {
+            executor.releaseOwner(ButtonAimPayloadOwner.DIRECTION_ADDITION)
+            executor.releaseOwner(ButtonAimPayloadOwner.DIRECTION_BASE)
+        }
         if (wasActive && !model.buttonAimEnabled) onPressedChanged(false)
     }
 
@@ -151,8 +155,8 @@ internal class ButtonDirectionalGestureHandler(
         val newSecond = if (next.stage >= 2 && (!sameDirection || selection.stage < 2)) {
             acquire(stages?.secondPayload.orEmpty())
         } else secondLease
-        if (!sameDirection || next.stage < 2) executor.release(secondLease)
-        if (!sameDirection || next.stage < 1) executor.release(firstLease)
+        if (!sameDirection || next.stage < 2) executor.releaseNormally(secondLease)
+        if (!sameDirection || next.stage < 1) executor.releaseNormally(firstLease)
         firstLease = if (next.stage >= 1) newFirst else null
         secondLease = if (next.stage >= 2) newSecond else null
         selection = next

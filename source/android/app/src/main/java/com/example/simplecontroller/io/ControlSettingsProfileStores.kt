@@ -10,6 +10,7 @@ import com.example.simplecontroller.model.TouchAimManualProfile
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -133,9 +134,13 @@ object TouchAimManualProfileStore {
         nameOf = TouchAimManualProfile::name,
         updatedAtOf = TouchAimManualProfile::updatedAtEpochMs,
         withName = { profile, name, updated ->
-            profile.copy(name = name, updatedAtEpochMs = updated)
+            profile.copy(name = name, updatedAtEpochMs = updated, schemaVersion = profile.requiredSchemaVersion())
         },
-        validationError = TouchAimManualProfile::validationError
+        validationError = TouchAimManualProfile::validationError,
+        preflight = { requirePayloadFeatureSchema(it, "manual TouchAim profile", TouchAimManualProfile.CURRENT_SCHEMA_VERSION,
+            TouchAimManualProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, stageTuning = true,
+            repeatVersion = TouchAimManualProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+            delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<TouchAimManualProfile> = store.list(context)
@@ -161,7 +166,11 @@ object ButtonAimProfileStore {
                 schemaVersion = profile.requiredSchemaVersion()
             )
         },
-        validationError = ButtonAimProfile::validationError
+        validationError = ButtonAimProfile::validationError,
+        preflight = { requirePayloadFeatureSchema(it, "Button Aim profile", ButtonAimProfile.CURRENT_SCHEMA_VERSION,
+            ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION,
+            repeatVersion = ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+            delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<ButtonAimProfile> = store.list(context)
@@ -181,9 +190,13 @@ object StickDirectionalProfileStore {
         nameOf = StickDirectionalProfile::name,
         updatedAtOf = StickDirectionalProfile::updatedAtEpochMs,
         withName = { profile, name, updated ->
-            profile.copy(name = name, updatedAtEpochMs = updated)
+            profile.copy(name = name, updatedAtEpochMs = updated, schemaVersion = profile.requiredSchemaVersion())
         },
-        validationError = StickDirectionalProfile::validationError
+        validationError = StickDirectionalProfile::validationError,
+        preflight = { requirePayloadFeatureSchema(it, "directional profile", StickDirectionalProfile.CURRENT_SCHEMA_VERSION,
+            StickDirectionalProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION,
+            repeatVersion = StickDirectionalProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+            delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<StickDirectionalProfile> = store.list(context)
@@ -217,8 +230,21 @@ object FloatingBoostProfileStore {
 
 /** Run before typed decode so a future preset shape cannot be silently discarded. */
 fun requireSupportedFloatingBoostSchema(value: JsonObject) {
+    requirePayloadFeatureSchema(value, "boost profile", FloatingBoostProfile.CURRENT_SCHEMA_VERSION,
+        FloatingBoostProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, repeatVersion = FloatingBoostProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
+        delayVersion = FloatingBoostProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
     val version = value["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
     require(version in 1..FloatingBoostProfile.CURRENT_SCHEMA_VERSION) {
         "Boost profile version $version is newer than supported version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION} or invalid."
+    }
+    require(version >= FloatingBoostProfile.DIRECT_TOUCH_DELAY_SCHEMA_VERSION || !boostPairHasDirectTouchDelayOption(value)) {
+        "The saved direct-touch boost delay option requires boost profile version ${FloatingBoostProfile.DIRECT_TOUCH_DELAY_SCHEMA_VERSION}."
+    }
+    val actions = value["ringAimActions"] as? JsonObject
+    val hasNewOption = (actions?.get("knobActions") as? JsonArray).orEmpty().any { fire ->
+        (fire as? JsonObject)?.let(::ringFireHasExtendedOptions) == true
+    }
+    require(version >= FloatingBoostProfile.RING_OPTIONS_SCHEMA_VERSION || !hasNewOption) {
+        "The saved ring actions require boost profile version ${FloatingBoostProfile.RING_OPTIONS_SCHEMA_VERSION}."
     }
 }

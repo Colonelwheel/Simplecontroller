@@ -66,15 +66,16 @@ internal class DirectionalCommandStateController(
         }
 
         val replacedLeases = changedSlots.mapNotNull { activePayloads[it]?.lease }
-        payloadExecutor.releaseTogether(*replacedLeases.toTypedArray())
+        payloadExecutor.releaseNormallyTogether(*replacedLeases.toTypedArray())
 
         activePayloads.clear()
         activePayloads.putAll(nextPayloads)
     }
 
-    fun clear() {
+    fun clear(natural: Boolean = false) {
         val leases = activePayloads.values.mapNotNull { it.lease }
-        payloadExecutor.releaseTogether(*leases.toTypedArray())
+        if (natural) payloadExecutor.releaseNormallyTogether(*leases.toTypedArray())
+        else payloadExecutor.releaseAllLeases()
         activePayloads.clear()
     }
 }
