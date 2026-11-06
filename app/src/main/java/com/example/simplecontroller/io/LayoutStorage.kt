@@ -11,6 +11,7 @@ import com.example.simplecontroller.model.requiredFormatVersion
 import com.example.simplecontroller.model.PAYLOAD_MODIFIERS_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.REPEAT_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
+import com.example.simplecontroller.model.RELEASE_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION
 import com.example.simplecontroller.model.stageTouchAimTuningValidationError
 import com.example.simplecontroller.model.actionPayloads
 import com.example.simplecontroller.model.payloadModifiersValidationError
@@ -113,8 +114,9 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
     val normalizedText = text.removePrefix("\uFEFF")
     if (normalizedText.trimStart().startsWith("[")) {
         val rawControls = json.parseToJsonElement(normalizedText)
-        require(!rawControls.hasPayloadModifierConfiguration() && !rawControls.hasStageTouchAimConfiguration()) {
-            "Payload modifiers and stage tuning require a versioned controller profile."
+        require(!rawControls.hasPayloadModifierConfiguration() && !rawControls.hasStageTouchAimConfiguration() &&
+            !rawControls.hasButtonMacroConfiguration()) {
+            "Payload modifiers, Macro Mode and stage tuning require a versioned controller profile."
         }
         val controls = json.decodeFromString<List<Control>>(normalizedText)
         val pageId = stableLegacyBasePageId(profileName)
@@ -153,6 +155,10 @@ fun decodeControllerProfile(text: String, profileName: String): ControllerProfil
 
 /** Check new saved behavior before typed decoding, including settings on inactive zones. */
 internal fun requireFloatingOptionsFormat(profile: JsonObject, version: Int) {
+    require(version >= RELEASE_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION ||
+        (!profile.hasReleasePayloadConfiguration() && !profile.hasButtonMacroConfiguration())) {
+        "Release payload modifiers and Macro Mode require controller profile format $RELEASE_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION."
+    }
     require(version >= DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION || !profile.hasDelayPayloadConfiguration()) {
         "Delay payload modifiers require controller profile format $DELAY_PAYLOAD_CONTROLLER_PROFILE_FORMAT_VERSION."
     }

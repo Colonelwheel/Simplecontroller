@@ -15,6 +15,16 @@ LT:1.0(I)(HRD200),RT:1.0(SOR)
   stays held. The number is the interval between press starts, in milliseconds.
 - `(D100)` delays that command's activation by 100 milliseconds. The number is
   whole milliseconds, from 0 to 600000. Each command's delay runs independently.
+- `(U100)` releases that command's owned press 100 milliseconds after activation.
+  Whole durations from 1 to 600000 are accepted. This is separate from D.
+
+An ordinary Button's **Macro Mode** checkbox lets one tap complete all timed
+commands after finger-up. Commands without a duration use a finite 90 ms press.
+It runs once, ignores global Hold/Turbo, and is separate from Hold Toggle,
+Auto-Tap, Button Aim and directional button inputs. R is excluded from this
+finite mode. Extra taps during a run are ignored. Release All and hard cleanup
+cancel the run. See [Macro Mode and payload porting](MACRO_MODE_AND_PAYLOAD_PORTING.md)
+for exact U interactions, compatibility, code entry points and copyable examples.
 
 Commands without modifiers retain their existing behavior. An explicit `(I)` or
 `(SOR)` overrides Button Aim's whole-payload timing for that command; undecorated
@@ -179,7 +189,7 @@ Old layouts default to inherited sensitivities and zero new confirmations.
 Full layouts, duplicate controls/pages, portable transfers, backups and reusable
 manual profiles preserve the new settings. Profiles with new tuning or modifier
 syntax require controller format 14, format 15 when R is stored, or format 16
-when D is stored. Reusable libraries use conditional schema
+when D is stored, or format 17 when U or Macro Mode is stored. Reusable libraries use conditional schema
 versions so older apps reject unsupported features before silently dropping them.
 
 Modifiers execute in Android. Receivers receive the existing plain commands;
@@ -237,3 +247,20 @@ The previous working APK, native app snapshots and new delivery artifacts remain
 in separate local build records. No uninstall, clear-data command, connected
 Gradle test, backup restore, automatic app launch or live game-input test was
 performed. Receiver command syntax and receiver executables are unchanged.
+
+## November 6 Macro Mode and U verification and delivery
+
+Both Android variants passed all 678 JVM tests with zero failures, errors or
+skips. APK and AAB packaging passed. Lint reported zero errors (209 Sideload
+warnings and 207 Play warnings, including one new translation warning for the
+Macro Mode help text). The added tests cover finite U deadlines, macro tap
+completion, Ctrl+Alt+Tab, simultaneous buttons, D origins, HRD reentry, SOR,
+R/Turbo interactions, shared ownership, cleanup and profile compatibility.
+
+The signing-compatible `adb install -r` succeeded. Both fresh pre-install
+snapshots matched, and all 127 saved app-data files remained byte-identical
+after installation. Installed APK SHA-256:
+`478178571B1606AEC51A61900C127EFA2C5C7370832E0B48E32E01B7DDF20203`.
+The previous APK and native app snapshots remain in separate local records.
+No uninstall, data clearing, restore, connected tests, automatic app launch or
+live game-input test was performed. Receiver files remain unchanged.

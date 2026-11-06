@@ -76,6 +76,7 @@ class PropertySheetBuilder(
         val heightSeek: SeekBar,
         val sensitivityField: EditText?,
         val holdToggle: CheckBox,
+        val macroMode: CheckBox,
         val autoTapEnabled: CheckBox,
         val autoTapIntervalMs: EditText,
         val autoCenter: CheckBox,
@@ -464,6 +465,17 @@ class PropertySheetBuilder(
         if (model.type == ControlType.BUTTON) {
             addSectionTitle(container, context.getString(R.string.property_sheet_behavior))
         }
+        val macroMode = addCheckBox(
+            container,
+            "Macro Mode",
+            model.macroModeEnabled,
+            model.type == ControlType.BUTTON
+        )
+        val macroHelp = TextView(context).apply {
+            text = "Tap once to complete the timed payload after finger-up. D sets each command's time from the start; U sets its press length. Commands without a duration press for 90 ms. Extra taps while running are ignored. Global Hold and Turbo are ignored."
+            visibility = if (model.type == ControlType.BUTTON && model.macroModeEnabled) View.VISIBLE else View.GONE
+        }
+        container.addView(macroHelp)
         val holdToggle = addCheckBox(
             container, 
             "Hold toggles", 
@@ -503,6 +515,7 @@ class PropertySheetBuilder(
         val buttonAimComponents = if (model.type == ControlType.BUTTON) {
             addButtonAimUI(container) { checked ->
                 if (checked) {
+                    macroMode.isChecked = false
                     autoTapEnabled.isChecked = false
                     excludeFromCameraFollow.visibility = View.VISIBLE
                 }
@@ -513,6 +526,7 @@ class PropertySheetBuilder(
         val buttonDirectionalComponents = if (model.type == ControlType.BUTTON) {
             addButtonDirectionalUI(container) { checked ->
                 if (checked) {
+                    macroMode.isChecked = false
                     excludeFromCameraFollow.visibility = View.VISIBLE
                     autoTapEnabled.isChecked = false
                     if (buttonAimComponents?.enabled?.isChecked != true) holdToggle.isChecked = false
@@ -521,9 +535,19 @@ class PropertySheetBuilder(
         } else null
 
         if (model.type == ControlType.BUTTON) {
+            macroMode.setOnCheckedChangeListener { _, checked ->
+                macroHelp.visibility = if (checked) View.VISIBLE else View.GONE
+                if (checked) {
+                    holdToggle.isChecked = false
+                    autoTapEnabled.isChecked = false
+                    buttonAimComponents?.enabled?.isChecked = false
+                    buttonDirectionalComponents?.enabled?.isChecked = false
+                }
+            }
             autoTapEnabled.setOnCheckedChangeListener { _, checked ->
                 autoTapIntervalMs.visibility = if (checked) View.VISIBLE else View.GONE
                 if (checked) {
+                    macroMode.isChecked = false
                     holdToggle.isChecked = false
                     buttonAimComponents?.enabled?.isChecked = false
                     buttonDirectionalComponents?.enabled?.isChecked = false
@@ -531,6 +555,7 @@ class PropertySheetBuilder(
             }
             holdToggle.setOnCheckedChangeListener { _, checked ->
                 if (checked) {
+                    macroMode.isChecked = false
                     autoTapEnabled.isChecked = false
                     if (buttonAimComponents?.enabled?.isChecked != true) {
                         buttonDirectionalComponents?.enabled?.isChecked = false
@@ -538,6 +563,12 @@ class PropertySheetBuilder(
                 }
             }
             when {
+                macroMode.isChecked -> {
+                    holdToggle.isChecked = false
+                    autoTapEnabled.isChecked = false
+                    buttonAimComponents?.enabled?.isChecked = false
+                    buttonDirectionalComponents?.enabled?.isChecked = false
+                }
                 buttonAimComponents?.enabled?.isChecked == true ->
                     autoTapEnabled.isChecked = false
                 autoTapEnabled.isChecked -> holdToggle.isChecked = false
@@ -549,6 +580,7 @@ class PropertySheetBuilder(
                 pageActionComponents?.targetContainer?.visibility =
                     if (pageActionNeedsTarget(action)) View.VISIBLE else View.GONE
                 holdToggle.isEnabled = !localAction
+                macroMode.isEnabled = !localAction
                 autoTapEnabled.isEnabled = !localAction
                 buttonAimComponents?.enabled?.isEnabled = !localAction
                 buttonDirectionalComponents?.enabled?.isEnabled = !localAction
@@ -558,6 +590,7 @@ class PropertySheetBuilder(
                     View.VISIBLE
                 } else View.GONE
                 if (localAction) {
+                    macroMode.isChecked = false
                     holdToggle.isChecked = false
                     autoTapEnabled.isChecked = false
                     buttonAimComponents?.enabled?.isChecked = false
@@ -675,7 +708,7 @@ class PropertySheetBuilder(
         
         return UIComponents(
             nameField, widthSeek, heightSeek, sensitivityField,
-            holdToggle, autoTapEnabled, autoTapIntervalMs,
+            holdToggle, macroMode, autoTapEnabled, autoTapIntervalMs,
             autoCenter, holdDurationField, swipeActivate,
             holdLeftWhileTouch, doubleTapClickLock, toggleLeftClick, directionalMode, stickPlusMode,
             directionalContainer, payloadField, excludeFromCameraFollow, cameraFollowStrength,
@@ -689,7 +722,7 @@ class PropertySheetBuilder(
     private fun addPageActionUI(container: LinearLayout): PageActionComponents {
         addSectionTitle(container, "Local page action")
         container.addView(TextView(context).apply {
-            text = "Page actions run once on Android and never send the ordinary payload. Hold, Turbo, Auto-Tap, Button Aim, and delayed actions are disabled."
+            text = "Page actions run once on Android and never send the ordinary payload. Macro Mode, Hold, Turbo, Auto-Tap, Button Aim, and delayed actions are disabled."
         })
         val action = addChoice(
             container,
@@ -2847,6 +2880,13 @@ class PropertySheetBuilder(
             model.swipeActivate = components.swipeActivate.isChecked
             components.buttonAim?.let(::saveButtonAimProperties)
             components.buttonDirectional?.let(::saveButtonDirectionalProperties)
+            model.macroModeEnabled = components.macroMode.isChecked && !model.holdToggle &&
+                !model.autoTapEnabled && !model.buttonAimEnabled && !model.buttonDirectional.enabled
+            if (model.macroModeEnabled) {
+                ButtonMacroController.validationError(model.payload)?.let { error ->
+                    Toast.makeText(context, "Macro Mode: $error", Toast.LENGTH_LONG).show()
+                }
+            }
             if (model.buttonDirectional.enabled && !model.buttonAimEnabled) model.holdToggle = false
             components.pageAction?.let { fields ->
                 val action = PageAction.entries[
@@ -2857,6 +2897,7 @@ class PropertySheetBuilder(
                     fields.targetIds.getOrNull(fields.target.selectedItemPosition).orEmpty()
                 } else ""
                 if (action != PageAction.NONE) {
+                    model.macroModeEnabled = false
                     model.holdToggle = false
                     model.autoTapEnabled = false
                     model.buttonAimEnabled = false

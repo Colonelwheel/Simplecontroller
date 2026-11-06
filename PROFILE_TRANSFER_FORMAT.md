@@ -10,6 +10,8 @@ The API 36 release must keep an importer that accepts all of the following:
 
 - transfer files with `fileType: "simplecontroller-profile"` and `transferVersion: 1`;
 - all-profile backups with `fileType: "simplecontroller-profiles-backup"` and `backupVersion: 1`;
+- nested format `17` for per-command U release durations or stored Macro Mode;
+- nested format `16` for per-command D activation delays, including `(D0)`;
 - nested format `15` when an action payload stores a per-command `(Rmilliseconds)`
   repeat modifier, including inactive selections;
 - nested format `14` when action payloads store timing modifiers or TouchAim stores
@@ -96,7 +98,12 @@ transport settings, theme, the current-profile preference, and other app/device 
 
 - Transfer version: `1`
 - Maximum backup version: `3`; writers use `3` when the full-ring preset library is present, `2` for boost profiles without full-ring presets, otherwise `1`. Historical backups 1 and 2 remain readable. Nonempty boost libraries require at least version 2; nonempty full-ring preset libraries require version 3. Future envelope and nested preset versions are rejected before decoding.
-- Maximum nested controller-profile format: `16` (formats `2` through `15` remain importable)
+- Maximum nested controller-profile format: `17` (formats `2` through `16` remain importable)
+- Writers use `17` only when U is stored or `macroModeEnabled` is true, including
+  inactive configuration. The new Boolean defaults to false and is preserved
+  through full profiles, duplicates, transfers and backups. Button Aim profile
+  application disables conflicting Macro Mode. Under-versioned raw JSON is
+  rejected before typed decoding.
 - Writers use `16` only when a D activation-delay modifier is stored, including
   `(D0)`. R-only profiles retain format 15 and earlier conditional rules remain.
 - Writers use `15` when an R repeat modifier is stored without D. Existing modifier
@@ -154,6 +161,11 @@ schema 6, or complete ring preset schema 7, as applicable. D and R can coexist;
 the required version is the newest stored feature's version. Libraries without
 D keep their earlier conditional schemas. Raw preflight includes malformed D
 attempts and inactive settings, before typed decoding or any application writes.
+
+A U release-duration modifier conditionally requires manual TouchAim/calibration
+schema 5, Button Aim schema 9, Directional/Stick+ schema 6, named floating boost
+schema 7, or complete ring preset schema 8. Earlier conditional versions remain
+unchanged without U. See `MACRO_MODE_AND_PAYLOAD_PORTING.md` for behavioral rules.
 
 ## Floating configuration and library contract
 

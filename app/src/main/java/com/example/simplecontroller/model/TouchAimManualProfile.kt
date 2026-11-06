@@ -68,7 +68,8 @@ data class TouchAimManualProfile(
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 2
         const val REPEAT_PAYLOAD_SCHEMA_VERSION = 3
         const val DELAY_PAYLOAD_SCHEMA_VERSION = 4
-        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+        const val RELEASE_PAYLOAD_SCHEMA_VERSION = 5
+        const val CURRENT_SCHEMA_VERSION = RELEASE_PAYLOAD_SCHEMA_VERSION
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
     }
@@ -155,6 +156,7 @@ data class TouchAimManualProfile(
         val payloads = listOfNotNull(settings?.lowPayload, settings?.mediumPayload, settings?.highPayload,
             twoState?.aimPayload, twoState?.shootPayload)
         return when {
+            payloads.any(PayloadModifiers::hasReleaseModifiers) -> RELEASE_PAYLOAD_SCHEMA_VERSION
             payloads.any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
             payloads.any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
             hasTuning || payloads.any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION

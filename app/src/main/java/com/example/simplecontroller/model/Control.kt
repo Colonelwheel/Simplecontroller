@@ -87,6 +87,8 @@ data class Control(
     var holdDurationMs: Long = 500,        // long-press threshold
     var autoTapEnabled: Boolean = false,
     var autoTapIntervalMs: Long = 100L,
+    /** A tap starts one finite payload run; only configuration is persisted. */
+    var macroModeEnabled: Boolean = false,
     var buttonDirectional: ButtonDirectionalSettings = ButtonDirectionalSettings(),
 
     /* Controller Pages (Android-local action; target is a stable page ID) */

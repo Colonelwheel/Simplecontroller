@@ -44,7 +44,8 @@ data class FloatingRingPreset(
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 5
         const val REPEAT_PAYLOAD_SCHEMA_VERSION = 6
         const val DELAY_PAYLOAD_SCHEMA_VERSION = 7
-        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+        const val RELEASE_PAYLOAD_SCHEMA_VERSION = 8
+        const val CURRENT_SCHEMA_VERSION = RELEASE_PAYLOAD_SCHEMA_VERSION
     }
 }
 
@@ -62,6 +63,7 @@ fun FloatingZone.captureRingPreset(id: String, name: String, nowMs: Long): Float
 }
 
 private fun FloatingZone.requiredRingPresetSchemaVersion(): Int = when {
+    ring?.actionPayloads()?.any(PayloadModifiers::hasReleaseModifiers) == true -> FloatingRingPreset.RELEASE_PAYLOAD_SCHEMA_VERSION
     ring?.actionPayloads()?.any(PayloadModifiers::hasDelayModifiers) == true -> FloatingRingPreset.DELAY_PAYLOAD_SCHEMA_VERSION
     ring?.actionPayloads()?.any(PayloadModifiers::hasRepeatModifiers) == true -> FloatingRingPreset.REPEAT_PAYLOAD_SCHEMA_VERSION
     ring?.actionPayloads()?.any(PayloadModifiers::hasModifiers) == true -> FloatingRingPreset.PAYLOAD_MODIFIERS_SCHEMA_VERSION

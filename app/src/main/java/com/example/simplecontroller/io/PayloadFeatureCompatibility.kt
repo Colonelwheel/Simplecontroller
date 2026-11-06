@@ -7,6 +7,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 
@@ -57,6 +58,24 @@ internal fun JsonElement.hasDelayPayloadConfiguration(): Boolean = when (this) {
     else -> false
 }
 
+internal fun JsonElement.hasReleasePayloadConfiguration(): Boolean = when (this) {
+    is JsonArray -> any { it.hasReleasePayloadConfiguration() }
+    is JsonObject -> any { (key, value) ->
+        (key in actionFields && (value as? JsonPrimitive)?.contentOrNull?.let(PayloadModifiers::hasReleaseModifiers) == true) ||
+            value.hasReleasePayloadConfiguration()
+    }
+    else -> false
+}
+
+internal fun JsonElement.hasButtonMacroConfiguration(): Boolean = when (this) {
+    is JsonArray -> any { it.hasButtonMacroConfiguration() }
+    is JsonObject -> any { (key, value) ->
+        (key == "macroModeEnabled" && (value as? JsonPrimitive)?.booleanOrNull == true) ||
+            value.hasButtonMacroConfiguration()
+    }
+    else -> false
+}
+
 internal fun JsonElement.hasStageTouchAimConfiguration(): Boolean = when (this) {
     is JsonArray -> any { it.hasStageTouchAimConfiguration() }
     is JsonObject -> any { (key, value) ->
@@ -75,10 +94,14 @@ internal fun requirePayloadFeatureSchema(
     legacyVersion: Int = 1,
     stageTuning: Boolean = false,
     repeatVersion: Int? = null,
-    delayVersion: Int? = null
+    delayVersion: Int? = null,
+    releaseVersion: Int? = null
 ) {
     val version = (value["schemaVersion"] as? JsonPrimitive)?.intOrNull ?: legacyVersion
     require(version in 1..maxVersion) { "$label version $version is newer than supported version $maxVersion or invalid." }
+    require(releaseVersion == null || version >= releaseVersion || !value.hasReleasePayloadConfiguration()) {
+        "The saved release payload modifier requires $label version $releaseVersion."
+    }
     require(delayVersion == null || version >= delayVersion || !value.hasDelayPayloadConfiguration()) {
         "The saved delay payload modifier requires $label version $delayVersion."
     }

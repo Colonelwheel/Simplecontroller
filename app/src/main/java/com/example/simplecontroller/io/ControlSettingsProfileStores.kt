@@ -140,7 +140,8 @@ object TouchAimManualProfileStore {
         preflight = { requirePayloadFeatureSchema(it, "manual TouchAim profile", TouchAimManualProfile.CURRENT_SCHEMA_VERSION,
             TouchAimManualProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, stageTuning = true,
             repeatVersion = TouchAimManualProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-            delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
+            delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+            releaseVersion = TouchAimManualProfile.RELEASE_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<TouchAimManualProfile> = store.list(context)
@@ -170,7 +171,8 @@ object ButtonAimProfileStore {
         preflight = { requirePayloadFeatureSchema(it, "Button Aim profile", ButtonAimProfile.CURRENT_SCHEMA_VERSION,
             ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION,
             repeatVersion = ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-            delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
+            delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+            releaseVersion = ButtonAimProfile.RELEASE_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<ButtonAimProfile> = store.list(context)
@@ -196,7 +198,8 @@ object StickDirectionalProfileStore {
         preflight = { requirePayloadFeatureSchema(it, "directional profile", StickDirectionalProfile.CURRENT_SCHEMA_VERSION,
             StickDirectionalProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION,
             repeatVersion = StickDirectionalProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-            delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION) }
+            delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+            releaseVersion = StickDirectionalProfile.RELEASE_PAYLOAD_SCHEMA_VERSION) }
     )
 
     fun list(context: Context): List<StickDirectionalProfile> = store.list(context)
@@ -232,7 +235,8 @@ object FloatingBoostProfileStore {
 fun requireSupportedFloatingBoostSchema(value: JsonObject) {
     requirePayloadFeatureSchema(value, "boost profile", FloatingBoostProfile.CURRENT_SCHEMA_VERSION,
         FloatingBoostProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, repeatVersion = FloatingBoostProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-        delayVersion = FloatingBoostProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+        delayVersion = FloatingBoostProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+        releaseVersion = FloatingBoostProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
     val version = value["schemaVersion"]?.jsonPrimitive?.intOrNull ?: 1
     require(version in 1..FloatingBoostProfile.CURRENT_SCHEMA_VERSION) {
         "Boost profile version $version is newer than supported version ${FloatingBoostProfile.CURRENT_SCHEMA_VERSION} or invalid."

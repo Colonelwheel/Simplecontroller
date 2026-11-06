@@ -89,7 +89,8 @@ data class ButtonAimProfile(
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 6
         const val REPEAT_PAYLOAD_SCHEMA_VERSION = 7
         const val DELAY_PAYLOAD_SCHEMA_VERSION = 8
-        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+        const val RELEASE_PAYLOAD_SCHEMA_VERSION = 9
+        const val CURRENT_SCHEMA_VERSION = RELEASE_PAYLOAD_SCHEMA_VERSION
         const val MAX_NAME_LENGTH = 80
         const val MAX_PAYLOAD_LENGTH = 1000
         const val MAX_DISPLAY_NAME_LENGTH = 120
@@ -97,6 +98,7 @@ data class ButtonAimProfile(
 
     /** New action behavior and mouse selections each require a compatible reader. */
     fun requiredSchemaVersion(): Int = when {
+        listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasReleaseModifiers) -> RELEASE_PAYLOAD_SCHEMA_VERSION
         listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
         listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
         listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION
@@ -108,6 +110,10 @@ data class ButtonAimProfile(
 
     fun validationError(): String? {
         if (schemaVersion !in 1..CURRENT_SCHEMA_VERSION) return "This profile version is not supported."
+        if (schemaVersion < RELEASE_PAYLOAD_SCHEMA_VERSION &&
+            listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasReleaseModifiers)) {
+            return "Release payload modifiers require Button Aim profile version $RELEASE_PAYLOAD_SCHEMA_VERSION."
+        }
         if (schemaVersion < DELAY_PAYLOAD_SCHEMA_VERSION &&
             listOf(actions.payload, actions.alternatePayload).any(PayloadModifiers::hasDelayModifiers)) {
             return "Delay payload modifiers require Button Aim profile version $DELAY_PAYLOAD_SCHEMA_VERSION."
@@ -142,6 +148,7 @@ data class ButtonAimProfile(
         if (control.type != ControlType.BUTTON || validationError() != null) return false
         applyTuningUnchecked(control)
         control.autoTapEnabled = false
+        control.macroModeEnabled = false
         control.buttonAimEnabled = true
         return true
     }
@@ -164,6 +171,7 @@ data class ButtonAimProfile(
         control.buttonAimAlternateBaseUnlatchDelayMs = actions.alternateBaseUnlatchDelayMs
         control.buttonAimAlternateDisplayName = actions.alternateDisplayName
         control.autoTapEnabled = false
+        control.macroModeEnabled = false
         control.buttonAimEnabled = true
         return true
     }
@@ -204,6 +212,7 @@ fun Control.captureButtonAimProfile(id: String, name: String, nowMs: Long): Butt
     if (type != ControlType.BUTTON) return null
     val profile = ButtonAimProfile(
         schemaVersion = when {
+            listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasReleaseModifiers) -> ButtonAimProfile.RELEASE_PAYLOAD_SCHEMA_VERSION
             listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasDelayModifiers) -> ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION
             listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasRepeatModifiers) -> ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION
             listOf(payload, buttonAimAlternatePayload).any(PayloadModifiers::hasModifiers) -> ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION

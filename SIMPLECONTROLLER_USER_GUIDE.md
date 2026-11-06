@@ -235,11 +235,19 @@ LT:1.0,RT:1.0
 
 These are intended as near-simultaneous combinations. They are sent as separate network commands, so do not depend on perfect atomic timing or a guaranteed order.
 
-### Delay commands are experimental
+### Timed combinations
+
+Use per-command D and U to schedule presses on Android. D is the time from
+activation to that command's press; U is how long that press stays down.
+`X360A(U100),X360B(D400)(U100)` presses A for 100 ms, then B at 400 ms for 100 ms.
+Delays run in parallel; a comma does not add a wait or release another command.
+Enable Macro Mode on an ordinary Button to complete the timeline from one tap.
+
+### Legacy WAIT commands are experimental
 
 The receiver recognizes the form `WAIT_150`, where the number is milliseconds, but the Android app currently separates and sends each command independently. A payload such as `X360A,WAIT_150,X360B` is therefore not guaranteed to arrive or execute in that order.
 
-For now, treat multi-action payloads as combinations—not timed scripts. Do not use `WAIT:150`, `DELAY:150`, or `DELAY_150`; those spellings are unsupported.
+Use D/U for timed payloads. Do not use `WAIT:150`, `DELAY:150`, or `DELAY_150`; those spellings are unsupported.
 
 ## Ordinary Buttons
 
@@ -260,6 +268,23 @@ Hold Toggle lets an action stay active after you remove your finger.
 A short tap that ends before the threshold does nothing. A very low threshold such as 50 ms makes latching quick, but it also makes accidental activation easier. Start around 300–500 ms and lower it only if that feels unnecessarily slow.
 
 This per-Button option is the dependable way to create a latch. The separate global **Hold** switch should be treated as experimental until it has had more real-device testing.
+
+### Macro Mode
+
+Enable **Macro Mode** in a Button's Behavior settings to tap once and let its
+payload finish after lifting. `CTRL,ALT,TAB` presses all three together for
+90 ms, then releases them. Choose another duration with
+`CTRL(U200),ALT(U200),TAB(U200)`.
+
+`X360A(U100),X360A(D500)(U100),X360B(D800)(U100)` presses A during 0–100 ms,
+A again during 500–600 ms, then B during 800–900 ms. Matching D values let
+different buttons press together. Extra taps during a run are ignored.
+
+Macro Mode runs once and ignores global Hold and Turbo. It is separate from
+Hold Toggle, Auto-Tap, Button Aim and directional button inputs; R repeat
+commands are excluded. Release All, cancellation and normal app cleanup stop it.
+With Macro Mode off, source release still cancels pending delayed commands.
+See [the porting contract](MACRO_MODE_AND_PAYLOAD_PORTING.md) for all timing rules.
 
 ## Trigger pressure and Pulse payloads
 
