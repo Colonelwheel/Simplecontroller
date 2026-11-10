@@ -66,23 +66,30 @@ def setup_low_latency_socket(sock):
             try:
                 # Disable Nagle's algorithm for TCP sockets
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                logger.info("Applied TCP_NODELAY setting")
+                with timing_recorder.span("log_output"):
+                    logger.info("Applied TCP_NODELAY setting")
             except (socket.error, OSError) as e:
-                logger.warning(f"Could not set TCP_NODELAY: {str(e)}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Could not set TCP_NODELAY: {str(e)}")
         
         # Try to set buffer sizes, but handle platform-specific issues
         try:
             # Start with moderate buffer sizes that are more likely to be accepted
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-            logger.info("Applied buffer size settings")
+            with timing_recorder.span("log_output"):
+                logger.info("Applied buffer size settings")
         except (socket.error, OSError) as e:
-            logger.warning(f"Could not set socket buffer sizes: {str(e)}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Could not set socket buffer sizes: {str(e)}")
         
-        logger.info("Low-latency socket configuration applied (with platform compatibility)")
+        with timing_recorder.span("log_output"):
+            logger.info("Low-latency socket configuration applied (with platform compatibility)")
     except Exception as e:
-        logger.error(f"Failed to apply low-latency socket configuration: {str(e)}")
-        logger.info("Continuing with default socket settings")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to apply low-latency socket configuration: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.info("Continuing with default socket settings")
 
 # Server configuration
 HOST = '0.0.0.0'  # Listen on all interfaces
@@ -140,7 +147,8 @@ def get_lan_ip_candidates():
             s.connect(("8.8.8.8", 80))
             add_candidate(s.getsockname()[0])
     except Exception as e:
-        logger.warning(f"Could not detect primary LAN IP: {e}")
+        with timing_recorder.span("log_output"):
+            logger.warning(f"Could not detect primary LAN IP: {e}")
 
     # Backup: collect other IPv4s attached to the hostname.
     try:
@@ -148,7 +156,8 @@ def get_lan_ip_candidates():
         for info in socket.getaddrinfo(hostname, None, socket.AF_INET):
             add_candidate(info[4][0])
     except Exception as e:
-        logger.warning(f"Could not list backup LAN IPs: {e}")
+        with timing_recorder.span("log_output"):
+            logger.warning(f"Could not list backup LAN IPs: {e}")
 
     return candidates
 
@@ -158,32 +167,52 @@ def show_connection_info():
     ip_candidates = get_lan_ip_candidates()
     primary_ip = ip_candidates[0] if ip_candidates else "Unable to detect IP"
 
-    print()
-    print("========================================", flush=True)
-    print(" Simple Controller Receiver is running", flush=True)
-    print("========================================", flush=True)
-    print()
-    print("Put this into the Android app:", flush=True)
-    print()
-    print(f"IP Address: {primary_ip}", flush=True)
-    print(f"Port:       {PORT}", flush=True)
-
-    if len(ip_candidates) > 1:
+    with timing_recorder.span("console_output"):
         print()
-        print("If that IP does not connect, try one of these:", flush=True)
-        for ip in ip_candidates[1:]:
-            print(f"  {ip}", flush=True)
+    with timing_recorder.span("console_output"):
+        print("========================================", flush=True)
+    with timing_recorder.span("console_output"):
+        print(" Simple Controller Receiver is running", flush=True)
+    with timing_recorder.span("console_output"):
+        print("========================================", flush=True)
+    with timing_recorder.span("console_output"):
+        print()
+    with timing_recorder.span("console_output"):
+        print("Put this into the Android app:", flush=True)
+    with timing_recorder.span("console_output"):
+        print()
+    with timing_recorder.span("console_output"):
+        print(f"IP Address: {primary_ip}", flush=True)
+    with timing_recorder.span("console_output"):
+        print(f"Port:       {PORT}", flush=True)
 
-    print()
-    print("Phone and PC must be on the same Wi-Fi/network.", flush=True)
-    print("If it does not connect, allow this app through Windows Firewall.", flush=True)
-    print("========================================", flush=True)
-    print()
-
-    logger.info(f"Suggested Android app IP: {primary_ip}")
-    logger.info(f"Suggested Android app port: {PORT}")
     if len(ip_candidates) > 1:
-        logger.info(f"Other possible local IPs: {', '.join(ip_candidates[1:])}")
+        with timing_recorder.span("console_output"):
+            print()
+        with timing_recorder.span("console_output"):
+            print("If that IP does not connect, try one of these:", flush=True)
+        for ip in ip_candidates[1:]:
+            with timing_recorder.span("console_output"):
+                print(f"  {ip}", flush=True)
+
+    with timing_recorder.span("console_output"):
+        print()
+    with timing_recorder.span("console_output"):
+        print("Phone and PC must be on the same Wi-Fi/network.", flush=True)
+    with timing_recorder.span("console_output"):
+        print("If it does not connect, allow this app through Windows Firewall.", flush=True)
+    with timing_recorder.span("console_output"):
+        print("========================================", flush=True)
+    with timing_recorder.span("console_output"):
+        print()
+
+    with timing_recorder.span("log_output"):
+        logger.info(f"Suggested Android app IP: {primary_ip}")
+    with timing_recorder.span("log_output"):
+        logger.info(f"Suggested Android app port: {PORT}")
+    if len(ip_candidates) > 1:
+        with timing_recorder.span("log_output"):
+            logger.info(f"Other possible local IPs: {', '.join(ip_candidates[1:])}")
 
 # Create virtual Xbox 360 controllers - one for each player
 # One RLock protects every native virtual-pad report, including Camera Follow.
@@ -212,10 +241,12 @@ def is_space_key(key):
 @timing_recorder.measure("desktop_output")
 def write_desktop_input(target, pressed):
     if target == 'SPACE' or target.startswith('KEY:'):
-        (keyboard.press if pressed else keyboard.release)(keyboard_name(target))
+        with timing_recorder.span("native_keyboard_output"):
+            (keyboard.press if pressed else keyboard.release)(keyboard_name(target))
     else:
         button = 'left' if target == 'MOUSE_LEFT' else 'right'
-        (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
+        with timing_recorder.span("native_mouse_output"):
+            (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
 
 
 _tagged_keyboard_api = None
@@ -265,9 +296,10 @@ def send_tagged_key(target, pressed):
         flags |= 1
     KeyboardInput, Input, send = _tagged_keyboard_api
     item = Input(type=1, ki=KeyboardInput(vk, 0, flags, 0, FACE_INPUT_TAG))
-    if send(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
-        error = ctypes.get_last_error()
-        raise OSError(error, 'Facial SendInput failed; check application elevation')
+    with timing_recorder.span("native_keyboard_output"):
+        if send(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
+            error = ctypes.get_last_error()
+            raise OSError(error, 'Facial SendInput failed; check application elevation')
 
 
 def write_facial_desktop_input(target, pressed):
@@ -278,12 +310,13 @@ def write_facial_desktop_input(target, pressed):
 
 
 desktop_input = MergedDesktopInput(write_desktop_input, release_state_lock, write_facial_desktop_input)
-gamepads = {
-    'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
-                           desktop=desktop_input, player='player1'),
-    'player2': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
-                           desktop=desktop_input, player='player2')
-}
+with timing_recorder.span("startup_controllers"):
+    gamepads = {
+        'player1': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
+                               desktop=desktop_input, player='player1'),
+        'player2': MergedGamepad(vgamepad.VX360Gamepad(), face_button_map, release_state_lock,
+                               desktop=desktop_input, player='player2')
+    }
 face_input_state = FaceInputState(gamepads, release_state_lock)
 face_input_server = FaceInputServer(face_input_state, logger=logger)
 voice_input_state = VoiceInputState(
@@ -400,12 +433,14 @@ class StabilitySmoother:
         self.frame_count = 0
         self.last_time = time.time()
         self.touch_active = True
-        logger.info("Smoother reset for new touch")
+        with timing_recorder.span("log_output"):
+            logger.info("Smoother reset for new touch")
         
     def end_touch(self):
         """End the current touch session"""
         self.touch_active = False
-        logger.info("Touch ended")
+        with timing_recorder.span("log_output"):
+            logger.info("Touch ended")
         
     def is_active(self):
         """Check if touch is currently active"""
@@ -499,7 +534,8 @@ class StabilitySmoother:
             
         # Log large movements for analysis
         if abs(final_dx) > 10 or abs(final_dy) > 10:
-            logger.warning(f"Large movement: dx={final_dx}, dy={final_dy}, raw=({delta_x:.3f}, {delta_y:.3f})")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Large movement: dx={final_dx}, dy={final_dy}, raw=({delta_x:.3f}, {delta_y:.3f})")
             
         return (final_dx, final_dy)
 
@@ -514,19 +550,21 @@ def release_xbox_button(button, player_id='player1'):
         if player_id in gamepads:
             gamepads[player_id].release_button(button=button)
             gamepads[player_id].update()
-            logger.info(f"{player_id} released button: {button}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} released button: {button}")
     except Exception as e:
-        logger.error(f"Failed to release button for {player_id}: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to release button for {player_id}: {str(e)}")
 
 def output_packet_is_current(session_id, sequence):
     """Reject packets behind global release or quiescent phone-adoption barriers."""
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         protocol = globals().get("phone_output_protocol")
         return (sequence > release_barriers.get(session_id, -1)
                 and (protocol is None or protocol.legacy_packet_is_current(session_id, sequence)))
 
 def current_release_generation(player_id):
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         return release_generations.get(player_id, 0)
 
 
@@ -539,6 +577,7 @@ phone_output_protocol = PhoneOutputProtocolState(
 )
 
 @synchronized(release_state_lock)
+@timing_recorder.measure("output_release")
 def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     """Neutralize receiver-owned outputs after an explicit RELEASE_ALL payload."""
     selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
@@ -551,15 +590,17 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     except Exception as e:
         # Scheduling/epoch barriers are cleared before native cleanup; still
         # attempt phone/voice cleanup if a Windows mouse/key release fails.
-        logger.warning(f"Facial input cleanup failed during global release: {e}")
+        with timing_recorder.span("log_output"):
+            logger.warning(f"Facial input cleanup failed during global release: {e}")
     try:
         voice_input_state.reset(selected)
     except Exception as e:
         # Voice scheduling is invalidated before native cleanup. An optional
         # voice pad failure must not skip phone timers or keyboard/mouse release.
-        logger.warning(f"Voice input cleanup failed during global release: {e}")
+        with timing_recorder.span("log_output"):
+            logger.warning(f"Voice input cleanup failed during global release: {e}")
 
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         timers = []
         keys_to_release = set()
         for player_id in selected:
@@ -583,9 +624,11 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             if canonical_phone_key(key) is not None:
                 desktop_input.phone_set(canonical_phone_key(key), False)
             else:
-                keyboard.release(key.lower())
+                with timing_recorder.span("native_keyboard_output"):
+                    keyboard.release(key.lower())
         except Exception as e:
-            logger.warning(f"Failed to release key {key}: {e}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Failed to release key {key}: {e}")
 
     # Generic face/phone keys retain cleanup ownership after partial native writes.
     for target in tuple(desktop_input.targets):
@@ -595,11 +638,13 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             try:
                 desktop_input.phone_set(target, False)
             except Exception as e:
-                logger.warning(f"Failed to release {target}: {e}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Failed to release {target}: {e}")
         try:
             desktop_input.clear_unowned(target)
         except Exception as e:
-            logger.warning(f"Failed to retry pending {target} release: {e}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Failed to retry pending {target} release: {e}")
 
     # Mouse output is shared by Windows, so idempotently release every supported button.
     for mouse_button in ("left", "right", "middle"):
@@ -607,9 +652,11 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             if mouse_button in ('left', 'right'):
                 desktop_input.phone_set('MOUSE_' + mouse_button.upper(), False)
             else:
-                pyautogui.mouseUp(button=mouse_button)
+                with timing_recorder.span("native_mouse_output"):
+                    pyautogui.mouseUp(button=mouse_button)
         except Exception as e:
-            logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
 
     smoother.end_touch()
 
@@ -617,7 +664,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
         camera_follow_last_input_at[player_id] = 0.0
         camera_follow_input_lost[player_id] = True
         try:
-            with camera_follow_output_locks[player_id]:
+            with timing_recorder.observe_lock(camera_follow_output_locks[player_id]):
                 # Keep Camera Follow calculation and virtual-pad reset atomic so a
                 # value calculated just before RELEASE_ALL cannot land afterward.
                 camera_follow_states[player_id].clear_inputs()
@@ -627,14 +674,16 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 gamepad.update()
                 camera_follow_last_right_output[player_id] = (0.0, 0.0, "neutral")
         except Exception as e:
-            logger.error(f"Failed to reset virtual gamepad for {player_id}: {e}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Failed to reset virtual gamepad for {player_id}: {e}")
 
-    logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
+    with timing_recorder.span("log_output"):
+        logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
 
 @synchronized(release_state_lock)
 def release_all_outputs(session_id, sequence):
     """Apply each global release identity once; duplicates still receive an ACK."""
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         if sequence <= release_barriers.get(session_id, -1):
             return False
         release_barriers[session_id] = sequence
@@ -648,7 +697,8 @@ def normalize_value(value):
     try:
         return max(-1.0, min(1.0, float(value)))
     except (ValueError, TypeError):
-        logger.error(f"Failed to convert value to float: {value}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to convert value to float: {value}")
         return 0.0
 
 def parse_float(value):
@@ -656,7 +706,8 @@ def parse_float(value):
     try:
         return float(value)
     except (ValueError, TypeError):
-        logger.error(f"Failed to convert value: {value}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to convert value: {value}")
         return 0.0
 
 @timing_recorder.measure("game_mouse_output")
@@ -667,11 +718,14 @@ def handle_game_mouse_delta(command):
         if not (math.isfinite(dx) and math.isfinite(dy)):
             raise ValueError("movement must be finite")
         # Match legacy TouchAim scaling and truncation before the native backend.
-        send_relative_mouse(int(dx * DELTA_GAIN), int(dy * DELTA_GAIN))
+        with timing_recorder.span("native_mouse_output"):
+            send_relative_mouse(int(dx * DELTA_GAIN), int(dy * DELTA_GAIN))
     except (ValueError, OverflowError) as error:
-        logger.warning(f"Bad GAME_DELTA packet: {command} ({error})")
+        with timing_recorder.span("log_output"):
+            logger.warning(f"Bad GAME_DELTA packet: {command} ({error})")
     except OSError as error:
-        logger.error(f"Game mouse movement failed: {error}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Game mouse movement failed: {error}")
 
 @timing_recorder.measure("legacy_mouse_output")
 def handle_touchpad(command):
@@ -682,12 +736,15 @@ def handle_touchpad(command):
             dx, dy = map(float, command[6:].split(",", 1))
             mx = int(dx * DELTA_GAIN)
             my = int(dy * DELTA_GAIN)
-            print("HDL", dx, dy, "⇒", mx, my)      # DEBUG
+            with timing_recorder.span("console_output"):
+                print("HDL", dx, dy, "⇒", mx, my)      # DEBUG
             # comment-out the line you're NOT using:
             # mouse.move(mx, my, absolute=False)   # needs admin
-            pyautogui.moveRel(mx, my)              # works without admin
+            with timing_recorder.span("native_mouse_output"):
+                pyautogui.moveRel(mx, my)              # works without admin
         except ValueError:
-            logger.warning(f"Bad DELTA packet: {command}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad DELTA packet: {command}")
         return                                     # ← don't let it fall through
     # ---------------------------------------
 
@@ -700,9 +757,11 @@ def handle_touchpad(command):
         y_val = normalize_value(y)
         dx, dy = smoother.process_movement(x_val, y_val)
         if dx or dy:
-            pyautogui.moveRel(dx, dy) 
+            with timing_recorder.span("native_mouse_output"):
+                pyautogui.moveRel(dx, dy)
     except Exception as e:
-        logger.error(f"Error handling touchpad input: {e}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error handling touchpad input: {e}")
 
 @synchronized(release_state_lock)
 def handle_mouse_buttons(command):
@@ -718,25 +777,31 @@ def handle_mouse_buttons(command):
             desktop_input.phone_set('MOUSE_RIGHT', False)
             
         elif command == "MOUSE_MIDDLE_DOWN":
-            pyautogui.mouseDown(button="middle")
+            with timing_recorder.span("native_mouse_output"):
+                pyautogui.mouseDown(button="middle")
         elif command == "MOUSE_MIDDLE_UP":
-            pyautogui.mouseUp(button="middle")
+            with timing_recorder.span("native_mouse_output"):
+                pyautogui.mouseUp(button="middle")
             
         elif command in ("TOUCHPAD_END", "TOUCH_END"):
             smoother.end_touch()
         elif command == "MOUSE_RESET":
-            logger.warning("MOUSE_RESET ignored to prevent jumps")
+            with timing_recorder.span("log_output"):
+                logger.warning("MOUSE_RESET ignored to prevent jumps")
     except Exception as e:
-        logger.error(f"Error handling button command: {e}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error handling button command: {e}")
         
 @timing_recorder.measure("scroll_output")
 def handle_scroll(command):
     # SCROLL:+/-n   → one notch ≈ 120 units on Windows
     try:
         amount = int(float(command.split(":",1)[1]) * 120)
-        pyautogui.scroll(amount)
+        with timing_recorder.span("native_mouse_output"):
+            pyautogui.scroll(amount)
     except Exception as e:
-        logger.error(f"Bad SCROLL packet {command}: {e}")        
+        with timing_recorder.span("log_output"):
+            logger.error(f"Bad SCROLL packet {command}: {e}")
 
 def apply_camera_follow_output(player_id, now=None, force=False):
     """Apply the highest-priority RS source to the virtual controller."""
@@ -744,7 +809,7 @@ def apply_camera_follow_output(player_id, now=None, force=False):
         return
 
     try:
-        with camera_follow_output_locks[player_id]:
+        with timing_recorder.observe_lock(camera_follow_output_locks[player_id]):
             x, y, source = camera_follow_states[player_id].step(now)
             previous_x, previous_y, previous_source = camera_follow_last_right_output[player_id]
             changed = (
@@ -760,25 +825,28 @@ def apply_camera_follow_output(player_id, now=None, force=False):
             gamepad.update()
             camera_follow_last_right_output[player_id] = (x, y, source)
     except Exception as e:
-        logger.error(f"Failed to apply right-stick output for {player_id}: {e}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to apply right-stick output for {player_id}: {e}")
 
 @synchronized(release_state_lock)
 def set_camera_follow_enabled(player_id, enabled):
     """Set an explicit Camera Follow state; duplicate commands are idempotent."""
     if player_id not in camera_follow_states:
-        logger.error(f"Unknown player ID for Camera Follow: {player_id}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Unknown player ID for Camera Follow: {player_id}")
         return
 
     changed = camera_follow_states[player_id].set_enabled(enabled)
     if changed:
-        logger.info(f"Camera Follow {'enabled' if enabled else 'disabled'}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"Camera Follow {'enabled' if enabled else 'disabled'}")
         apply_camera_follow_output(player_id, force=True)
 
 def clear_camera_follow_player(player_id):
     """Clear generated/manual/macro RS state after input loss or disconnect."""
     if player_id not in camera_follow_states:
         return
-    with camera_follow_output_locks[player_id]:
+    with timing_recorder.observe_lock(camera_follow_output_locks[player_id]):
         camera_follow_states[player_id].clear_inputs()
         pad = gamepads[player_id]
         if pad.phone_left == (0.0, 0.0) and pad.face_left != (0.0, 0.0):
@@ -811,6 +879,7 @@ def start_camera_follow_worker():
     )
     camera_follow_thread.start()
 
+@timing_recorder.measure("shutdown_camera")
 def stop_camera_follow_worker():
     camera_follow_stop_event.set()
     if camera_follow_thread is not None and camera_follow_thread.is_alive():
@@ -831,13 +900,14 @@ def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="man
     
     try:
         if player_id not in gamepads:
-            logger.error(f"Unknown player ID: {player_id}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Unknown player ID: {player_id}")
             return
             
         gamepad = gamepads[player_id]
 
         if stick_type == "LEFT":
-            with camera_follow_output_locks[player_id]:
+            with timing_recorder.observe_lock(camera_follow_output_locks[player_id]):
                 camera_follow_phone_left_excluded[player_id] = bool(exclude_from_camera_follow)
                 gamepad.left_joystick_float(x_value_float=x, y_value_float=-y)  # Y is inverted for gamepad
                 gamepad.update()
@@ -848,9 +918,11 @@ def handle_stick_input(x, y, stick_type="LEFT", player_id='player1', source="man
                 camera_follow_states[player_id].set_manual_right_stick(x, y)
             apply_camera_follow_output(player_id, force=True)
 
-        logger.info(f"{player_id} Stick {stick_type}: x={x:.2f}, y={y:.2f}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"{player_id} Stick {stick_type}: x={x:.2f}, y={y:.2f}")
     except Exception as e:
-        logger.error(f"Error handling stick input for {player_id}: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error handling stick input for {player_id}: {str(e)}")
 
 @synchronized(release_state_lock)
 def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
@@ -861,21 +933,25 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
         value = max(0.0, min(1.0, value))
         
         if player_id not in gamepads:
-            logger.error(f"Unknown player ID: {player_id}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Unknown player ID: {player_id}")
             return
             
         gamepad = gamepads[player_id]
         
         if trigger == "LEFT":
             gamepad.left_trigger_float(value_float=value)
-            logger.info(f"{player_id} Left trigger: {value:.2f}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} Left trigger: {value:.2f}")
         else:
             gamepad.right_trigger_float(value_float=value)
-            logger.info(f"{player_id} Right trigger: {value:.2f}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} Right trigger: {value:.2f}")
         
         gamepad.update()
     except Exception as e:
-        logger.error(f"Error handling trigger input for {player_id}: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error handling trigger input for {player_id}: {str(e)}")
 
 def neutralize_legacy_phone_outputs(player_id):
     """Quiescent protocol adoption affects phone ownership only, under the shared lock."""
@@ -1032,7 +1108,7 @@ def dispatch_scoped_legacy_state(command, player_id, guard):
     if finite:
         timer = None
         def release():
-            with release_state_lock:
+            with timing_recorder.observe_lock(release_state_lock):
                 try:
                     guard.release(inactive_command(upper))
                 finally:
@@ -1050,11 +1126,14 @@ def handle_wait_command(command, player_id='player1'):
         # Extract milliseconds from WAIT_X command
         wait_ms = int(command.split("_")[1])
         # Sleep for the specified time
-        time.sleep(wait_ms / 1000.0)
-        logger.info(f"{player_id} waited for {wait_ms}ms")
+        with timing_recorder.span("legacy_wait"):
+            time.sleep(wait_ms / 1000.0)
+        with timing_recorder.span("log_output"):
+            logger.info(f"{player_id} waited for {wait_ms}ms")
         return True
     except (ValueError, IndexError) as e:
-        logger.error(f"Invalid wait command from {player_id}: {command} - {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Invalid wait command from {player_id}: {command} - {str(e)}")
         return False
 
 def handle_key_press(key, player_id='player1'):
@@ -1070,32 +1149,37 @@ def handle_key_press(key, player_id='player1'):
         handle_wait_command(key, player_id)
         return
 
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         if player_id not in key_states:
             key_states[player_id] = {}
 
         key_states[player_id][key] = True
-        logger.info(f"{player_id} Key press: {key}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"{player_id} Key press: {key}")
 
         if player_id == 'player1':
             try:
                 if canonical_phone_key(key) is not None:
                     desktop_input.phone_set(canonical_phone_key(key), True)
                 else:
-                    keyboard.press(key.lower())
+                    with timing_recorder.span("native_keyboard_output"):
+                        keyboard.press(key.lower())
             except Exception as e:
-                logger.error(f"Failed to press key {key}: {str(e)}")
+                with timing_recorder.span("log_output"):
+                    logger.error(f"Failed to press key {key}: {str(e)}")
 
+@timing_recorder.measure("key_release")
 def handle_key_release(key, player_id='player1'):
     """Handle a directional key release with state tracking"""
 
     # Ignore accidental releases for wait tokens.
     # WAIT_1000 is a delay, not a real key that needs releasing.
     if key.startswith("WAIT_"):
-        logger.info(f"{player_id} ignored wait key release: {key}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"{player_id} ignored wait key release: {key}")
         return
 
-    with release_state_lock:
+    with timing_recorder.observe_lock(release_state_lock):
         if player_id not in key_states:
             key_states[player_id] = {}
 
@@ -1103,7 +1187,8 @@ def handle_key_release(key, player_id='player1'):
         if key in key_states[player_id]:
             del key_states[player_id][key]
 
-        logger.info(f"{player_id} Key release: {key}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"{player_id} Key release: {key}")
 
         # Release key (only player1 controls keyboard)
         if player_id == 'player1':
@@ -1111,16 +1196,19 @@ def handle_key_release(key, player_id='player1'):
                 if canonical_phone_key(key) is not None:
                     desktop_input.phone_set(canonical_phone_key(key), False)
                 else:
-                    keyboard.release(key.lower())
+                    with timing_recorder.span("native_keyboard_output"):
+                        keyboard.release(key.lower())
             except Exception as e:
-                logger.error(f"Failed to release key {key}: {str(e)}")
+                with timing_recorder.span("log_output"):
+                    logger.error(f"Failed to release key {key}: {str(e)}")
 
 def handle_button_press(command, player_id='player1', phone_guard=None):
     """Handle various button commands with proper release handling"""
     if phone_guard is not None and dispatch_scoped_legacy_state(command, player_id, phone_guard):
         return True
     if player_id not in mouse_states or player_id not in gamepads:
-        logger.error(f"Unknown player ID: {player_id}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Unknown player ID: {player_id}")
         return False
 
     # ── 1️⃣ Ignore keep-alive packets completely ─────────────────────
@@ -1147,7 +1235,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
     if command.startswith("KEY_UP:"):
         key = command.split(":", 1)[1]
         if key.startswith("WAIT_"):
-            logger.info(f"{player_id} ignored wait key release: {key}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} ignored wait key release: {key}")
             return True
         handle_key_release(key, player_id)
         return True
@@ -1246,22 +1335,24 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
     if command in xbox_release_commands:
         btn = xbox_release_commands[command]
         try:
-            with release_state_lock:
+            with timing_recorder.observe_lock(release_state_lock):
                 phone_button_tokens[player_id][btn] = object()
                 gamepad.release_button(button=btn)
                 gamepad.update()
                 # clear only phone ownership; the proxy preserves facial holds.
                 button_states.setdefault(player_id, {})[btn] = False
-            logger.info(f"{player_id} Xbox button explicitly released: {command}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} Xbox button explicitly released: {command}")
         except Exception as e:
-            logger.error(f"Failed to release Xbox button for {player_id}: {str(e)}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Failed to release Xbox button for {player_id}: {str(e)}")
         return True
     
     # Check if it's an Xbox button press
     if command in xbox_buttons:
         btn = xbox_buttons[command]
         try:
-            with release_state_lock:
+            with timing_recorder.observe_lock(release_state_lock):
                 # Keep existing phone press edges when face is idle. A facial
                 # owner intentionally masks this release rather than losing hold.
                 if button_states.get(player_id, {}).get(btn, False):
@@ -1274,14 +1365,15 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                 gamepad.press_button(button=btn)
                 gamepad.update()
                 button_states.setdefault(player_id, {})[btn] = True
-                logger.info(f"{player_id} Xbox button pressed: {command}")
+                with timing_recorder.span("log_output"):
+                    logger.info(f"{player_id} Xbox button pressed: {command}")
 
                 if not command.endswith("_HOLD"):
                     release_generation = current_release_generation(player_id)
                     release_timer = None
 
                     def do_release():
-                        with release_state_lock:
+                        with timing_recorder.observe_lock(release_state_lock):
                             try:
                                 if ((phone_guard is not None and not phone_guard())
                                         or release_generations[player_id] != release_generation
@@ -1291,7 +1383,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                                 gamepad.update()
                                 button_states[player_id][btn] = False
                             except Exception as e:
-                                logger.error(f"Auto-release failed for {player_id}: {e}")
+                                with timing_recorder.span("log_output"):
+                                    logger.error(f"Auto-release failed for {player_id}: {e}")
                             finally:
                                 pending_button_release_timers[player_id].discard(release_timer)
 
@@ -1299,11 +1392,14 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                     release_timer.daemon = True
                     pending_button_release_timers[player_id].add(release_timer)
                     release_timer.start()
-                    logger.info(f"Scheduled auto-release for {player_id} {command}")
+                    with timing_recorder.span("log_output"):
+                        logger.info(f"Scheduled auto-release for {player_id} {command}")
                 else:
-                    logger.info(f"Hold mode - no auto-release for {player_id} {command}")
+                    with timing_recorder.span("log_output"):
+                        logger.info(f"Hold mode - no auto-release for {player_id} {command}")
         except Exception as e:
-            logger.error(f"Failed to press Xbox button for {player_id}: {str(e)}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Failed to press Xbox button for {player_id}: {str(e)}")
         return True
     
     # Handle keyboard input (common keys)
@@ -1314,11 +1410,14 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
             if canonical_phone_key(command) is not None:
                 desktop_input.phone_tap(canonical_phone_key(command))
             else:
-                keyboard.press_and_release(command.lower())
-            logger.info(f"{player_id} Keyboard key pressed: {command}")
+                with timing_recorder.span("native_keyboard_output"):
+                    keyboard.press_and_release(command.lower())
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} Keyboard key pressed: {command}")
         return True
     except Exception as e:
-        logger.error(f"Failed to process command for {player_id}: {command} - {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Failed to process command for {player_id}: {command} - {str(e)}")
         return False
 
 def process_timed_sequence(commands, player_id='player1', release_generation=None, phone_guard=None):
@@ -1330,7 +1429,8 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
         for cmd in commands:
             if ((phone_guard is not None and not phone_guard())
                     or current_release_generation(player_id) != release_generation):
-                logger.info(f"Cancelled delayed command sequence for {player_id}")
+                with timing_recorder.span("log_output"):
+                    logger.info(f"Cancelled delayed command sequence for {player_id}")
                 return
 
             cmd = cmd.strip()
@@ -1339,27 +1439,30 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
                     try:
                         wait_seconds = max(0, int(cmd.split("_", 1)[1])) / 1000.0
                     except (ValueError, IndexError):
-                        logger.warning(f"Invalid wait command from {player_id}: {cmd}")
+                        with timing_recorder.span("log_output"):
+                            logger.warning(f"Invalid wait command from {player_id}: {cmd}")
                         continue
 
                     deadline = time.monotonic() + wait_seconds
                     while time.monotonic() < deadline:
                         if ((phone_guard is not None and not phone_guard())
                                 or current_release_generation(player_id) != release_generation):
-                            logger.info(f"Cancelled delayed command sequence for {player_id}")
+                            with timing_recorder.span("log_output"):
+                                logger.info(f"Cancelled delayed command sequence for {player_id}")
                             return
                         time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
                     continue
 
                 # Check and dispatch atomically with global release. WAIT remains
                 # outside this lock so face heartbeats can run during sequences.
-                with release_state_lock:
+                with timing_recorder.observe_lock(release_state_lock):
                     if ((phone_guard is not None and not phone_guard())
                             or release_generations[player_id] != release_generation):
                         return
                     handle_button_press(cmd, player_id, phone_guard=phone_guard)
     except Exception as e:
-        logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
 
 @timing_recorder.measure("command")
 def process_command(data, addr, player_id='player1', phone_guard=None):
@@ -1405,13 +1508,15 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
     if data.startswith("RELEASE_ALL:"):
         parts = data.split(":", 2)
         if len(parts) != 3:
-            logger.warning(f"Bad RELEASE_ALL packet: {data}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad RELEASE_ALL packet: {data}")
             return None
         _, session_id, seq_text = parts
         try:
             sequence = int(seq_text)
         except ValueError:
-            logger.warning(f"Bad RELEASE_ALL sequence: {data}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad RELEASE_ALL sequence: {data}")
             return None
         release_all_outputs(session_id, sequence)
         return f"RELEASE_ALL_ACK:{session_id}:{sequence}"
@@ -1421,21 +1526,24 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
     if data.startswith("OUTPUT:"):
         parts = data.split(":", 3)
         if len(parts) != 4:
-            logger.warning(f"Bad ordered output packet: {data}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad ordered output packet: {data}")
             return None
         _, session_id, seq_text, output_command = parts
         try:
             sequence = int(seq_text)
         except ValueError:
-            logger.warning(f"Bad ordered output sequence: {data}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad ordered output sequence: {data}")
             return None
         if not output_packet_is_current(session_id, sequence):
-            logger.debug(f"Dropped pre-release output packet: {session_id}:{sequence}")
+            with timing_recorder.span("log_output"):
+                logger.debug(f"Dropped pre-release output packet: {session_id}:{sequence}")
             return None
         guard = lambda: output_packet_is_current(session_id, sequence)
         # Recheck and dispatch under the same lock as activation. A delayed
         # legacy sequence carries this guard while it waits outside the lock.
-        with release_state_lock:
+        with timing_recorder.observe_lock(release_state_lock):
             if not guard():
                 return None
             return process_command(output_command, addr, player_id, phone_guard=guard)
@@ -1455,9 +1563,10 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             if sequence < 0 or not math.isfinite(percent) or not 0.0 <= percent <= 200.0:
                 raise ValueError("invalid strength value")
         except ValueError:
-            logger.warning(f"Bad Camera Follow strength packet from {player_id}: {data}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Bad Camera Follow strength packet from {player_id}: {data}")
             return None
-        with release_state_lock:
+        with timing_recorder.observe_lock(release_state_lock):
             if ordered_output and not output_packet_is_current(*ordered_output):
                 return None
             if not output_packet_is_current(session_id, sequence):
@@ -1485,13 +1594,14 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
         
          # --- LOG LEFT-CLICK PACKETS ---------------------------------
     if data.startswith("MOUSE_LEFT"):
-        print("BTN", data)            # << add this line
+        with timing_recorder.span("console_output"):
+            print("BTN", data)            # << add this line
     # ------------------------------------------------------------
 
     # The game-mouse backend is additive. Serialize its release-barrier check
     # with output so a concurrent global release cannot admit a stale movement.
     if data.startswith("GAME_DELTA:"):
-        with release_state_lock:
+        with timing_recorder.observe_lock(release_state_lock):
             if ordered_output and not output_packet_is_current(*ordered_output):
                 return None
             handle_game_mouse_delta(data)
@@ -1519,13 +1629,16 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             if requested_id in ['player1', 'player2']:
                 player_id = requested_id
                 active_connections[addr_key]['player_id'] = player_id
-                logger.info(f"Client {addr} connected as {player_id}")
+                with timing_recorder.span("log_output"):
+                    logger.info(f"Client {addr} connected as {player_id}")
                 return f"CONNECTED:{player_id}"
             else:
-                logger.warning(f"Invalid player ID in connection request: {requested_id}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Invalid player ID in connection request: {requested_id}")
                 return "ERROR:invalid_player_id"
         except Exception as e:
-            logger.error(f"Error processing connection request: {e}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Error processing connection request: {e}")
             return "ERROR:connection_failed"
             
     # Handle player ID prefix in command
@@ -1535,13 +1648,16 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             if requested_id in ['player1', 'player2']:
                 player_id = requested_id
                 active_connections[addr_key]['player_id'] = player_id
-                logger.info(f"Client {addr} registered as {player_id}")
+                with timing_recorder.span("log_output"):
+                    logger.info(f"Client {addr} registered as {player_id}")
                 return f"REGISTERED:{player_id}"
             else:
-                logger.warning(f"Invalid player ID request: {requested_id}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Invalid player ID request: {requested_id}")
                 return "ERROR:invalid_player_id"
         except Exception as e:
-            logger.error(f"Error processing registration: {e}")
+            with timing_recorder.span("log_output"):
+                logger.error(f"Error processing registration: {e}")
             return "ERROR:registration_failed"
 
     # ─── Ignore keep-alive packets so taps don't fire twice ───
@@ -1562,7 +1678,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
     if data.startswith("KEY_UP:"):
         key = data.split(":", 1)[1]
         if key.startswith("WAIT_"):
-            logger.info(f"{player_id} ignored wait key release: {key}")
+            with timing_recorder.span("log_output"):
+                logger.info(f"{player_id} ignored wait key release: {key}")
             return None
         handle_key_release(key, player_id)
         return None
@@ -1640,7 +1757,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
                 seq = int(seq_text)
                 x, y = coords.split(",", 1)
             except (ValueError, IndexError):
-                logger.warning(f"Bad sequenced stick packet from {player_id}: {data}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Bad sequenced stick packet from {player_id}: {data}")
                 return None
 
             source = "macro" if command.startswith("STICK_MACRO_") else "manual"
@@ -1659,11 +1777,12 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
                     if seq < 0 or not session_id or not all(math.isfinite(v) for v in coordinates):
                         raise ValueError("invalid excluded stick value")
                 except ValueError:
-                    logger.warning(f"Bad excluded stick packet from {player_id}: {data}")
+                    with timing_recorder.span("log_output"):
+                        logger.warning(f"Bad excluded stick packet from {player_id}: {data}")
                     return None
             # Tag and vector are accepted atomically at the same physical-stick
             # freshness gate, so delayed eligible/excluded sources cannot revive.
-            with release_state_lock:
+            with timing_recorder.observe_lock(release_state_lock):
                 if ordered_output and not output_packet_is_current(*ordered_output):
                     return None
                 if not output_packet_is_current(session_id, seq):
@@ -1696,10 +1815,12 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
                 # Handle generic position data (used by optimized clients)
                 handle_touchpad(data)  # Use the stability smoother version
             else:
-                logger.warning(f"Unknown coordinate command from {player_id}: {command}")
+                with timing_recorder.span("log_output"):
+                    logger.warning(f"Unknown coordinate command from {player_id}: {command}")
             return None
         else:
-            logger.warning(f"Invalid coordinate format from {player_id}: {coords}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Invalid coordinate format from {player_id}: {coords}")
             return None
     
     # Handle commands with commas (format: "W,SHIFT" or "A,WAIT_500,B")
@@ -1713,7 +1834,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             args=(commands, player_id, release_generation, phone_guard),
             daemon=True
         ).start()
-        logger.info(f"Started command sequence with {len(commands)} commands for {player_id}")
+        with timing_recorder.span("log_output"):
+            logger.info(f"Started command sequence with {len(commands)} commands for {player_id}")
         return None
     
     # Handle simple button commands
@@ -1722,7 +1844,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
         return None
 
     # Anything else just gets logged
-    logger.info(f"Command from {addr}: {data}")
+    with timing_recorder.span("log_output"):
+        logger.info(f"Command from {addr}: {data}")
 
 def clean_inactive_connections():
     """Remove connections that haven't sent data in a while"""
@@ -1736,7 +1859,8 @@ def clean_inactive_connections():
     
     for addr_key in to_remove:
         player_id = active_connections[addr_key]['player_id']
-        logger.info(f"Removing inactive connection: {addr_key} ({player_id})")
+        with timing_recorder.span("log_output"):
+            logger.info(f"Removing inactive connection: {addr_key} ({player_id})")
         del active_connections[addr_key]
 
 @synchronized(release_state_lock)
@@ -1749,17 +1873,23 @@ def clean_key_states():
             for key in list(key_states['player1'].keys()):
                 try:
                     # If key is not actually pressed according to the keyboard library
-                    if not keyboard.is_pressed(key.lower()):
+                    with timing_recorder.span("native_keyboard_output"):
+                        pressed = keyboard.is_pressed(key.lower())
+                    if not pressed:
                         # Re-press it to ensure it's active
                         if canonical_phone_key(key) is not None:
                             desktop_input.resync_phone(canonical_phone_key(key))
                         else:
-                            keyboard.press(key.lower())
-                        logger.info(f"Re-pressed key: {key}")
+                            with timing_recorder.span("native_keyboard_output"):
+                                keyboard.press(key.lower())
+                        with timing_recorder.span("log_output"):
+                            logger.info(f"Re-pressed key: {key}")
                 except Exception as e:
-                    logger.warning(f"Error checking key state: {key} - {str(e)}")
+                    with timing_recorder.span("log_output"):
+                        logger.warning(f"Error checking key state: {key} - {str(e)}")
     except Exception as e:
-        logger.error(f"Error in key state cleanup: {str(e)}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Error in key state cleanup: {str(e)}")
 
 def start_cleanup_scheduler():
     """Schedule regular cleaning of inactive connections and key states"""
@@ -1783,12 +1913,16 @@ def udp_server():
             # Set buffer sizes for UDP socket
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 262144)
-            logger.info("Applied UDP buffer size settings")
+            with timing_recorder.span("log_output"):
+                logger.info("Applied UDP buffer size settings")
         except (socket.error, OSError) as e:
-            logger.warning(f"Could not set UDP socket buffer sizes: {str(e)}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Could not set UDP socket buffer sizes: {str(e)}")
         
-        sock.bind((HOST, PORT))
-        logger.info(f"UDP server started on {HOST}:{PORT}")
+        with timing_recorder.span("startup_udp"):
+            sock.bind((HOST, PORT))
+        with timing_recorder.span("log_output"):
+            logger.info(f"UDP server started on {HOST}:{PORT}")
         
         # Set up a housekeeping timer for cleaning inactive connections
         housekeeping_timer = threading.Timer(10.0, clean_inactive_connections)
@@ -1818,24 +1952,34 @@ def udp_server():
                             sock.sendto(response.encode('utf-8'), addr)
                         
                 except UnicodeDecodeError:
-                    logger.warning(f"Received invalid data from {addr}")
+                    with timing_recorder.span("log_output"):
+                        logger.warning(f"Received invalid data from {addr}")
                     
             except Exception as e:
-                logger.error(f"Error in UDP server: {e}")
+                with timing_recorder.span("log_output"):
+                    logger.error(f"Error in UDP server: {e}")
                 
     except Exception as e:
-        logger.error(f"Fatal error in UDP server: {e}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Fatal error in UDP server: {e}")
     finally:
-        sock.close()
-        logger.info("UDP server stopped")
+        with timing_recorder.span("shutdown_udp"):
+            sock.close()
+        with timing_recorder.span("log_output"):
+            logger.info("UDP server stopped")
 
 if __name__ == "__main__":
     timing_recorder.start()
-    logger.info("=== Complete Controller Server ===")
-    logger.info("UDP Controller Server starting up...")
-    logger.info(f"Listening on {HOST}:{PORT}")
-    logger.info(f"Log file: {log_file}")
-    logger.info("Press Ctrl+C to exit")
+    with timing_recorder.span("log_output"):
+        logger.info("=== Complete Controller Server ===")
+    with timing_recorder.span("log_output"):
+        logger.info("UDP Controller Server starting up...")
+    with timing_recorder.span("log_output"):
+        logger.info(f"Listening on {HOST}:{PORT}")
+    with timing_recorder.span("log_output"):
+        logger.info(f"Log file: {log_file}")
+    with timing_recorder.span("log_output"):
+        logger.info("Press Ctrl+C to exit")
 
     show_connection_info()
     
@@ -1848,32 +1992,46 @@ if __name__ == "__main__":
 
         # Failure to bind the optional local endpoint must not stop phone output.
         try:
-            face_input_server.start()
-            logger.info("Facial input listening on 127.0.0.1:42735")
+            with timing_recorder.span("startup_endpoints"):
+                face_input_server.start()
+            with timing_recorder.span("log_output"):
+                logger.info("Facial input listening on 127.0.0.1:42735")
         except OSError as e:
-            logger.warning(f"Facial input endpoint unavailable: {e}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"Facial input endpoint unavailable: {e}")
 
         # The independent local voice endpoint uses the existing pad pair.
         try:
-            voice_input_server.start()
-            logger.info("VoiceAttack input listening on 127.0.0.1:42736")
+            with timing_recorder.span("startup_endpoints"):
+                voice_input_server.start()
+            with timing_recorder.span("log_output"):
+                logger.info("VoiceAttack input listening on 127.0.0.1:42736")
         except OSError as e:
-            logger.warning(f"VoiceAttack input endpoint unavailable: {e}")
+            with timing_recorder.span("log_output"):
+                logger.warning(f"VoiceAttack input endpoint unavailable: {e}")
         
         # Start the UDP server
         udp_server()
         
     except KeyboardInterrupt:
-        print("\nServer shutting down...")
-        logger.info("Server stopping...")
+        with timing_recorder.span("console_output"):
+            print("\nServer shutting down...")
+        with timing_recorder.span("log_output"):
+            logger.info("Server stopping...")
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        with timing_recorder.span("log_output"):
+            logger.error(f"Unexpected error: {e}")
     finally:
-        voice_input_server.stop()
-        face_input_server.stop()
-        stop_camera_follow_worker()
+        with timing_recorder.span("shutdown_voice"):
+            voice_input_server.stop()
+        with timing_recorder.span("shutdown_face"):
+            face_input_server.stop()
+        with timing_recorder.span("shutdown_camera"):
+            stop_camera_follow_worker()
         timing_recorder.close()
-        print("Server stopped")
-        logger.info("Server stopped")
+        with timing_recorder.span("console_output"):
+            print("Server stopped")
+        with timing_recorder.span("log_output"):
+            logger.info("Server stopped")
         
     input("Press Enter to exit...")

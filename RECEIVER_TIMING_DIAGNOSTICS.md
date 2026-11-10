@@ -1,41 +1,45 @@
-# Separate receiver timing diagnostics
+# Receiver hang diagnostics
 
-The diagnostic executable uses the verified Floating Controls receiver source and adds timing observations. It does not change packet ordering, ownership, Hold/Turbo behavior, releases, native values, or the phone protocol. The ordinary source entrypoint leaves timing disabled unless explicitly enabled for that process.
+This separate build helps investigate intermittent receiver freezes while retaining the existing input behavior. It does not fix an unidentified native/driver hang, release a port held by an older process, or change Click Lengthen or other BL4 mods.
 
-## Running the candidate
+## Starting the separate build
 
-The distinct `Simple Controller Receiver (Timing Diagnostics).exe` entrypoint enables `SC_RECEIVER_TIMING=1` only in its own process. By default, it creates a new uniquely named JSONL file under `timing-logs` beside the diagnostic executable. An explicit `SC_RECEIVER_TIMING_DIR` overrides this location. It does not overwrite prior timing logs or change persistent settings.
+Use **Simple Controller Receiver (Hang Diagnostics).exe**, or its matching desktop shortcut. Keep only one receiver running. If Windows cannot finish ending the old receiver and it still owns UDP 42734, restart Windows before using this build. TCP 42735 and 42736 are the existing local face/voice endpoints.
 
-Prepare and inspect the candidate before switching. Close the old receiver before starting the candidate; two receivers must not bind the same port or create competing virtual-controller pairs. Keep the existing receiver and shortcut for recovery. Preparing this build does not authorize replacing the installed EXE, changing its shortcut, stopping it, or launching native outputs automatically.
+The diagnostic entrypoint enables `SC_RECEIVER_TIMING=1` for its own process. Its default directory is `hang-diagnostics` beside the executable. An explicit `SC_RECEIVER_TIMING_DIR` overrides that directory. Normal receiver imports keep diagnostics disabled unless explicitly enabled.
 
-## What is measured
+Each launch creates uniquely named diagnostic files. Rolling retention applies only to files created by that recorder session; it does not scan or clean older sessions, the old `timing-logs` directory, ordinary receiver logs, or user files. Older sessions remain available for investigation and are not automatically deleted. Consequently, disk use across many launches can exceed the per-session limit.
 
-- `udp_receive_wait`: time spent in the socket receive call. Long values also occur normally while there is no input; they do not establish a connectivity fault.
-- `udp_dispatch`: time from returning from `recvfrom` to command dispatch.
-- `udp_process` / `command`: packet/command processing duration. Nested command calls overlap; these totals must not be added together as independent CPU time.
-- `phone_protocol`: the negotiated phone protocol path, including its existing locking and native output work.
-- `lock_wait` / `lock_hold`: wait/hold duration around the receiver's existing `synchronized` callbacks. Direct lock sites are not all separately instrumented.
-- `native_gamepad_update`: time inside each merged gamepad's raw native report-update call.
-- `desktop_output`, `game_mouse_output`, `legacy_mouse_output`, `scroll_output`: the corresponding existing output/handler durations. Legacy mouse timing includes the existing console debug print, so a slow console write can be distinguished from a slow gamepad report.
+Defaults retain up to **64 MiB per launch**, in four segments of up to 16 MiB. Once full, the oldest segment belonging to that same launch is removed to retain recent activity. The watchdog checks every 250 ms, observes operations lasting at least one second, and repeats an unchanged long-operation capture no more than every ten seconds. Idle heartbeats occur every 30 seconds. Stack snapshots and in-memory queues have fixed limits.
 
-Timings are wall-clock durations, not CPU usage. No phone key values, typed characters, commands, coordinates, IP addresses, process/session identities from packets, or payload contents are recorded. Only fixed categories and timing/count statistics enter the diagnostic file.
+## What the capture adds
 
-The input path never formats or writes diagnostic files. It attempts to record into bounded memory without waiting for the recorder's lock; contended samples are counted as dropped. A background writer emits summaries approximately once per second, with bounded slow-event detail for calls taking at least 20 ms. The log is capped at 64 MiB. File/cap failures disable diagnostics while leaving controller processing active.
+- Active operation markers exist while a call is still running, including its fixed category, monotonic start time, Python thread ID, and native thread ID.
+- A watchdog observes those markers without acquiring the receiver output lock. It captures bounded Python stack locations for sustained operations, before they return, rather than relying only on completed duration measurements.
+- Lock acquisition and lock holding are observed separately. Mouse, keyboard, gamepad, logging/console, startup, and shutdown stages help locate the wait.
+- Rolling timing records retain recent activity instead of stopping permanently when an overnight idle log fills. Idle summaries are reduced.
+- Metadata identifies the process and provides UTC/monotonic clock correlation.
 
-Shutdown waits no more than 250 ms for the background writer; if storage is blocked, the final flush is best effort. This prevents a diagnostic file write from holding up normal receiver shutdown.
+The additional diagnostics record categories and code locations, not command payloads, pressed keys, pointer coordinates, typed text, stack locals, or source line contents. Existing ordinary receiver logs retain their historical behavior and may contain input commands; they are not the privacy-filtered diagnostic log.
 
-## Interpreting a recurrence
+This does not identify clicks originating in Unified Remote or monitor that application. Correlate the receiver capture with the reported time of switching apps/right-clicking; a receiver stall record alone does not attribute causation to another program.
 
-A long `udp_process` with a matching long `native_gamepad_update` points toward the virtual-controller/native call. A long command with long lock wait points toward a receiver lock holder. A long legacy mouse handler with short gamepad calls can implicate its mouse/console path. Short processing after a receive gap or a burst cannot alone distinguish phone-side queueing, network delivery, and packets waiting in Windows' socket buffer.
+## Interpreting a long operation
 
-Receiver read timestamps are not network-adapter arrival timestamps or phone touch/send timestamps. A normal heartbeat receive wait must not be labeled a stall, and this diagnostic does not discard old packets or attempt an unverified queue fix.
+An idle `udp_receive_wait` is normal and does not trigger a stall alert by itself. A long command can be an intentional WAIT. A watchdog record is evidence of an operation still in progress, not a diagnosis or a reason to terminate anything. The watchdog never resets controls, cancels commands, or kills processes.
 
-## Verification boundary
+Nested durations overlap and must not be added together as independent CPU time. Python stacks show the call site entering a native API, not the native/kernel stack below it. If the interpreter, Windows, or disk is itself blocked, this in-process capture may also be unable to progress. A native stack capture may still be required to distinguish Windows input, ViGEm, networking, or another driver. This build does not claim to eliminate that limitation.
 
-Tests replace all native input modules before importing the receiver. They use fake outputs and mock sockets, an isolated temporary directory, and controlled native/lock delays. Packaging and static archive/source checks do not prove live game feel, physical controller output, absence of hardware-specific latency, or the recurrence's root cause. Do not run connected Android tests or install/update the primary phone for this receiver-only diagnostic.
+Explicit shutdown stages are captured before the recorder closes. Later interpreter finalization or native ViGEm destructor work may occur after capture stops; this build cannot observe those stages or continue recording after Windows terminates its threads.
 
-The November 2, 2026 candidate passed all 282 receiver/timing tests. A focused review strengthened the enabled integration test to require positive stage counts and wait for its test writer's final flush; all 17 timing-focused tests then passed. Static archive checks verified all eight bundled Python modules against fresh compilation of their delivery sources and both ViGEm DLLs against their original bytes. The EXE was not executed.
+For the reported incident, useful stages include releases sent when leaving the Android app, native mouse/keyboard output, lock waiting, and shutdown. There is no need to disable Click Lengthen to collect this capture. First confirm the new receiver actually controls the PC and its diagnostic files update during use.
 
-The running Floating Controls receiver's SHA-256 was `4CBF88F909E38EDA70ACEA63517D720820FFA31530E2E02D9F6EB10835BFCF18`. It exactly matched the published receiver, whose six embedded modules matched the published source and the floating-controls checkout after newline normalization. The diagnostic source branch starts from commit `18172c3e2599616cd43f223821df83bef87ab0fc`; the existing receiver remains the current working version.
+## Preservation and verification
 
-A synthetic benchmark of 50,000 enabled counter records took 17.2 ms on this PC (about 0.34 microseconds per record). That measures counter recording only; it does not establish the full diagnostic receiver's live hardware/game overhead or comfort.
+The patch does not change packet ordering, ownership, Hold/Turbo, release semantics, WAIT behavior, native output values, or the phone protocol. Existing shutdown/recovery weaknesses are observed rather than silently rewritten.
+
+Tests substitute fake keyboard/mouse/gamepad modules before importing receiver code. They use isolated test files and fake sockets for the instrumented paths. No connected Android tests, phone installs, driver changes, mod changes, or live input generation belong to this validation.
+
+`build_timing_receiver.ps1` requires separate, nonexistent `-DeliveryDirectory` and `-ScratchDirectory` paths. Reviewed source, EXE, and reports go in the delivery; intermediate build/cache/spec/temp files go in scratch. `verify_timing_bundle.py` compares the packaged Python code and both ViGEm DLLs to the reviewed build inputs without launching the executable. Test/build success does not establish real-game performance or prove capture of the original intermittent Windows hang.
+
+The November 10, 2026 patch passed 294 receiver tests, including 27 recorder tests and two fake-native integration scenarios. Deliberately blocked keyboard/mouse/gamepad/log operations and output-lock waits were observed before they completed. Rotation, privacy, bounded I/O behavior, and transient watchdog failure recovery were checked. An independent AST comparison found no non-diagnostic input/protocol behavior changes. A synthetic 50,000-iteration benchmark averaged about 4.5 microseconds for an observed lock plus a fake native-output span on this PC; that is not a measurement of gameplay latency or the complete receiver workload.

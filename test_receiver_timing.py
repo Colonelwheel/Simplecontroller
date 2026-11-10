@@ -48,7 +48,7 @@ class TimingTests(unittest.TestCase):
                 recorder._thread.join(3)
 
     def make(self, **kwargs):
-        recorder = TimingRecorder(enabled=True, interval_seconds=10, **kwargs)
+        recorder = TimingRecorder(enabled=True, interval_seconds=kwargs.pop("interval_seconds", 10), **kwargs)
         self.recorders.append(recorder)
         return recorder
 
@@ -56,7 +56,8 @@ class TimingTests(unittest.TestCase):
         recorder.close()
         recorder._thread.join(3)
         self.assertFalse(recorder._thread.is_alive())
-        return [json.loads(line) for line in recorder.path.read_text(encoding="utf-8").splitlines()]
+        return [json.loads(line) for path in recorder.paths
+                for line in path.read_text(encoding="utf-8").splitlines()]
 
     def test_disabled_start_record_and_span_create_nothing(self):
         recorder = TimingRecorder()
@@ -113,6 +114,7 @@ class TimingTests(unittest.TestCase):
         self.recorders.append(recorder)
         with mock.patch.object(recorder, "_open_stream", return_value=stream):
             recorder.start(self.directory)
+        recorder.record("command", 1)
         try:
             self.assertTrue(stream.entered.wait(1))
             done = threading.Event()
@@ -244,15 +246,231 @@ class TimingTests(unittest.TestCase):
         self.assertEqual(recorder._reason, "write_error")
         stream.close.assert_called_once()
 
-    def test_size_cap_is_hard_and_disables_recording(self):
+    def test_impossibly_small_budget_fails_closed_without_exceeding_limit(self):
         recorder = self.make(max_bytes=800)
         path = recorder.start(self.directory)
         recorder.record("command", 30_000_000)
         self.finish(recorder)
         self.assertLessEqual(path.stat().st_size, 800)
         self.assertFalse(recorder.enabled)
-        self.assertEqual(recorder._reason, "size_limit")
+        self.assertEqual(recorder._reason, "record_too_large")
         recorder.record("command", 1)
+
+    def wait_until(self, predicate, message="Condition was not reached"):
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.005)
+        self.fail(message)
+
+    def test_never_returned_operation_emits_bounded_private_frame_metadata(self):
+        recorder = self.make(interval_seconds=0.01, watchdog_interval_seconds=0.005,
+                             stall_threshold_seconds=0.02)
+        recorder.start(self.directory)
+        entered, release = threading.Event(), threading.Event()
+
+        def fake_output():
+            private_input = "PRIVATE_INPUT_MUST_NOT_BE_LOGGED"
+            with recorder.span("native_keyboard_output"):
+                entered.set()
+                release.wait(2)
+            return private_input
+
+        thread = threading.Thread(target=fake_output)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.wait_until(lambda: b'"event":"long_operation"' in recorder.path.read_bytes())
+            self.assertTrue(thread.is_alive(), "operation returned before it was captured")
+            records = [json.loads(line) for line in recorder.path.read_text().splitlines()]
+            event = next(r for r in records if r["event"] == "long_operation")
+            self.assertEqual(event["pid"], os.getpid())
+            operation = event["operations"][0]
+            self.assertEqual(operation["kind"], "native_keyboard_output")
+            self.assertEqual(operation["native_thread_id"], thread.native_id)
+            self.assertGreater(operation["elapsed_ns"], 0)
+            self.assertNotIn("PRIVATE_INPUT_MUST_NOT_BE_LOGGED", recorder.path.read_text())
+            for entry in event["threads"]:
+                self.assertLessEqual(len(entry["frames"]), 16)
+                for frame in entry["frames"]:
+                    self.assertEqual(set(frame), {"file", "function", "line"})
+                    self.assertNotIn("\\", frame["file"])
+                    self.assertNotIn("/", frame["file"])
+        finally:
+            release.set()
+            thread.join(2)
+
+    def test_completed_operation_cannot_stay_active_when_diagnostic_locks_contend(self):
+        recorder = self.make()
+        recorder.start(self.directory)
+        span = recorder.span("command")
+        span.__enter__()
+        recorder._operations_lock.acquire()
+        recorder._lock.acquire()
+        done = threading.Event()
+        thread = threading.Thread(target=lambda: (span.__exit__(None, None, None), done.set()))
+        try:
+            thread.start()
+            self.assertTrue(done.wait(0.25))
+            self.assertTrue(span.operation.done)
+        finally:
+            recorder._lock.release()
+            recorder._operations_lock.release()
+            thread.join(1)
+        self.assertEqual(recorder._active_snapshot(), [])
+
+    def test_observed_rlock_preserves_nested_ownership_and_original_exception(self):
+        recorder = self.make()
+        recorder.start(self.directory)
+        lock = threading.RLock()
+        error = RuntimeError("original")
+        with self.assertRaises(RuntimeError) as caught:
+            with recorder.observe_lock(lock):
+                with recorder.observe_lock(lock):
+                    self.assertTrue(lock._is_owned())
+                    raise error
+        self.assertIs(caught.exception, error)
+        self.assertFalse(lock._is_owned())
+        self.assertEqual(recorder._active_snapshot(), [])
+        with mock.patch.object(recorder, "span", side_effect=OSError("observer")):
+            with recorder.observe_lock(lock):
+                self.assertTrue(lock._is_owned())
+        self.assertFalse(lock._is_owned())
+        self.assertIs(TimingRecorder().observe_lock(lock), lock)
+
+    def test_waiting_on_output_lock_is_observed_before_acquisition(self):
+        recorder = self.make(watchdog_interval_seconds=0.005, stall_threshold_seconds=0.02)
+        recorder.start(self.directory)
+        lock, finished = threading.Lock(), threading.Event()
+        lock.acquire()
+
+        def work():
+            with recorder.observe_lock(lock):
+                finished.set()
+
+        thread = threading.Thread(target=work)
+        thread.start()
+        try:
+            self.wait_until(lambda: any(o["kind"] == "lock_wait" for o in recorder._active_snapshot()))
+            self.wait_until(lambda: bool(recorder._pending))
+            self.assertFalse(finished.is_set())
+        finally:
+            lock.release()
+            thread.join(2)
+        self.assertTrue(finished.is_set())
+
+    def test_idle_receive_and_authored_wait_do_not_raise_long_operation_alert(self):
+        recorder = self.make(watchdog_interval_seconds=0.005, stall_threshold_seconds=0.01)
+        recorder.start(self.directory)
+        with recorder.span("udp_receive_wait"):
+            time.sleep(0.05)
+            self.assertTrue(recorder._active_snapshot()[0]["expected_wait"])
+            self.assertFalse(recorder._pending)
+        with recorder.span("command"):
+            with recorder.span("legacy_wait"):
+                time.sleep(0.05)
+                self.assertFalse(recorder._pending)
+
+    def test_watchdog_continues_with_blocked_writer_and_bounded_queue(self):
+        stream = BlockingStream()
+        recorder = self.make(watchdog_interval_seconds=0.005, stall_threshold_seconds=0.01,
+                             repeat_stall_seconds=0.01, max_pending_snapshots=2)
+        with mock.patch.object(recorder, "_open_stream", return_value=stream):
+            recorder.start(self.directory)
+        try:
+            self.assertTrue(stream.entered.wait(1))
+            with recorder.span("native_gamepad_update"):
+                self.wait_until(lambda: recorder._dropped_snapshots > 0)
+                self.assertEqual(len(recorder._pending), 2)
+                self.assertTrue(recorder._watchdog_thread.is_alive())
+                before = time.monotonic()
+                recorder.close()
+                self.assertLess(time.monotonic() - before, 0.5)
+        finally:
+            stream.release.set()
+
+    def test_watchdog_recovers_after_transient_frame_capture_failure(self):
+        recorder = self.make(watchdog_interval_seconds=0.005, stall_threshold_seconds=0.01)
+        real_frames = recorder._frames
+        calls = []
+
+        def flaky_frames(operations):
+            calls.append(1)
+            if len(calls) == 1:
+                raise RuntimeError("private failure text must not be recorded")
+            return real_frames(operations)
+
+        with mock.patch.object(recorder, "_frames", side_effect=flaky_frames):
+            recorder.start(self.directory)
+            with recorder.span("native_mouse_output"):
+                self.wait_until(lambda: bool(recorder._pending))
+                self.assertEqual(recorder._dropped_snapshots, 1)
+                self.assertTrue(recorder._watchdog_thread.is_alive())
+                self.assertGreaterEqual(len(calls), 2)
+        records = self.finish(recorder)
+        self.assertTrue(any(r["event"] == "long_operation" for r in records))
+        self.assertNotIn("private failure text", recorder.path.read_text())
+
+    def test_active_registry_has_a_hard_bound(self):
+        recorder = self.make(max_active_operations=3)
+        recorder.start(self.directory)
+        spans = [recorder.span("command") for _ in range(20)]
+        for span in spans:
+            span.__enter__()
+        self.assertEqual(len(recorder._active_snapshot()), 3)
+        self.assertEqual(recorder._dropped_active, 17)
+        for span in spans:
+            span.__exit__(None, None, None)
+        self.assertEqual(recorder._active_snapshot(), [])
+
+    def test_rollover_keeps_recording_and_never_touches_prior_files(self):
+        prior = self.directory / "receiver-timing-prior-session.jsonl"
+        prior.write_bytes(b"preserve previous evidence")
+        recorder = self.make(max_bytes=32768)
+        # Exercise the writer's rotation deterministically, without a live input process.
+        recorder._base_path = recorder._new_path(self.directory)
+        recorder._open_segment(recorder._base_path)
+        self.assertTrue(recorder._write(recorder._metadata()))
+        try:
+            for number in range(40):
+                self.assertTrue(recorder._write({"event": "test", "number": number, "padding": "x" * 3000}))
+            self.assertTrue(recorder.enabled)
+            self.assertGreater(recorder._segment_number, 4)
+            self.assertEqual(len(recorder.paths), 4)
+            self.assertLessEqual(sum(p.stat().st_size for p in recorder.paths), 32768)
+            self.assertEqual(prior.read_bytes(), b"preserve previous evidence")
+            self.assertIn('"number":39', recorder.path.read_text())
+            self.assertTrue(all(json.loads(p.read_text().splitlines()[0])["event"] == "metadata"
+                                for p in recorder.paths))
+        finally:
+            recorder._stream.close()
+
+    def test_rotation_preserves_externally_modified_session_segment(self):
+        recorder = self.make(max_bytes=16384, retain_segments=2)
+        recorder._base_path = recorder._new_path(self.directory)
+        recorder._open_segment(recorder._base_path)
+        recorder._write(recorder._metadata())
+        first = recorder.path
+        recorder._rotate()
+        with first.open("ab") as stream:
+            stream.write(b"external addition")
+        expected = first.read_bytes()
+        try:
+            with self.assertRaises(OSError):
+                recorder._rotate()
+            self.assertEqual(first.read_bytes(), expected)
+        finally:
+            recorder._stream.close()
+
+    def test_idle_period_has_only_compact_heartbeat_until_close(self):
+        recorder = self.make(interval_seconds=0.005, idle_heartbeat_seconds=0.025)
+        recorder.start(self.directory)
+        with recorder.span("udp_receive_wait"):
+            self.wait_until(lambda: b'"event":"heartbeat"' in recorder.path.read_bytes())
+            records = [json.loads(line) for line in recorder.path.read_text().splitlines()]
+            self.assertFalse(any(r["event"] == "summary" for r in records))
+            self.assertLess(recorder.path.stat().st_size, 5000)
 
     def test_periodic_writer_flushes_without_close(self):
         recorder = TimingRecorder(enabled=True, interval_seconds=0.02)

@@ -27,6 +27,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Callable, Iterable
+from receiver_timing import recorder as timing_recorder
 
 
 PROTOCOL_VERSION = 1
@@ -116,12 +117,12 @@ class VoiceInputState:
         self._sessions: dict[str, _AcceptedRequest] = {}
 
     def ready(self) -> dict:
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return {"v": PROTOCOL_VERSION, "op": "ready",
                     "receiver": self.receiver, "epoch": self.epoch}
 
     def error(self, message: str) -> dict:
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return {"v": PROTOCOL_VERSION, "op": "error", "message": message,
                     "receiver": self.receiver, "epoch": self.epoch}
 
@@ -179,7 +180,7 @@ class VoiceInputState:
 
     def handle(self, request: object) -> dict:
         """Validate and apply one command atomically, returning ack or error."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             try:
                 request = self._validate(request)
                 fingerprint = json.dumps(request, sort_keys=True, separators=(",", ":"),
@@ -249,7 +250,7 @@ class VoiceInputState:
 
     def tick(self) -> None:
         """Expire finite voice inputs. Call approximately every 10 ms."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             now = self.clock()
             expired = [key for key, deadline in self._deadlines.items() if deadline <= now]
             for key in expired:
@@ -261,9 +262,10 @@ class VoiceInputState:
                 else:
                     self._release(key)
 
+    @timing_recorder.measure("shutdown_outputs")
     def reset(self, player_ids: Iterable[str]) -> None:
         """Clear selected voice ownership/timers and invalidate queued requests."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             players = set(player_ids)
             if not players.issubset(self.gamepads):
                 raise ValueError("cannot reset unknown player")
@@ -316,6 +318,7 @@ class VoiceInputServer:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
 
+    @timing_recorder.measure("log_output")
     def _log(self, message: str) -> None:
         if self.logger is not None:
             try:
@@ -347,6 +350,7 @@ class VoiceInputServer:
         self._log(f"VoiceAttack input listening on {self.host}:{self.port}")
         return self
 
+    @timing_recorder.measure("shutdown_voice")
     def stop(self) -> None:
         self._stop.set()
         if self._thread is not None and self._thread is not threading.current_thread():
@@ -432,17 +436,18 @@ class VoiceInputServer:
         except Exception as exc:
             self._log(f"VoiceAttack input stopped: {type(exc).__name__}: {exc}")
         finally:
-            # A stopped scheduler must not leave finite or persistent voice
-            # inputs held. This clears voice only, preserving phone/face.
-            try:
-                self.state.reset(tuple(self.state.gamepads))
-            except Exception as exc:
-                self._log(f"VoiceAttack cleanup failed: {type(exc).__name__}: {exc}")
-            for sock in clients:
-                sock.close()
-            if listener is not None:
-                listener.close()
-            self._listener = None
+            with timing_recorder.span("shutdown_voice"):
+                # A stopped scheduler must not leave finite or persistent voice
+                # inputs held. This clears voice only, preserving phone/face.
+                try:
+                    self.state.reset(tuple(self.state.gamepads))
+                except Exception as exc:
+                    self._log(f"VoiceAttack cleanup failed: {type(exc).__name__}: {exc}")
+                for sock in clients:
+                    sock.close()
+                if listener is not None:
+                    listener.close()
+                self._listener = None
 
 
 __all__ = ["VoiceInputState", "VoiceInputServer", "ProtocolError", "decode_request",

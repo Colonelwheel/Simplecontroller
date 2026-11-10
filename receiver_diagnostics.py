@@ -9,7 +9,7 @@ def main():
     os.environ["SC_RECEIVER_TIMING"] = "1"
     if "SC_RECEIVER_TIMING_DIR" not in os.environ:
         base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-        os.environ["SC_RECEIVER_TIMING_DIR"] = str(base / "timing-logs")
+        os.environ["SC_RECEIVER_TIMING_DIR"] = str(base / "hang-diagnostics")
     # Import only after enabling this separate process's diagnostics. There is no
     # persistent setting change, and no receiver is imported by static checks.
     from receiver_timing import recorder
