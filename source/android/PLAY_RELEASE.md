@@ -15,7 +15,8 @@ versioned export/import contract in `PROFILE_TRANSFER_FORMAT.md`; the two apps d
 Android storage.
 
 The main controller activity uses the app's saved Play Mode orientation lock rather than the phone's
-rotation sensor. The optional Touch Sensor Test activity remains sideload-only and portrait-only.
+rotation sensor. The standalone Touch Sensor Test activity and its extra launcher icon have been
+removed from both distributions. TouchAim and its calibration workflow remain available.
 
 ## Build commands
 

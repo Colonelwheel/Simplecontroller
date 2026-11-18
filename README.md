@@ -81,13 +81,13 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Facial-input setup, matching source and packaging recipe | [facial-input](facial-input/README.md) |
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
 
-The APK uses Android source commit `d6e20f6`, including per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, and per-stage aim tuning. Both Android variants passed 626 JVM tests each and lint with zero errors; the APK and Play AAB builds passed. The supplied receiver EXE and receiver source remain unchanged and already support floating controls. Compilation and package checks do not establish compatibility with every game, webcam or network. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
+The APK uses the Android source in this branch, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Both Android variants passed 626 JVM tests each and lint with zero errors; the APK and Play AAB builds passed. The supplied receiver EXE and receiver source remain unchanged and already support floating controls. Compilation and package checks do not establish compatibility with every game, webcam or network. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
 
 SHA-256 checksums:
 
 ```text
 SimpleController.apk
-9c378f407503fba6d161b5c4384ba15d6da4a8518a72ba5fb90b5ce264e28b3b
+8e50f99b7eb8ea08b32581dc15c6f39319417ed7ff836aa1a4d39b9385522149
 
 SimpleControllerReceiver.exe
 4cbf88f909e38eda70acea63517d720820ffa31530e2e02d9f6eb10835bfcf18

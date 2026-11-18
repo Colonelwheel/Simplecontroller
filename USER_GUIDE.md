@@ -152,7 +152,7 @@ Tune sensitivity, deadzone, displacement, inversion, and stick centering as appr
 
 ### Touch Aim and Camera Follow
 
-**Touch Aim** combines movement with actions selected by finger-contact geometry. It offers contact-score thresholds and a calibrated two-state Aim/Shoot workflow. Contact Size, Major, and Minor are not dependable force measurements: phones and finger angles differ. Use Touch Sensor Test and calibration to see whether the stages are distinguishable for you. Keep Release All available while tuning this experimental input.
+**Touch Aim** combines movement with actions selected by finger-contact geometry. It offers contact-score thresholds and a calibrated two-state Aim/Shoot workflow. Contact Size, Major, and Minor are not dependable force measurements: phones and finger angles differ. Use Touch Aim calibration to see whether Aim and Shoot are distinguishable for you. Keep Release All available while tuning this experimental input.
 
 **Camera Follow** generates horizontal right-stick assistance from eligible left-stick movement through the Windows receiver. A dedicated Camera Follow Button can set strength. Movement controls can opt out with **Exclude from Camera Follow**; manual right-stick input takes priority. Optional mouse-engagement suppression is available in Floating / Camera Follow options. Game settings still affect the resulting camera motion.
 
