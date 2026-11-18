@@ -808,9 +808,7 @@ renamed, or deleted from the TouchAim property sheet.
 
 ### Touch Sensor Test
 
-The APK installs a second launcher icon called **Touch Sensor Test**. It is an optional diagnostic tool, not a second controller app.
-
-It walks one finger through six samples—normal, flattened, and pressed contact while still and moving—then lets you copy the measurements. It sends no controller output. The results can help choose Touch Aim thresholds for a specific phone and finger position.
+The standalone **Touch Sensor Test** screen and its second launcher icon have been removed. Touch Aim and its built-in two-state calibration workflow remain available for tuning contact-based actions.
 
 ## Camera Follow
 
@@ -999,7 +997,7 @@ There were no feature commits from August 29 through September 7. The following 
 
 ### 1. Touch Sensor Test — developed September 8, committed September 10
 
-A separate diagnostic screen records one-finger contact Size, Major, and Minor measurements while still and moving. Open the **Touch Sensor Test** launcher icon, complete its six prompted touches, then copy the results. It does not send controller input.
+This historical addition recorded one-finger contact Size, Major, and Minor measurements while still and moving. The standalone screen and launcher icon were removed in November 2026; Touch Aim calibration remains available.
 
 ### 2. Touch Aim — developed September 8, committed September 10
 

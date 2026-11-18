@@ -68,8 +68,7 @@ Primary files:
 `MainActivity` explicitly requests Portrait or Landscape and never depends on Android auto-rotate.
 Two large controls are present only in Edit Mode: one switches the editor orientation and one toggles
 the persisted Play Mode lock. Entering Play Mode and app startup apply that saved lock. Both controls
-use `GONE` in Play Mode, so they are neither visible nor tappable while gaming. The sideload-only
-`TouchDiagnosticActivity` remains independently locked to Portrait.
+use `GONE` in Play Mode, so they are neither visible nor tappable while gaming.
 
 The main activity declares Android 16's temporary restricted-resizability compatibility property so
 API-36 large-screen devices continue honoring its explicit orientation request. Most phones are
@@ -112,9 +111,9 @@ and profile-transfer contract:
 - `playRelease` uses the permanent application ID `io.github.colonelwheel.simplecontroller` and
   target API 36 for Google Play. It installs beside the debug app rather than overwriting it.
 
-Only those two combinations are enabled. The Touch Sensor Test activity and its second launcher
-icon are declared only in the `sideload` source set, so they remain available for development but
-are excluded from the Play manifest. Module-wide compile SDK is 36, and Android Gradle Plugin
+Only those two combinations are enabled. The standalone Touch Sensor Test activity and its
+second launcher icon have been removed from both distributions. TouchAim and its calibration
+workflow remain available. Module-wide compile SDK is 36, and Android Gradle Plugin
 8.10.1 is used with the existing Gradle 8.11.1 wrapper because that plugin supports API 36.
 
 Use `assembleSideloadDebug` for the existing feature APK and `bundlePlayRelease` for the Play AAB.
