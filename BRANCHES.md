@@ -7,7 +7,7 @@
 | [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Public release | Public-release snapshot `69eee7d`; Android work based on `d6e20f6` with the standalone diagnostic removed |
 | [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development features awaiting release promotion | Floating-controls snapshot `1ea6ffa`, including Macro Mode and per-command `(U...)` timing |
 
-`main` is the default public branch. The historical `master` branch remains unchanged. Both current branches use the same layout:
+`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same layout:
 
 ```text
 README.md, USER_GUIDE.md, BRANCHES.md
@@ -52,7 +52,7 @@ Building or testing Play Release from dev uses dev source. It does not copy code
 
 The root README links to downloads from the branch it describes. GitHub **Code → Download ZIP** provides the committed snapshot of the selected branch, without local untracked build data or Git's working-copy metadata. It is a source/file snapshot, not a complete backup of Git history or local files.
 
-Legacy branches remain available for historical references and existing links, including `codex/play-store-release` and `codex/floating-controls`. They are preserved snapshots, not aliases that automatically follow main or dev. Existing local folders and branch references are retained; their concrete PC locations belong in the private local workspace map.
+The public repository now publishes only `main` and `dev`. On November 22, 2026, the eight older remote branches, including `master`, `codex/play-store-release`, and `codex/floating-controls`, were retired after their exact tips were preserved in local archive branches and verified complete-history backups. Existing local folders and branch references remain intact; their concrete PC locations belong in the private local workspace map. Commit history reachable through main/dev and the preserved public tags remains available on GitHub; work unique to retired branches is retained in the local archives and backups. URLs containing retired branch names no longer resolve. Current README download links use main/dev, and fixed release-asset links remain unchanged.
 
 Keep the historical recovery tag `stable-2026-09-10` pointing to its original target, and preserve the history containing recovery commit `c6b60428296e1bc2a93fe3859bb962104f769bc9`. Also retain `safe-before-facial-movement-20261010` and the `facial-input-windows-2026-10-16` release tag. Current FacialInput download links intentionally reference that existing versioned release.
 
