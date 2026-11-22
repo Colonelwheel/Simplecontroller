@@ -149,10 +149,10 @@ class DelayPayloadProfileCompatibilityTest {
     }
 
     @Test fun futureFormatAndLibrarySchema_stillRejectBeforeUnknownEnumDecoding() {
-        val controller = """{"formatVersion":17,"pages":[{"controls":[{"type":"FUTURE_CONTROL"}]}]}"""
+        val controller = """{"formatVersion":${MAX_SUPPORTED_CONTROLLER_PROFILE_FORMAT_VERSION + 1},"pages":[{"controls":[{"type":"FUTURE_CONTROL"}]}]}"""
         assertTrue(runCatching { decodeControllerProfile(controller, "Future") }
             .exceptionOrNull()!!.message.orEmpty().contains("newer"))
-        val preset = """{"schemaVersion":8,"zone":{"kind":"FUTURE_RING"}}"""
+        val preset = """{"schemaVersion":${FloatingRingPreset.CURRENT_SCHEMA_VERSION + 1},"zone":{"kind":"FUTURE_RING"}}"""
         assertTrue(runCatching { decodeFloatingRingPreset(preset) }.exceptionOrNull()!!.message.orEmpty().contains("newer"))
     }
 

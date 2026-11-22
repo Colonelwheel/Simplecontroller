@@ -155,7 +155,8 @@ object TouchAimCalibrationStore {
             requirePayloadFeatureSchema(value, "calibration profile", TouchAimCalibrationProfile.CURRENT_SCHEMA_VERSION,
                 TouchAimCalibrationProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
                 repeatVersion = TouchAimCalibrationProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-                delayVersion = TouchAimCalibrationProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                delayVersion = TouchAimCalibrationProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+                releaseVersion = TouchAimCalibrationProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
             TouchAimCalibrationCatalog.migrated(
                 json.decodeFromString<TouchAimCalibrationProfile>(text)
             )?.takeIf { profile -> profile.id.equals(fileId, ignoreCase = true) }

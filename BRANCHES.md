@@ -7,7 +7,7 @@
 | [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Public release | Public-release snapshot `69eee7d`; Android work based on `d6e20f6` with the standalone diagnostic removed |
 | [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development features awaiting release promotion | Floating-controls snapshot `1ea6ffa`, including Macro Mode and per-command `(U...)` timing |
 
-Both branches use the same layout:
+`main` is the default public branch. The historical `master` branch remains unchanged. Both current branches use the same layout:
 
 ```text
 README.md, USER_GUIDE.md, BRANCHES.md
@@ -24,7 +24,7 @@ The main/dev setup preserves existing packaged APK/EXE contents. New source orga
 
 The current main Android source accepts controller-profile formats through **16**. Dev supports **17** for stored Macro Mode or `(U...)` timed releases, including inactive settings. Older supported profiles remain readable by dev.
 
-A profile or all-profile backup containing unsupported format-17 settings cannot be imported into this main release. It must be rejected rather than silently dropping those settings. Keep verified external backups before moving between app versions, and retain the previous compatible APK. Do not uninstall or clear private app data to switch branches or resolve a signing issue.
+A profile or all-profile backup containing unsupported format-17 settings cannot be imported into the current main release. It must be rejected rather than silently dropping those settings. Keep verified external backups before moving between app versions, and retain the previous compatible APK. Do not uninstall or clear private app data to switch branches or resolve a signing issue.
 
 See [the Android profile-transfer contract](source/android/PROFILE_TRANSFER_FORMAT.md) for conditional nested formats and reusable-profile schemas. The branch reorganization does not change serialized data, application IDs, or signing configuration.
 
@@ -57,3 +57,9 @@ Legacy branches remain available for historical references and existing links, i
 Keep the historical recovery tag `stable-2026-09-10` pointing to its original target, and preserve the history containing recovery commit `c6b60428296e1bc2a93fe3859bb962104f769bc9`. Also retain `safe-before-facial-movement-20261010` and the `facial-input-windows-2026-10-16` release tag. Current FacialInput download links intentionally reference that existing versioned release.
 
 Do not force-push, recreate history, remove historical references, or retire old folders/branches as part of routine release promotion. Any later cleanup requires an explicit preservation plan and authorization for the affected data and links.
+
+## Current source layout and historical material
+
+Dev retains the current Android module, receiver companions/tests, and reusable helpers in the common source layout. See [ARCHITECTURE.md](ARCHITECTURE.md) for current entrypoints. The long historical architecture dump, old readme transcript, private restore notes, credential-bearing legacy firmware sketches, old binary collections, and generated build/IDE data are not copied into these new public working tips. They remain in their original local folders and preserved history; this setup does not erase or rewrite those records.
+
+Detailed Android feature documents remain under `source/android` so their module-relative `app/src/...` references keep their meaning. Dated verification, legacy delivery filenames, and old desktop shortcuts are historical evidence rather than current deployment instructions. Local workspace/device maps and backups remain private.

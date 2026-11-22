@@ -2,7 +2,7 @@
 
 SimpleController turns an Android phone or tablet into a customizable controller for a Windows PC. The phone sends commands over your local network to the Windows receiver, which produces keyboard, mouse, or virtual Xbox-controller input. Buttons, sticks, aiming surfaces, and floating controls can be arranged around your comfortable reach and operated with one finger.
 
-This guide covers the **`main` public release**. [The `dev` branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) also includes Macro Mode and the `(U...)` timed-release modifier. Profiles using those features can require format 17, which this release's format-16 importer cannot read. Keep a verified backup before moving between versions; see [branches and compatibility](BRANCHES.md).
+This guide covers **`dev`, the development version**, including Macro Mode and the `(U...)` timed-release modifier. [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) is the public release. Profiles using Macro Mode/U can require format 17, which the current main format-16 importer cannot read. Keep a verified backup before moving between versions; see [branches and compatibility](BRANCHES.md).
 
 ## Install and connect
 
@@ -113,6 +113,7 @@ Modifiers follow the individual command. For example, `LT:1.0,RT:1.0(D100)` pres
 | `(I)` | Start from source activation, overriding whole-payload Send on release timing. D still applies if present. |
 | `(SOR)` | Send one finite press after normal source release; the default press lasts 90 ms. |
 | `(D100)` | Wait 100 ms before activating this command. |
+| `(U100)` | Release this command 100 ms after its actual activation. |
 | `(HRD200)` | Keep an already pressed output held for 200 ms after its source ends. |
 | `(R100)` | Repeat this command every 100 ms while held, normally 50 ms pressed and 50 ms released. |
 
@@ -121,6 +122,19 @@ Use Hold mappings for sustained TouchAim or ring actions. With lower-Hold carryo
 D delays only the first R press, or delays a SOR shot after release. R does not require global Turbo. Global Turbo preserves explicit R cadence and keeps HRD commands steady. R and SOR cannot decorate the same command. Hard cancellation, Release All, disconnect and lifecycle cleanup cancel pending modifiers and release outputs immediately. See [modifier details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md) for limits and finite-action timing.
 
 TouchAim sensitivity accepts numeric values such as `0.001`. Manual three-stage mode also offers optional sensitivity and Enter Stage Confirmation milliseconds for Aim-only, Low, Medium and High; blank sensitivity inherits the main value, and blank or zero confirmation preserves immediate entry.
+
+### Button Macro Mode
+
+In an ordinary Button's Behavior settings, enable **Macro Mode** to tap once and complete a finite payload after lifting. Commands without a duration use a 90 ms press. For example:
+
+```text
+CTRL,ALT,TAB
+X360A(U100),X360A(D500)(U100),X360B(D800)(U100)
+```
+
+The first payload presses Ctrl+Alt+Tab together for 90 ms. The second presses A during 0–100 ms, A again during 500–600 ms, and B during 800–900 ms. Each D is measured independently from initial activation; commas do not add waits or release another command.
+
+Macro Mode ignores global Hold/Turbo, rejects R repetition, and cannot combine with Hold Toggle, Auto-Tap, Button Aim, or directional button inputs. Additional taps while it runs are ignored. Release All and hard cancellation stop pending and active commands. Outside Macro Mode, U caps an individual press duration; releasing its source early still follows normal cancellation rules. See [the complete timing contract](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md).
 
 ## Holding, repeating, and sliding
 
@@ -200,4 +214,4 @@ The [facial-input guide](facial-input/README.md) covers source installation, dev
 
 Receiver logs are under `%LOCALAPPDATA%\SimpleControllerReceiver\touchpad_logs`. When reporting an issue, include app/receiver versions, connection type, a minimal payload example, and what happened. Separate controller-tester results from game behavior.
 
-Public Android and receiver source is under [source/android](source/android/) and [source/receiver](source/receiver/). The [VoiceAttack guide](voiceattack/USER_GUIDE.md) covers optional voice commands through the receiver. Compilation and automated checks do not establish touch comfort, camera behavior, or compatibility with every game.
+Public Android and receiver source is under [source/android](source/android/) and [source/receiver](source/receiver/). The [detailed development guide](source/android/SIMPLECONTROLLER_USER_GUIDE.md) and [source map](ARCHITECTURE.md) cover additional settings and implementation locations. The [VoiceAttack guide](voiceattack/USER_GUIDE.md) covers optional voice commands through the receiver. Compilation and automated checks do not establish touch comfort, camera behavior, or compatibility with every game.

@@ -6,11 +6,11 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-This is **`main`, the public release branch**. The [development branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) includes newer features, currently Button Macro Mode and the `(U...)` timed-release modifier. See [branches and compatibility](BRANCHES.md) before moving profiles between versions.
+This is **`dev`, the development branch**. It includes Button Macro Mode and the `(U...)` timed-release modifier. For the public release, use [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main). See [branches and compatibility](BRANCHES.md) before moving profiles between versions.
 
-- [Download the Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleController.apk) (open this link in your phone browser)
-- [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleControllerReceiver.exe)
-- [Download the ViGEmBus driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/ViGEmBus_1.22.0_x64_x86_arm64.exe)
+- [Download the development Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleController.apk) (open this link in your phone browser)
+- [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleControllerReceiver.exe)
+- [Download the ViGEmBus driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/ViGEmBus_1.22.0_x64_x86_arm64.exe)
 - [Click here for the facial input](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) — optional standalone Windows app; [setup and source](facial-input/README.md).
 - [Click here for the VoiceAttack user guide](voiceattack/USER_GUIDE.md)
 
@@ -26,7 +26,7 @@ The Windows receiver must stay open while you use the Android app. The packaged 
 
 You need an Android device running **Android 7.0 or newer**, a **Windows 10/11 x64 PC**, and a local connection through your home network or Android USB tethering.
 
-1. On the PC, download and run the [ViGEmBus installer](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/ViGEmBus_1.22.0_x64_x86_arm64.exe). Follow its prompts and restart Windows if requested. This is a one-time prerequisite: **the receiver EXE does not install the driver automatically**, and this receiver creates its virtual Xbox controllers at startup.
+1. On the PC, download and run the [ViGEmBus installer](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/ViGEmBus_1.22.0_x64_x86_arm64.exe). Follow its prompts and restart Windows if requested. This is a one-time prerequisite: **the receiver EXE does not install the driver automatically**, and this receiver creates its virtual Xbox controllers at startup.
 2. Download the PC receiver above and open it. Allow it through Windows Firewall on your trusted **Private** network, and keep its console window open. The receiver is not code-signed; Windows may show an unfamiliar-publisher warning.
 3. On Android, download and open the APK above. If asked, allow that browser or file manager to install apps from this source, then select **Install**.
 
@@ -84,15 +84,15 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 
-The supplied APK and Android implementation are preserved from public-release commit `69eee7d`, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Macro Mode and `(U...)` are currently development features. The supplied receiver EXE remains unchanged and already supports floating controls. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
+The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. The receiver EXE is the same existing public receiver used by main. See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
 
-Historical verification for the November 17, 2026 release passed 626 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. Compilation and package checks do not establish compatibility with every game, webcam or network.
+Historical verification for the November 17, 2026 feature delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. Compilation and package checks do not establish compatibility with every game, webcam or network.
 
 SHA-256 checksums:
 
 ```text
 SimpleController.apk
-8e50f99b7eb8ea08b32581dc15c6f39319417ed7ff836aa1a4d39b9385522149
+e0869e5b346c03f282a74d291c234783dee3c60eb18fbb3d62c5341bf2316544
 
 SimpleControllerReceiver.exe
 4cbf88f909e38eda70acea63517d720820ffa31530e2e02d9f6eb10835bfcf18

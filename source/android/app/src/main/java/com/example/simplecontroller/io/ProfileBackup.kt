@@ -251,21 +251,25 @@ private fun requireNestedVersions(objectValue: JsonObject) {
                 "touchAimCalibrations" -> requirePayloadFeatureSchema(itemObject, label, current,
                     TouchAimCalibrationProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
                     repeatVersion = TouchAimCalibrationProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-                    delayVersion = TouchAimCalibrationProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                    delayVersion = TouchAimCalibrationProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+                    releaseVersion = TouchAimCalibrationProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
                 "touchAimManualProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
                     TouchAimManualProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION, stageTuning = true,
                     repeatVersion = TouchAimManualProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-                    delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                    delayVersion = TouchAimManualProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+                    releaseVersion = TouchAimManualProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
                 "buttonAimProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
                     ButtonAimProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
                     legacyVersion = ButtonAimProfile.LEGACY_SCHEMA_VERSION,
                     repeatVersion = ButtonAimProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-                    delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                    delayVersion = ButtonAimProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+                    releaseVersion = ButtonAimProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
                 "stickDirectionalProfiles" -> requirePayloadFeatureSchema(itemObject, label, current,
                     StickDirectionalProfile.PAYLOAD_MODIFIERS_SCHEMA_VERSION,
                     legacyVersion = StickDirectionalProfile.LEGACY_SCHEMA_VERSION,
                     repeatVersion = StickDirectionalProfile.REPEAT_PAYLOAD_SCHEMA_VERSION,
-                    delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION)
+                    delayVersion = StickDirectionalProfile.DELAY_PAYLOAD_SCHEMA_VERSION,
+                    releaseVersion = StickDirectionalProfile.RELEASE_PAYLOAD_SCHEMA_VERSION)
             }
             if (key == "floatingRingPresets") {
                 requireFloatingRingPresetOptionsSchema(

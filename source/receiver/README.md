@@ -33,3 +33,7 @@ The new executable is under that directory's `dist/SimpleControllerReceiver.exe`
 Before publishing a rebuilt receiver, check the selected source and companions, packaged files and DLLs, and relevant synthetic tests. An executable package check does not establish actual controller, camera, speech-recognition, or game behavior. Do not start native input or camera sessions without authorization.
 
 The main/dev setup did not rebuild or launch the supplied receiver. See [branch workflow](../../BRANCHES.md), [the main setup guide](../../README.md), [facial input](../../facial-input/README.md), and [VoiceAttack](../../voiceattack/USER_GUIDE.md).
+
+## Retained development helpers
+
+Dev also retains the [Camera Follow packaging helper](tools/camera_follow/build_receiver.ps1), [Game Mouse packaging helper](tools/game_mouse/build_receiver.ps1), and [voice integration helper](../../voiceattack/build_receiver.ps1). They resolve this canonical receiver source and bundled DLLs from repository-relative paths, accept a selected Python executable, and require a fresh delivery directory. Their historical output filenames remain distinct; the specification above is the canonical public receiver recipe. Helper portability was updated for this layout without rebuilding their executables or running native input.

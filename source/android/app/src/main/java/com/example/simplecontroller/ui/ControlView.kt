@@ -59,6 +59,7 @@ class ControlView(
     private var wasJustUnlatched = false
     private var suppressLatchReleaseSideEffect = false
     private var pageActionGestureConsumed = false
+    private var macroPointerId = MotionEvent.INVALID_POINTER_ID
     private var safeForSilentDetach = false
     private var outputRoot: PhoneOutputScope? = null
     private val outputScopeId = "control:${model.id}:${System.identityHashCode(this)}"
@@ -698,6 +699,44 @@ class ControlView(
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
                             pageActionGestureConsumed = false
                     }
+                    return
+                }
+                if (model.macroModeEnabled && !uiHelper.isReleaseAllAction()) {
+                    when (e.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            val error = uiHelper.startMacro()
+                            isPressed = error == null
+                            macroPointerId = if (error == null) e.getPointerId(0) else MotionEvent.INVALID_POINTER_ID
+                            if (error == null) triggerStrongVibration(30)
+                            else Toast.makeText(context, error, Toast.LENGTH_LONG).show()
+                        }
+                        MotionEvent.ACTION_UP -> {
+                            isPressed = false
+                            if (macroPointerId != MotionEvent.INVALID_POINTER_ID) uiHelper.releaseMacro()
+                            macroPointerId = MotionEvent.INVALID_POINTER_ID
+                        }
+                        MotionEvent.ACTION_POINTER_UP -> {
+                            if (e.getPointerId(e.actionIndex) == macroPointerId) {
+                                isPressed = false
+                                macroPointerId = MotionEvent.INVALID_POINTER_ID
+                                uiHelper.releaseMacro()
+                            }
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            if (macroPointerId != MotionEvent.INVALID_POINTER_ID &&
+                                e.findPointerIndex(macroPointerId) < 0) {
+                                isPressed = false
+                                macroPointerId = MotionEvent.INVALID_POINTER_ID
+                                uiHelper.cancelMacro()
+                            }
+                        }
+                        MotionEvent.ACTION_CANCEL -> {
+                            isPressed = false
+                            macroPointerId = MotionEvent.INVALID_POINTER_ID
+                            uiHelper.cancelMacro()
+                        }
+                    }
+                    invalidate()
                     return
                 }
                 if (model.buttonDirectional.enabled && !uiHelper.isReleaseAllAction()) {
@@ -1388,6 +1427,7 @@ class ControlView(
      */
     fun releaseEverythingLocally() {
         physicalGestureActive = false
+        macroPointerId = MotionEvent.INVALID_POINTER_ID
         activationGestureConsumed = false
         pageActionGestureConsumed = false
         val buttonAimOwnedRuntime = buttonAimHandler?.hasRuntimeState() == true
@@ -1423,7 +1463,7 @@ class ControlView(
         val wasPressed = isPressed
         isPressed = false
         if (model.type == ControlType.BUTTON) {
-            if (buttonAimOwnedRuntime || buttonDirectionsOwnedRuntime) {
+            if (buttonAimOwnedRuntime || buttonDirectionsOwnedRuntime || model.macroModeEnabled) {
                 // The gesture handlers already reconciled their leased payloads.
             } else if (wasLatched) {
                 isLatched = false
@@ -1455,12 +1495,14 @@ class ControlView(
         releaseButtonAim()
         releaseButtonDirections()
         releaseTouchAim()
+        uiHelper.cancelMacro()
         PropertySheetBuilder(context, model) {
             // After properties are updated:
             releaseAutoTap()
             releaseButtonAim()
             releaseButtonDirections()
             releaseTouchAim()
+            uiHelper.cancelMacro()
             val lp = layoutParams as ViewGroup.MarginLayoutParams
             lp.width = model.w.toInt()
             lp.height = model.h.toInt()
