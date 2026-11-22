@@ -2,6 +2,8 @@
 
 SimpleController turns an Android phone or tablet into a customizable controller for a Windows PC. The phone sends commands over your local network to the Windows receiver, which produces keyboard, mouse, or virtual Xbox-controller input. Buttons, sticks, aiming surfaces, and floating controls can be arranged around your comfortable reach and operated with one finger.
 
+This guide covers the **`main` public release**. [The `dev` branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) also includes Macro Mode and the `(U...)` timed-release modifier. Profiles using those features can require format 17, which this release's format-16 importer cannot read. Keep a verified backup before moving between versions; see [branches and compatibility](BRANCHES.md).
+
 ## Install and connect
 
 ### What you need

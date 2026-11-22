@@ -1,7 +1,9 @@
-# SimpleController Play Release
+# SimpleController Android distributions
 
-This branch prepares a Google Play version without changing the identity of the existing debug
-installation.
+Both Git branches, `main` and `dev`, provide these Android build variants. `main` is the public
+release source and `dev` is the development source; neither branch name selects a build variant.
+The Google Play variant has a separate identity from the existing debug installation. See
+[branch roles and profile compatibility](../../BRANCHES.md).
 
 ## Variant identities
 
@@ -20,6 +22,8 @@ removed from both distributions. TouchAim and its calibration workflow remain av
 
 ## Build commands
 
+Run from `source/android`:
+
 ```powershell
 .\gradlew.bat assembleSideloadDebug
 .\gradlew.bat testSideloadDebugUnitTest
@@ -28,6 +32,10 @@ removed from both distributions. TouchAim and its calibration workflow remain av
 
 The development APK is produced under `app/build/outputs/apk/sideload/debug/`. The Play bundle is
 produced under `app/build/outputs/bundle/playRelease/`.
+
+These commands build local artifacts. They do not publish source to another Git branch, upload
+to Google Play, or install on a device. Gradle install and connected-device tasks require explicit
+approval for the particular device and affected data.
 
 ## Signing boundary
 

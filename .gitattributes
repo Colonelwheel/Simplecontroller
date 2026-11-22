@@ -1,0 +1,6 @@
+# Preserve the exact source and artifact bytes from the existing release snapshots.
+# Disable automatic line-ending conversion; normal text diffs still work.
+* -text
+*.md text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf

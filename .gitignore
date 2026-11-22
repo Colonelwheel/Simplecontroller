@@ -1,0 +1,36 @@
+# Local IDE, build, and test output.
+**/.idea/
+**/.gradle/
+**/.kotlin/
+**/build/
+**/dist/
+**/__pycache__/
+**/.pytest_cache/
+**/.venv/
+**/venv/
+*.py[cod]
+*.log
+*.hprof
+hs_err_pid*
+replay_pid*
+local.properties
+
+# Personal instructions, settings, and signing material stay local.
+CLAUDE.local.md
+AGENTS.local.md
+.claude/settings.local.json
+HANDOFF.md
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+
+# Only the intended public downloads belong in the repository root.
+*.apk
+*.aab
+*.exe
+!/SimpleController.apk
+!/SimpleControllerReceiver.exe
+!/ViGEmBus_1.22.0_x64_x86_arm64.exe

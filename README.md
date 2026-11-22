@@ -6,9 +6,11 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-- [Click here for the app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/SimpleController.apk) (Recommended to tap this link through your phone browser)
-- [Click here for the exe for your PC](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/SimpleControllerReceiver.exe)
-- [Click here for the ViGEm driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/ViGEmBus_1.22.0_x64_x86_arm64.exe)
+This is **`main`, the public release branch**. The [development branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) includes newer features, currently Button Macro Mode and the `(U...)` timed-release modifier. See [branches and compatibility](BRANCHES.md) before moving profiles between versions.
+
+- [Download the Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleController.apk) (open this link in your phone browser)
+- [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleControllerReceiver.exe)
+- [Download the ViGEmBus driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/ViGEmBus_1.22.0_x64_x86_arm64.exe)
 - [Click here for the facial input](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) — optional standalone Windows app; [setup and source](facial-input/README.md).
 - [Click here for the VoiceAttack user guide](voiceattack/USER_GUIDE.md)
 
@@ -24,7 +26,7 @@ The Windows receiver must stay open while you use the Android app. The packaged 
 
 You need an Android device running **Android 7.0 or newer**, a **Windows 10/11 x64 PC**, and a local connection through your home network or Android USB tethering.
 
-1. On the PC, download and run the [ViGEmBus installer](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/codex/play-store-release/ViGEmBus_1.22.0_x64_x86_arm64.exe). Follow its prompts and restart Windows if requested. This is a one-time prerequisite: **the receiver EXE does not install the driver automatically**, and this receiver creates its virtual Xbox controllers at startup.
+1. On the PC, download and run the [ViGEmBus installer](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/ViGEmBus_1.22.0_x64_x86_arm64.exe). Follow its prompts and restart Windows if requested. This is a one-time prerequisite: **the receiver EXE does not install the driver automatically**, and this receiver creates its virtual Xbox controllers at startup.
 2. Download the PC receiver above and open it. Allow it through Windows Firewall on your trusted **Private** network, and keep its console window open. The receiver is not code-signed; Windows may show an unfamiliar-publisher warning.
 3. On Android, download and open the APK above. If asked, allow that browser or file manager to install apps from this source, then select **Install**.
 
@@ -80,8 +82,11 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Standalone facial-input app | [FacialInput.exe](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) |
 | Facial-input setup, matching source and packaging recipe | [facial-input](facial-input/README.md) |
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
+| Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 
-The APK uses the Android source in this branch, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Both Android variants passed 626 JVM tests each and lint with zero errors; the APK and Play AAB builds passed. The supplied receiver EXE and receiver source remain unchanged and already support floating controls. Compilation and package checks do not establish compatibility with every game, webcam or network. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
+The supplied APK and Android implementation are preserved from public-release commit `69eee7d`, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Macro Mode and `(U...)` are currently development features. The supplied receiver EXE remains unchanged and already supports floating controls. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
+
+Historical verification for the November 17, 2026 release passed 626 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. Compilation and package checks do not establish compatibility with every game, webcam or network.
 
 SHA-256 checksums:
 
@@ -98,4 +103,4 @@ FacialInput.exe
 
 To build the Android source, install JDK 21 and Android SDK 36, open `source/android`, and run `gradlew.bat assembleSideloadDebug`. The Play bundle task is `bundlePlayRelease`; Play signing and upload are separate from this APK download. A local build uses your own signing setup.
 
-To build the receiver, use a Windows Python environment with the packages in `source/receiver/requirements.txt`, then run `python -m PyInstaller --noconfirm SimpleControllerReceiver.spec` from that directory. To run from source, use `python simple_controller_receiver.py`. ViGEmBus must already be installed. Facial input has its own [setup and developer build instructions](facial-input/README.md#build-the-standalone-exe) and [third-party notices](facial-input/packaging/THIRD_PARTY_NOTICES.md).
+The [receiver source guide](source/receiver/README.md) explains its entrypoint and packaging with separate build outputs. ViGEmBus must already be installed before running a receiver. Facial input has its own [setup and developer build instructions](facial-input/README.md#build-the-standalone-exe) and [third-party notices](facial-input/packaging/THIRD_PARTY_NOTICES.md).
