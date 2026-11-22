@@ -4,3 +4,5 @@
 *.md text eol=lf
 .gitignore text eol=lf
 .gitattributes text eol=lf
+# This existing upstream file was committed with CRLF; retain its exact bytes.
+facial-input/.gitignore -text
