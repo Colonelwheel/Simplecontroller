@@ -83,6 +83,7 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Facial-input setup, matching source and packaging recipe | [facial-input](facial-input/README.md) |
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
+| Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
 The supplied APK and Android implementation are preserved from public-release commit `69eee7d`, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Macro Mode and `(U...)` are currently development features. The supplied receiver EXE remains unchanged and already supports floating controls. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
 

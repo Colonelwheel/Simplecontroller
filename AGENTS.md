@@ -10,6 +10,7 @@
 
 ## Before making changes
 
+- Before planning or implementing changes, consult [ARCHITECTURE.md](ARCHITECTURE.md): read its Start here routing table, then the relevant subsystem, ownership/cleanup rules and test pointers. Verify the current branch and actual source; the map describes main and can become stale. Update affected entries in the same work when approved implementation or layout changes alter them. This guide does not grant source/device permissions.
 - Read the relevant project-authored Markdown, inspect the actual branch/worktree and local changes, and preserve working behavior. Prefer targeted changes.
 - Ask before source changes unless the concrete scope is already authorized. Ask for the commit message for important source, firmware, build, or binary changes; use a clear message for documentation-only work.
 - Treat tracked, untracked, ignored, generated, backup, profile, and installed-app data as important. Obtain explicit permission before overwriting, moving, or deleting existing data outside the authorized scope.
