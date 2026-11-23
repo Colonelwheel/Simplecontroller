@@ -572,6 +572,9 @@ data class FloatingBoostProfile(
     fun requiredSchemaVersion(): Int = when {
         (boost1.actionPayloads() + boost2.actionPayloads() +
             ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
+            .any(PayloadModifiers::hasReleaseModifiers) -> RELEASE_PAYLOAD_SCHEMA_VERSION
+        (boost1.actionPayloads() + boost2.actionPayloads() +
+            ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
             .any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
         (boost1.actionPayloads() + boost2.actionPayloads() +
             ringAimActions?.knobActions.orEmpty().flatMap { listOf(it.adsPayload, it.firePayload) })
@@ -591,7 +594,8 @@ data class FloatingBoostProfile(
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 4
         const val REPEAT_PAYLOAD_SCHEMA_VERSION = 5
         const val DELAY_PAYLOAD_SCHEMA_VERSION = 6
-        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+        const val RELEASE_PAYLOAD_SCHEMA_VERSION = 7
+        const val CURRENT_SCHEMA_VERSION = RELEASE_PAYLOAD_SCHEMA_VERSION
     }
 }
 

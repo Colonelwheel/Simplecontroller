@@ -116,10 +116,12 @@ data class TouchAimCalibrationProfile(
         const val PAYLOAD_MODIFIERS_SCHEMA_VERSION = 2
         const val REPEAT_PAYLOAD_SCHEMA_VERSION = 3
         const val DELAY_PAYLOAD_SCHEMA_VERSION = 4
-        const val CURRENT_SCHEMA_VERSION = DELAY_PAYLOAD_SCHEMA_VERSION
+        const val RELEASE_PAYLOAD_SCHEMA_VERSION = 5
+        const val CURRENT_SCHEMA_VERSION = RELEASE_PAYLOAD_SCHEMA_VERSION
     }
 
     fun requiredSchemaVersion(): Int = when {
+        listOf(aimPayload, shootPayload).any(PayloadModifiers::hasReleaseModifiers) -> RELEASE_PAYLOAD_SCHEMA_VERSION
         listOf(aimPayload, shootPayload).any(PayloadModifiers::hasDelayModifiers) -> DELAY_PAYLOAD_SCHEMA_VERSION
         listOf(aimPayload, shootPayload).any(PayloadModifiers::hasRepeatModifiers) -> REPEAT_PAYLOAD_SCHEMA_VERSION
         listOf(aimPayload, shootPayload).any(PayloadModifiers::hasModifiers) -> PAYLOAD_MODIFIERS_SCHEMA_VERSION

@@ -2,7 +2,7 @@
 
 SimpleController turns an Android phone or tablet into a customizable controller for a Windows PC. The phone sends commands over your local network to the Windows receiver, which produces keyboard, mouse, or virtual Xbox-controller input. Buttons, sticks, aiming surfaces, and floating controls can be arranged around your comfortable reach and operated with one finger.
 
-This guide covers the **`main` public release**. [The `dev` branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) also includes Macro Mode and the `(U...)` timed-release modifier. Profiles using those features can require format 17, which this release's format-16 importer cannot read. Keep a verified backup before moving between versions; see [branches and compatibility](BRANCHES.md).
+This guide covers the **`main` public release**, including Macro Mode and the `(U...)` timed-release modifier promoted from [development](https://github.com/Colonelwheel/Simplecontroller/tree/dev). Both current source branches support controller-profile format 17 and the corresponding reusable libraries. Older APKs can reject these profiles or backups. Keep a verified backup before moving between app versions; see [branches and compatibility](BRANCHES.md).
 
 ## Install and connect
 
@@ -56,7 +56,7 @@ Use large targets and put frequently used actions near your easiest resting posi
 
 In Edit, tap **Editing page: Base ▾** to duplicate the current page, add a blank page, import a saved profile's page, rename a page, or choose Home. Each page has its own complete controls. Duplicated pages are independent copies.
 
-An ordinary Button's **Local page action** can Go to a page, Toggle a page, Return to the previous page, or Go Home. Choose the destination in the editor. Page actions are local navigation, and cannot combine with Hold Toggle, Turbo, Auto-Tap, Button Aim, or directional Button behavior. A page change cleans up active output; arrange navigation so every playing page has an easy return route. Reopening a profile starts on Home.
+An ordinary Button's **Local page action** can Go to a page, Toggle a page, Return to the previous page, or Go Home. Choose the destination in the editor. Page actions are local navigation, and cannot combine with Hold Toggle, Turbo, Auto-Tap, Macro Mode, Button Aim, or directional Button behavior. A page change cleans up active output; arrange navigation so every playing page has an easy return route. Reopening a profile starts on Home.
 
 Use **Edit in Landscape / Edit in Portrait** to edit without physically rotating the phone. Each page keeps separate positions and sizes for the two orientations. **Play lock: Portrait / Landscape** chooses the orientation applied when you tap Done. Orientation changes release active output. The first switch of an older profile creates a fitted arrangement for its missing orientation.
 
@@ -102,7 +102,7 @@ LS:R50,X360RB,X360A
 LT:1.0,RT:1.0
 ```
 
-Combinations are not guaranteed timed scripts. Do not use `WAIT:` or `DELAY:` commands. Although the receiver recognizes `WAIT_150`, Android normally sends split commands separately, so a Button payload does not guarantee an ordered press-wait-press sequence. Do not put mouse DOWN and UP together on a normal hold Button. Keep Release All, Camera Follow, and Scroll Mode toggles on dedicated Buttons.
+Comma-separated commands start independently. For timed combinations, use the per-command D/U modifiers and Macro Mode below. Do not use `WAIT:` or `DELAY:` commands. Although the receiver recognizes `WAIT_150`, Android normally sends split commands separately, so that legacy syntax does not guarantee an ordered press-wait-press sequence. Do not put mouse DOWN and UP together on a normal hold Button. Keep Release All, Camera Follow, and Scroll Mode toggles on dedicated Buttons.
 
 ### Per-command timing modifiers
 
@@ -113,6 +113,7 @@ Modifiers follow the individual command. For example, `LT:1.0,RT:1.0(D100)` pres
 | `(I)` | Start from source activation, overriding whole-payload Send on release timing. D still applies if present. |
 | `(SOR)` | Send one finite press after normal source release; the default press lasts 90 ms. |
 | `(D100)` | Wait 100 ms before activating this command. |
+| `(U100)` | Release this command's owned press 100 ms after it actually activates. |
 | `(HRD200)` | Keep an already pressed output held for 200 ms after its source ends. |
 | `(R100)` | Repeat this command every 100 ms while held, normally 50 ms pressed and 50 ms released. |
 
@@ -120,13 +121,29 @@ Use Hold mappings for sustained TouchAim or ring actions. With lower-Hold carryo
 
 D delays only the first R press, or delays a SOR shot after release. R does not require global Turbo. Global Turbo preserves explicit R cadence and keeps HRD commands steady. R and SOR cannot decorate the same command. Hard cancellation, Release All, disconnect and lifecycle cleanup cancel pending modifiers and release outputs immediately. See [modifier details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md) for limits and finite-action timing.
 
+U runs from the actual press, after any D delay. Outside Macro Mode, an early normal source release still cancels pending D and can end a press early. With R, U chooses each ON duration and must be shorter than the repeat interval: `RT:1.0(R100)(U20)` gives 20 ms pressed and 80 ms released. A trigger P duration and U cannot decorate the same command. Another legitimate owner may keep a shared output held after this command releases.
+
 TouchAim sensitivity accepts numeric values such as `0.001`. Manual three-stage mode also offers optional sensitivity and Enter Stage Confirmation milliseconds for Aim-only, Low, Medium and High; blank sensitivity inherits the main value, and blank or zero confirmation preserves immediate entry.
+
+### One-tap Macro Mode
+
+Enable **Macro Mode** in an ordinary Button's properties to run one finite combination from a tap. Normal source release lets its immediate timed steps finish. Commands without U use a 90 ms press; existing trigger P durations are respected. A SOR command fires on normal source release. With global Swipe, leaving the Button or handing off to another control synthesizes a normal UP, so SOR can fire before you physically lift. Extra taps during a run are ignored; holding the finger down does not repeat it.
+
+For example:
+
+```text
+X360A(U100),X360A(D500)(U100),X360B(D800)(U100)
+```
+
+This presses A during 0–100 ms, A again during 500–600 ms, then B during 800–900 ms from the initial touch, even if you lift at 20 ms. D values are independent offsets, not waits added after the previous command. `CTRL,ALT,TAB` holds all three keys together for 90 ms.
+
+Macro Mode is separate from Hold Toggle, Toggle Auto-Tap, Button Aim and directional Button inputs. It ignores global Hold/Turbo and rejects the while-held R modifier. Release All, pointer cancellation/loss, disconnect, Edit, page/profile changes and scoped Finish cancel the run. See [the Macro Mode/U contract](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md) for more examples and exact cleanup rules.
 
 ## Holding, repeating, and sliding
 
 **Hold Toggle** keeps one Button's action held after lift. Enable it in the Button's properties and set its hold time. Hold until the threshold and vibration, then lift; tap again to release. A short touch ending before the threshold does nothing. The default threshold is 500 ms; adjust it to your comfortable timing.
 
-**Turbo** repeats compatible ordinary Buttons while your finger remains down. Its interval is in milliseconds. **Toggle Auto-Tap** is a per-Button alternative: tap once to start repeating and tap again to stop. It cannot combine with Hold Toggle, Button Aim, or directional Button inputs. Avoid stacking repeat methods on one control.
+**Turbo** repeats compatible ordinary Buttons while your finger remains down. Its interval is in milliseconds. **Toggle Auto-Tap** is a per-Button alternative: tap once to start repeating and tap again to stop. It cannot combine with Hold Toggle, Macro Mode, Button Aim, or directional Button inputs. Avoid stacking repeat methods on one control.
 
 For a timed trigger pulse, `RT:1.0P0.3` requests a full right-trigger press for 0.3 seconds. On an ordinary nonlatched Button it is a finite pulse; lifting can release it earlier. With Hold Toggle, the duration becomes the whole repeating cycle, divided between pressed and released. Keep Pulse separate from Turbo and Auto-Tap.
 

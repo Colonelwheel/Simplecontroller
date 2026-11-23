@@ -4,10 +4,10 @@
 
 | Branch | Purpose | Preserved source/artifact basis |
 | --- | --- | --- |
-| [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Public release | Public-release snapshot `69eee7d`; Android work based on `d6e20f6` with the standalone diagnostic removed |
-| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development features awaiting release promotion | Floating-controls snapshot `1ea6ffa`, including Macro Mode and per-command `(U...)` timing |
+| [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Default public release | Macro Mode/U and format-17 compatibility promoted from dev `632447c` onto the previous public-release basis `69eee7d` |
+| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development work and additional verification/packaging tools | Android implementation and regression tests at `632447c` are the source of this main promotion; dev retains its additional receiver/voice tools and historical feature notes |
 
-Both branches use the same layout:
+`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same layout:
 
 ```text
 README.md, USER_GUIDE.md, BRANCHES.md
@@ -18,15 +18,17 @@ facial-input/         Separate optional facial app
 voiceattack/          Optional voice helper and guide
 ```
 
-The main/dev setup preserves existing packaged APK/EXE contents. New source organization and documentation do not mean those binaries were rebuilt, installed, or tested in a game. Root README checksums identify the supplied files. Historic build/test reports describe their dated deliveries.
+The initial main/dev setup preserved existing APK/EXE contents. This later Macro Mode/U promotion updates main's Android source, regression tests and public APK; the receiver, driver and facial downloads stay at their existing versions. The root README records the supplied artifact checksums and this release's verification. A source change alone does not rebuild a binary, install an app or establish game behavior.
 
 ## Profile compatibility
 
-The current main Android source accepts controller-profile formats through **16**. Dev supports **17** for stored Macro Mode or `(U...)` timed releases, including inactive settings. Older supported profiles remain readable by dev.
+Both current main and dev Android source accept controller-profile formats through **17**. Writers require 17 when Macro Mode is stored as enabled or any action attempts `(U...)`, including inactive settings. Profiles without those features retain their earlier conditional versions; older supported profiles remain readable.
 
-A profile or all-profile backup containing unsupported format-17 settings cannot be imported into this main release. It must be rejected rather than silently dropping those settings. Keep verified external backups before moving between app versions, and retain the previous compatible APK. Do not uninstall or clear private app data to switch branches or resolve a signing issue.
+A format-16 APK from before this promotion cannot import profiles or all-profile backups containing format-17 settings. U can also require newer nested reusable schemas: manual TouchAim and calibration 5, Button Aim 9, Directional/Stick+ 6, floating boost 7, and full-ring presets 8. Unsupported versions must be rejected before decoding rather than silently dropping settings. This promotion adds no transfer/backup-envelope version: single-profile transfer stays 1 and the conditional backup envelope remains 1–3.
 
-See [the Android profile-transfer contract](source/android/PROFILE_TRANSFER_FORMAT.md) for conditional nested formats and reusable-profile schemas. The branch reorganization does not change serialized data, application IDs, or signing configuration.
+Keep verified external backups before moving between app versions, and retain the previous compatible APK. Do not uninstall or clear private app data to switch branches or resolve a signing issue.
+
+See [the Android profile-transfer contract](source/android/PROFILE_TRANSFER_FORMAT.md) for conditional nested formats and reusable-profile schemas. Macro Mode defaults off in older layouts. Application IDs and signing configuration are unchanged by this promotion; an independently built APK can still use a different developer's signing key.
 
 ## Source branch versus Android build variant
 

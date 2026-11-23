@@ -63,11 +63,29 @@ class ControlViewHelper(
     private var pulseCallbackGeneration = 0
     private var modifierExecutor: ButtonAimPayloadExecutor? = null
     private var modifierLease: ButtonAimPayloadLease? = null
+    private var macroController: ButtonMacroController? = null
     private val payloadScheduler = HandlerButtonAimPayloadScheduler()
 
     fun hasPendingOutputWork(): Boolean = repeater != null || pulseRepeater != null ||
         isPulseLoopActive || activePulseTrigger != null || pendingOutputCallbacks > 0 ||
-        (modifierExecutor?.activeLeaseCount() ?: 0) > 0
+        (modifierExecutor?.activeLeaseCount() ?: 0) > 0 || macroController?.isActive == true
+
+    fun startMacro(): String? {
+        val controller = macroController ?: ButtonMacroController(
+            createButtonAimPayloadExecutor("macro")
+        ).also { macroController = it }
+        return controller.press(model.payload).also { parentView.refreshLegacyOutputBusy() }
+    }
+
+    fun releaseMacro() {
+        macroController?.release()
+        parentView.refreshLegacyOutputBusy()
+    }
+
+    fun cancelMacro() {
+        macroController?.cancel()
+        parentView.refreshLegacyOutputBusy()
+    }
 
     private fun postOutputRelease(handler: Handler, delayMs: Long, action: () -> Unit) {
         val generation = outputCallbackGeneration
@@ -600,6 +618,7 @@ class ControlViewHelper(
 
     /** Cancel every delayed/repeating action owned by this helper without changing settings. */
     fun cancelPendingActionsForReleaseAll() {
+        cancelMacro()
         modifierExecutor?.releaseAllLeases()
         modifierLease = null
         outputCallbackGeneration++

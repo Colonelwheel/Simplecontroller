@@ -1,5 +1,7 @@
 # Payload modifiers and TouchAim stage tuning
 
+> Behavior and compatibility reference for the current Android release. Android paths are relative to `source/android`. Dated verification below describes its original snapshots; use [current download and build evidence](../../README.md#5-downloads-and-source), [branch compatibility](../../BRANCHES.md), and [the source map](../../ARCHITECTURE.md).
+
 Modifiers belong to individual action commands, after the existing command text:
 
 ```text
@@ -15,6 +17,16 @@ LT:1.0(I)(HRD200),RT:1.0(SOR)
   stays held. The number is the interval between press starts, in milliseconds.
 - `(D100)` delays that command's activation by 100 milliseconds. The number is
   whole milliseconds, from 0 to 600000. Each command's delay runs independently.
+- `(U100)` releases that command's owned press 100 milliseconds after activation.
+  Whole durations from 1 to 600000 are accepted. This is separate from D.
+
+An ordinary Button's **Macro Mode** checkbox lets one tap complete all timed
+commands after finger-up. Commands without a duration use a finite 90 ms press.
+It runs once, ignores global Hold/Turbo, and is separate from Hold Toggle,
+Auto-Tap, Button Aim and directional button inputs. R is excluded from this
+finite mode. Extra taps during a run are ignored. Release All and hard cleanup
+cancel the run. See [Macro Mode and payload porting](MACRO_MODE_AND_PAYLOAD_PORTING.md)
+for exact U interactions, compatibility, code entry points and copyable examples.
 
 Commands without modifiers retain their existing behavior. An explicit `(I)` or
 `(SOR)` overrides Button Aim's whole-payload timing for that command; undecorated
@@ -179,7 +191,7 @@ Old layouts default to inherited sensitivities and zero new confirmations.
 Full layouts, duplicate controls/pages, portable transfers, backups and reusable
 manual profiles preserve the new settings. Profiles with new tuning or modifier
 syntax require controller format 14, format 15 when R is stored, or format 16
-when D is stored. Reusable libraries use conditional schema
+when D is stored, or format 17 when U or Macro Mode is stored. Reusable libraries use conditional schema
 versions so older apps reject unsupported features before silently dropping them.
 
 Modifiers execute in Android. Receivers receive the existing plain commands;

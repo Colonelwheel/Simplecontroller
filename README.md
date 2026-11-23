@@ -6,7 +6,7 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-This is **`main`, the public release branch**. The [development branch](https://github.com/Colonelwheel/Simplecontroller/tree/dev) includes newer features, currently Button Macro Mode and the `(U...)` timed-release modifier. See [branches and compatibility](BRANCHES.md) before moving profiles between versions.
+This is **`main`, the public release branch**. It includes Button Macro Mode and the `(U...)` timed-release modifier, promoted from [development](https://github.com/Colonelwheel/Simplecontroller/tree/dev). Both source branches now support controller-profile format 17. See [branches and compatibility](BRANCHES.md) before moving profiles between app versions.
 
 - [Download the Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleController.apk) (open this link in your phone browser)
 - [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/main/SimpleControllerReceiver.exe)
@@ -18,7 +18,7 @@ This is **`main`, the public release branch**. The [development branch](https://
 
 # 1. What Simple Controller Does
 
-Create profiles for different games, arrange large buttons and sticks within comfortable reach, and choose what each control does. Features include held/toggle buttons, Turbo, swipe-across buttons, mouse touchpads, stick and aiming controls, pages, and floating rings or button groups. You can combine actions such as movement and sprint in one control.
+Create profiles for different games, arrange large buttons and sticks within comfortable reach, and choose what each control does. Features include held/toggle buttons, Turbo, swipe-across buttons, mouse touchpads, stick and aiming controls, pages, and floating rings or button groups. You can combine actions such as movement and sprint in one control, or enable Macro Mode so one tap completes a timed combination after finger-up.
 
 The Windows receiver must stay open while you use the Android app. The packaged receiver includes Python, so you do not need to install Python to run it.
 
@@ -85,15 +85,17 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 | Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
-The supplied APK and Android implementation are preserved from public-release commit `69eee7d`, based on `d6e20f6` with the standalone Touch Sensor Test screen and extra launcher removed. Per-command payload modifiers, independent Delay and repeat timing, TouchAim HRD fixes, per-stage aim tuning, and TouchAim calibration remain available. Macro Mode and `(U...)` are currently development features. The supplied receiver EXE remains unchanged and already supports floating controls. See [payload timing details](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md).
+The Android release promotes Macro Mode, `(U...)` timed releases and their compatibility gates from dev commit `632447ce0606a21dd63886564fdcecf68de1fd8b` onto the previous main release based on `69eee7d`. The Android implementation and regression tests match that dev snapshot. Independent Delay and repeat timing, TouchAim HRD fixes, per-stage tuning, calibration and floating controls remain available; the standalone Touch Sensor Test screen and extra launcher remain removed. The supplied receiver EXE is unchanged. See [Macro Mode examples and timing](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md).
 
-Historical verification for the November 17, 2026 release passed 626 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. Compilation and package checks do not establish compatibility with every game, webcam or network.
+Fresh off-device verification on November 22, 2026 passed **678 JVM tests per variant** (Sideload Debug and Play Release; zero failures, errors or skips), including all 52 new Macro/U/compatibility cases per variant. The Sideload APK and Play AAB built successfully. Both lint variants reported zero errors/fatals and 212 warnings each. APK signature verification matches the previous main APK, with the same application ID, SDK targets, permissions and single controller launcher. Compiled Macro/U code is present and the removed standalone diagnostic remains absent. The newly built public APK is byte-for-byte identical to the existing dev APK; main now publishes that same feature level.
+
+Compilation and package checks do not establish compatibility with every game, webcam or network. This release preparation does not install an app, replace a running receiver or change saved phone profiles.
 
 SHA-256 checksums:
 
 ```text
 SimpleController.apk
-8e50f99b7eb8ea08b32581dc15c6f39319417ed7ff836aa1a4d39b9385522149
+e0869e5b346c03f282a74d291c234783dee3c60eb18fbb3d62c5341bf2316544
 
 SimpleControllerReceiver.exe
 4cbf88f909e38eda70acea63517d720820ffa31530e2e02d9f6eb10835bfcf18
