@@ -4,8 +4,8 @@
 
 | Branch | Purpose | Preserved source/artifact basis |
 | --- | --- | --- |
-| [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Public release | Public-release snapshot `69eee7d`; Android work based on `d6e20f6` with the standalone diagnostic removed |
-| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development features awaiting release promotion | Floating-controls snapshot `1ea6ffa`, including Macro Mode and per-command `(U...)` timing |
+| [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Default public release | Macro Mode/U and format-17 compatibility promoted from dev `632447c` onto the previous public-release basis `69eee7d` |
+| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development work and additional verification/packaging tools | Android source at `632447c` supplies this main promotion; the existing November 17 dev APK and extra receiver/voice tools remain preserved |
 
 `main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same layout:
 
@@ -18,13 +18,13 @@ facial-input/         Separate optional facial app
 voiceattack/          Optional voice helper and guide
 ```
 
-The main/dev setup preserves existing packaged APK/EXE contents. New source organization and documentation do not mean those binaries were rebuilt, installed, or tested in a game. Root README checksums identify the supplied files. Historic build/test reports describe their dated deliveries.
+The initial main/dev setup and this dev documentation refresh preserve this branch's existing APK/EXE contents. The later main promotion builds its own public Android APK from the promoted source; it does not rebuild or replace the November 17 dev APK. Each branch's root README identifies its supplied artifact hashes and verification. Main release `06b1e64` rebuilt and verified its APK byte-for-byte identical to the existing dev download. This does not establish a new device/game test.
 
 ## Profile compatibility
 
-The current main Android source accepts controller-profile formats through **16**. Dev supports **17** for stored Macro Mode or `(U...)` timed releases, including inactive settings. Older supported profiles remain readable by dev.
+Both current main and dev Android source accept controller-profile formats through **17**. Writers require 17 for stored U or `macroModeEnabled=true`, including inactive settings. Older supported profiles remain readable, and profiles without these features retain their earlier conditional versions.
 
-A profile or all-profile backup containing unsupported format-17 settings cannot be imported into the current main release. It must be rejected rather than silently dropping those settings. Keep verified external backups before moving between app versions, and retain the previous compatible APK. Do not uninstall or clear private app data to switch branches or resolve a signing issue.
+An older format-16 APK from before the main promotion cannot import profiles or backups requiring format 17. U can also require newer reusable schemas: manual TouchAim and calibration 5, Button Aim 9, Directional/Stick+ 6, floating boost 7, and complete ring presets 8. Unsupported data must be rejected before decoding rather than silently dropping settings. Single-profile transfer remains version 1; conditional backup envelopes remain 1–3. Keep verified external backups and the previous compatible APK before moving between app versions. Do not uninstall or clear private app data to resolve a signing issue.
 
 See [the Android profile-transfer contract](source/android/PROFILE_TRANSFER_FORMAT.md) for conditional nested formats and reusable-profile schemas. The branch reorganization does not change serialized data, application IDs, or signing configuration.
 

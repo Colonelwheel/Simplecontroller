@@ -6,7 +6,7 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-This is **`dev`, the development branch**. It includes Button Macro Mode and the `(U...)` timed-release modifier. For the public release, use [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main). See [branches and compatibility](BRANCHES.md) before moving profiles between versions.
+This is **`dev`, the development branch**. Both dev and the [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) include Button Macro Mode, `(U...)` timed releases and controller-profile format 17. Dev retains additional receiver/voice development tools and historical feature notes. Its APK remains the existing November 17 feature delivery; main release `06b1e64` rebuilt and verified the same APK bytes without replacing this dev download. See [branches and compatibility](BRANCHES.md) before moving profiles between app versions.
 
 - [Download the development Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleController.apk) (open this link in your phone browser)
 - [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleControllerReceiver.exe)

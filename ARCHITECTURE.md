@@ -1,6 +1,6 @@
 # Architecture and source map
 
-Implementation map for **dev**, inspected November 22, 2026 at `208c0a4e97888cb7737683224d8e7fa5ab2024e3`. Adapted from the main architecture guide at `ec89fc50969307582d27e7eaf9c4d9af4f4aa232` by comparing committed differences and inspecting changed blocks/callers; unchanged runtime maps are carried over. Android source preserves the development snapshot described in [BRANCHES.md](BRANCHES.md). This is a navigation aid: verify current implementation before editing and update affected entries when behavior changes. Symbol names are search anchors; line numbers would become stale.
+Implementation map for **dev**, with the branch comparison refreshed November 22, 2026 for main's promotion from dev `632447ce0606a21dd63886564fdcecf68de1fd8b`. The original runtime inspection and main-derived shared maps remain applicable: the promoted main Android implementation/tests now match dev, while development tools and packaged artifact provenance differ. See [BRANCHES.md](BRANCHES.md). This is a navigation aid: verify current implementation before editing and update affected entries when behavior changes. Symbol names are search anchors; line numbers would become stale.
 
 ## Start here
 
@@ -25,7 +25,7 @@ Read this section, the relevant change route, and that subsystem's entries. Ther
 
 ### Branch and entrypoint facts
 
-- `dev` supports `(I)`, `(SOR)`, `(HRD...)`, `(R...)`, `(D...)`, **`(U...)`**, and finite **Button Macro Mode**. Profiles need format **17** for stored U or an enabled Macro flag; main currently supports through 16. Fixed-direction stick payloads such as `LS:R50` are distinct from Button Macro Mode. See the [Macro Mode/U contract](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md).
+- `dev` supports `(I)`, `(SOR)`, `(HRD...)`, `(R...)`, `(D...)`, **`(U...)`**, and finite **Button Macro Mode**. Both main and dev need format **17** for stored U or an enabled Macro flag; older format-16 APKs cannot import those settings. Fixed-direction stick payloads such as `LS:R50` are distinct from Button Macro Mode. See the [Macro Mode/U contract](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md).
 - `source/android/app/src/main/AndroidManifest.xml` launches **`.MainActivity`**. `RefactoredMainActivity.kt` is an older alternative, not a second active launcher. No `RefactoredControlView.kt` exists in this snapshot; historical migration suggestions are not the active runtime wiring.
 - Android uses classic Views/AppCompat, with substantial UI constructed in Kotlin. Compose entries in the version catalog do not make this a Compose application.
 - The receiver entrypoint is **`source/receiver/simple_controller_receiver.py`**, despite its historical header mentioning `merged_controller.py`. **Do not import it merely to inspect it:** import creates logs and two native virtual gamepads and changes PyAutoGUI settings.
@@ -34,15 +34,16 @@ Read this section, the relevant change route, and that subsystem's entries. Ther
 
 ### Differences from main
 
-Verified against the commit pair in the opening paragraph. The runtime differences are narrowly scoped; extra development files do not imply extra production receiver behavior.
+Main's Android promotion uses dev `632447c`. Runtime parity is separate from dev-only tooling and each branch's packaged downloads.
 
-| Difference | What changes / where to read |
+| Difference or shared area | Current relationship / where to read |
 | --- | --- |
-| Android Macro Mode and U | **19 existing production Kotlin files differ**, with one new `ui/ButtonMacroController.kt`. Start at [Macro Mode and U](#macro-mode-and-u), parser/executor, ControlView/helper/editor, and raw compatibility gates. |
-| Saved data | Conditional controller format 17 and U-aware reusable schemas; transfer/backup envelopes remain unchanged. Macro defaults off and survives full-profile copies/transfers. |
-| Android tests | **77 production Kotlin files / 65 JVM test files** in dev, versus main's 76/62. Three new suites cover Macro/U/compatibility; the existing Delay compatibility suite adjusts future-version assertions. |
-| Receiver/voice development support | Thirteen receiver suites, three packaging builders, two bundle inspectors, sender mock/interop harnesses and runner. See [development tools](#development-packaging-and-test-tools) and [verification](#verification-map). |
-| Shared implementation | All six production receiver modules, their canonical spec/dependencies/DLLs, the facial runtime/build files, and production VoiceAttack sender match main. Android MainActivity, transport/scopes, aim/TouchAim/floating handlers, manifest/resources and build configuration are unchanged; shared-executor changes still affect their behavior. |
+| Android Macro Mode and U | Both branches now have the same implementation, including `ui/ButtonMacroController.kt`, parser/executor, ControlView/helper/editor and raw compatibility gates. Start at [Macro Mode and U](#macro-mode-and-u). |
+| Saved data | Both support conditional controller format 17 and U-aware reusable schemas; transfer/backup envelopes are unchanged. Macro defaults off and survives full-profile copies/transfers. |
+| Android source and tests | Both contain **77 production Kotlin files / 65 JVM test files** with matching contents, including Macro/U/compatibility coverage. This file inventory is not a test-case count or execution claim. |
+| Receiver/voice development support | Dev additionally retains thirteen receiver suites, three packaging builders, two bundle inspectors, sender mock/interop harnesses and runner. See [development tools](#development-packaging-and-test-tools) and [verification](#verification-map). Main does not add these tools in the Android promotion. |
+| Shared implementation | All six production receiver modules, canonical spec/dependencies/DLLs, facial runtime/build files, production VoiceAttack sender and the promoted Android implementation match main. |
+| Packaged APK | Dev keeps its existing November 17 feature APK. Main release `06b1e64` publishes a freshly built APK verified byte-for-byte identical to this existing dev APK. Dev was not rebuilt; build history differs while current APK bytes match. Each branch README records its hash and verification. |
 
 For later refreshes, compare **verified** main/dev tips and local changes first, then inspect changed blocks and their callers. Reuse the unchanged component maps; do not infer every old plan or retained test/helper is a new runtime feature.
 
@@ -217,7 +218,7 @@ Dev adds [`ui/ButtonMacroController.kt`](source/android/app/src/main/java/com/ex
 | File / new block | Behavior and invariant |
 | --- | --- |
 | `ButtonMacroController.press`, `isActive` | Validate nonblank reversible output, reject R/edge/toggle/force-UP/Release All, then activate BASE with default **90 ms** and `completeOnRelease=true`. Extra presses while its lease is active are ignored, not restarted/queued. Authored trigger P is respected; holding the same touch does not repeat a completed run. |
-| `release`, `cancel` | Normal release preserves finite immediate steps and resolves SOR once. Cancel calls `releaseAllLeases` and clears the run; lifecycle/Release All/Finish must not complete pending steps in the background. |
+| `release`, `cancel` | Normal source release preserves finite immediate steps and resolves SOR once. Global Swipe exit/handoff synthesizes normal UP while the physical finger may remain down; it is not hard cancellation. Cancel calls `releaseAllLeases` and clears the run; lifecycle/Release All/Finish must not complete pending steps in the background. |
 | `ControlView.playTouch`, `macroPointerId` | Macro branch follows local actions and precedes directional/Aim/Auto-Tap/ordinary routing. Track initiating pointer: normal UP/its POINTER_UP releases; missing pointer/CANCEL cancels. Early return ignores global Hold/Turbo. Properties cancel before and after editing; local cleanup avoids legacy release reinterpretation. |
 | `ControlViewHelper` macro methods | Lazy controller uses `createButtonAimPayloadExecutor("macro")`, preserving existing scoped output/ownership and legacy adoption-busy checks. |
 | `PropertySheetBuilder` Macro checkbox/save | Ordinary Button only; reciprocal exclusion with Hold Toggle, Auto-Tap, Button Aim and directional Button. Local page action disables it. Save can toast an invalid-payload error without clearing the saved flag; runtime validation rejects the activation. Do not assume raw imports resolve every conflict like editor switches. |

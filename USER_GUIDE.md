@@ -2,7 +2,7 @@
 
 SimpleController turns an Android phone or tablet into a customizable controller for a Windows PC. The phone sends commands over your local network to the Windows receiver, which produces keyboard, mouse, or virtual Xbox-controller input. Buttons, sticks, aiming surfaces, and floating controls can be arranged around your comfortable reach and operated with one finger.
 
-This guide covers **`dev`, the development version**, including Macro Mode and the `(U...)` timed-release modifier. [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) is the public release. Profiles using Macro Mode/U can require format 17, which the current main format-16 importer cannot read. Keep a verified backup before moving between versions; see [branches and compatibility](BRANCHES.md).
+This guide covers **`dev`, the development version**, including Macro Mode and the `(U...)` timed-release modifier. The [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) now includes the same Android implementation and format-17 support, promoted from dev `632447c`. Older format-16 APKs still reject profiles or backups requiring those newer settings. Keep a verified backup before moving between app versions; see [branches and compatibility](BRANCHES.md).
 
 ## Install and connect
 
@@ -125,7 +125,7 @@ TouchAim sensitivity accepts numeric values such as `0.001`. Manual three-stage 
 
 ### Button Macro Mode
 
-In an ordinary Button's Behavior settings, enable **Macro Mode** to tap once and complete a finite payload after lifting. Commands without a duration use a 90 ms press. For example:
+In an ordinary Button's Behavior settings, enable **Macro Mode** to tap once and complete a finite payload after normal source release. Commands without a duration use a 90 ms press. SOR fires on normal source release; when global Swipe hands the gesture to another control, its synthesized UP qualifies even while your finger remains down. Finite immediate steps continue after that release. For example:
 
 ```text
 CTRL,ALT,TAB

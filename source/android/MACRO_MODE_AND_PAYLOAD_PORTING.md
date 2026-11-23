@@ -35,15 +35,17 @@ Page actions, Release All, toggles and raw force-UP commands are excluded.
 
 Persist `Control.macroModeEnabled: Boolean = false`. Show a **Macro Mode** checkbox
 in ordinary Button settings. On DOWN, start one finite run immediately. Normal
-finger-up does not cancel pending D commands or shorten finite immediate presses.
+source release does not cancel pending D commands or shorten finite immediate presses.
 Commands without U use a 90 ms press; an existing trigger P duration is respected.
-SOR still waits for the real source finger-up and fires only once.
+SOR fires once on normal source release. Macro Buttons remain eligible for global
+Swipe: its exit/handoff synthesizes a normal UP, so SOR can fire while the physical
+finger is still down. Finite immediate steps continue after that source release.
 
 Additional taps while the run is active are ignored: they neither restart nor
 queue another run. After completion, a new tap starts a fresh run. Holding the
 finger down does not repeat a completed run. Runs containing armed SOR remain
-alive until finger-up. Track the initiating pointer: its POINTER_UP is normal
-release, while a missing pointer or Android CANCEL is hard cleanup.
+alive until normal source release. Track the initiating pointer: its POINTER_UP
+is normal release, while a missing pointer or Android CANCEL is hard cleanup.
 
 Macro Mode is separate from Hold Toggle, Toggle Auto-Tap, Button Aim and directional
 button inputs; selecting one disables the conflicting mode. Macro Mode ignores
