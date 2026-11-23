@@ -83,6 +83,7 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Facial-input setup, matching source and packaging recipe | [facial-input](facial-input/README.md) |
 | VoiceAttack setup and controller outputs | [VoiceAttack guide](voiceattack/USER_GUIDE.md) |
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
+| Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
 The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. The receiver EXE is the same existing public receiver used by main. See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
 
