@@ -5,9 +5,9 @@
 | Branch | Purpose | Preserved source/artifact basis |
 | --- | --- | --- |
 | [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Default public release | Macro Mode/U and format-17 compatibility promoted from dev `632447c` onto the previous public-release basis `69eee7d` |
-| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development work and additional verification/packaging tools | Android source at `632447c` supplies this main promotion; the existing November 17 dev APK and extra receiver/voice tools remain preserved |
+| [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development work and additional verification/packaging tools | Android source at `632447c` supplied the Macro Mode/U promotion; dev now adds selected USB/Wi-Fi reconnection, a rebuilt APK, and extra receiver/voice tools |
 
-`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same source layout. Dev now supplies `Simple Controller Receiver.exe` with hang diagnostics; main keeps `SimpleControllerReceiver.exe` without those additions:
+`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same source layout. Dev's November 24 Android update additionally remembers USB versus manual connection mode, restores USB discovery on reopen, and rejects canceled/stale discovery results. Main retains its previous Android implementation and APK. Controller/profile schemas and the manual Wi-Fi address/ConsoleBridge preference are unchanged. Dev now supplies `Simple Controller Receiver.exe` with hang diagnostics; main keeps `SimpleControllerReceiver.exe` without those additions:
 
 ```text
 README.md, USER_GUIDE.md, BRANCHES.md
@@ -18,7 +18,7 @@ facial-input/         Separate optional facial app
 voiceattack/          Optional voice helper and guide
 ```
 
-The initial main/dev setup and November 22 dev documentation refresh preserved this branch's existing APK/EXE contents. On November 23, dev ports the desktop hang-diagnostic receiver, rebuilds and renames its download to `Simple Controller Receiver.exe`, and updates its packaging helpers. Main's receiver is unchanged. The six production modules preserve the existing control logic with added diagnostic instrumentation; dev also supplies `receiver_timing.py`, `receiver_diagnostics.py` and their tests. The 294 mocked receiver tests and static bundle verification are separate from real input/game testing. The later main promotion builds its own public Android APK from the promoted source; it does not rebuild or replace the November 17 dev APK. Each branch's root README identifies its supplied artifact hashes and verification. Main release `06b1e64` rebuilt and verified its APK byte-for-byte identical to the existing dev download. This does not establish a new device/game test.
+The initial main/dev setup and November 22 dev documentation refresh preserved this branch's existing APK/EXE contents. On November 23, dev ports the desktop hang-diagnostic receiver, rebuilds and renames its download to `Simple Controller Receiver.exe`, and updates its packaging helpers. Main's receiver is unchanged. The six production modules preserve the existing control logic with added diagnostic instrumentation; dev also supplies `receiver_timing.py`, `receiver_diagnostics.py` and their tests. The 294 mocked receiver tests and static bundle verification are separate from real input/game testing. The later main promotion builds its own public Android APK from the promoted source; it does not rebuild or replace the November 17 dev APK. Each branch's root README identifies its supplied artifact hashes and verification. Main release `06b1e64` rebuilt and verified its APK byte-for-byte identical to the then-current November 17 dev download; dev's later USB reconnect APK now differs. This does not establish a new device/game test.
 
 ## Profile compatibility
 

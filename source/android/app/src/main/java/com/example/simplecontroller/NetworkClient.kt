@@ -74,6 +74,8 @@ object NetworkClient {
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val usbDiscoveryAttempts = UsbTetherDiscoveryAttempts()
+    private val usbTetherStartGate = UsbTetherStartGate()
     private var socket: DatagramSocket? = null
     private var serverAddress: InetAddress? = null
 
@@ -110,10 +112,12 @@ object NetworkClient {
 
     /** Update connection settings */
     fun updateSettings(host: String, port: Int, autoReconnectEnabled: Boolean) {
+        usbDiscoveryAttempts.invalidate()
         UdpClient.invalidatePhoneCapability()
         this.hostAddress = host
         this.portNumber = port
         this.autoReconnect = autoReconnectEnabled
+        usbTetherStartGate.endpointConfigured()
 
         // If already connected, disconnect and reconnect with new settings
         if (_connectionStatus.value == ConnectionStatus.CONNECTED) {
@@ -124,7 +128,10 @@ object NetworkClient {
 
     /** Set the player role for this client */
     fun setPlayerRole(role: PlayerRole) {
-        if (currentPlayerRole != role) UdpClient.invalidatePhoneCapability()
+        if (currentPlayerRole != role) {
+            usbDiscoveryAttempts.invalidate()
+            UdpClient.invalidatePhoneCapability()
+        }
         currentPlayerRole = role
         Log.d("NetworkClient", "Player role set to: $role")
 
@@ -143,7 +150,9 @@ object NetworkClient {
 
     /** Start connection to server */
     fun start() {
+        if (!usbTetherStartGate.canStart()) return
         if (_connectionStatus.value == ConnectionStatus.CONNECTING) return
+        usbDiscoveryAttempts.invalidate()
 
         _connectionStatus.value = ConnectionStatus.CONNECTING
         scope.launch {
@@ -198,34 +207,41 @@ object NetworkClient {
      * Manual host/port settings are not changed unless a receiver explicitly replies.
      */
     fun discoverUsbTetherReceiver(onResult: (ReceiverEndpoint?) -> Unit) {
+        requireUsbTetherDiscovery()
         close()
+        val attempt = usbDiscoveryAttempts.next()
         _lastErrorMessage.value = null
         _connectionStatus.value = ConnectionStatus.CONNECTING
 
         scope.launch {
             val endpoint = try {
-                findUsbTetherReceiver()
+                findUsbTetherReceiver(attempt)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
-                Log.e("NetworkClient", "USB tether discovery failed", e)
+                if (usbDiscoveryAttempts.isCurrent(attempt)) {
+                    Log.e("NetworkClient", "USB tether discovery failed", e)
+                }
                 null
             }
-
-            if (endpoint == null) {
-                _connectionStatus.value = ConnectionStatus.ERROR
-                _lastErrorMessage.value =
-                    "USB receiver not found. Check USB tethering, the PC receiver, and Windows Firewall."
-            } else {
-                // Let the normal connection path take over using the verified endpoint.
-                _connectionStatus.value = ConnectionStatus.DISCONNECTED
-            }
-
+            currentCoroutineContext().ensureActive()
             withContext(Dispatchers.Main.immediate) {
-                onResult(endpoint)
+                usbDiscoveryAttempts.applyIfCurrent(attempt) {
+                    if (endpoint == null) {
+                        _connectionStatus.value = ConnectionStatus.ERROR
+                        _lastErrorMessage.value =
+                            "USB receiver not found. Check USB tethering, the PC receiver, and Windows Firewall."
+                    } else {
+                        // Only this live attempt may hand its verified route to the UI.
+                        _connectionStatus.value = ConnectionStatus.DISCONNECTED
+                    }
+                    onResult(endpoint)
+                }
             }
         }
     }
 
-    private suspend fun findUsbTetherReceiver(): ReceiverEndpoint? {
+    private suspend fun findUsbTetherReceiver(attempt: Long): ReceiverEndpoint? {
         val deadline = System.currentTimeMillis() + USB_DISCOVERY_TIMEOUT_MS
         val requestBytes = USB_DISCOVERY_REQUEST.toByteArray()
 
@@ -233,6 +249,8 @@ object NetworkClient {
             discoverySocket.broadcast = true
 
             while (System.currentTimeMillis() < deadline) {
+                currentCoroutineContext().ensureActive()
+                if (!usbDiscoveryAttempts.isCurrent(attempt)) return null
                 val ports = linkedSetOf(portNumber, CURRENT_RECEIVER_PORT, 9001)
                     .filter { it in 1..65535 }
 
@@ -250,6 +268,8 @@ object NetworkClient {
 
                 val receiveUntil = minOf(deadline, System.currentTimeMillis() + 900L)
                 while (System.currentTimeMillis() < receiveUntil) {
+                    currentCoroutineContext().ensureActive()
+                    if (!usbDiscoveryAttempts.isCurrent(attempt)) return null
                     val remaining = (receiveUntil - System.currentTimeMillis())
                         .coerceIn(1L, 900L)
                     discoverySocket.soTimeout = remaining.toInt()
@@ -285,7 +305,15 @@ object NetworkClient {
         return null
     }
 
-    private fun usbTetherBroadcastAddresses(): Set<InetAddress> {
+    /** A failed/canceled USB search must not let floating preparation start an old route. */
+    fun requireUsbTetherDiscovery() {
+        usbTetherStartGate.requireDiscovery()
+    }
+
+    /** Only observed active USB interfaces count; fallback broadcasts are not detection. */
+    fun hasUsbTetherNetwork(): Boolean = usbTetherInterfaceBroadcastAddresses().isNotEmpty()
+
+    private fun usbTetherInterfaceBroadcastAddresses(): Set<InetAddress> {
         val addresses = linkedSetOf<InetAddress>()
 
         runCatching {
@@ -308,6 +336,11 @@ object NetworkClient {
             Log.d("NetworkClient", "Could not enumerate USB network interfaces: ${it.message}")
         }
 
+        return addresses
+    }
+
+    private fun usbTetherBroadcastAddresses(): Set<InetAddress> {
+        val addresses = usbTetherInterfaceBroadcastAddresses().toMutableSet()
         // Common Android USB-tether subnets cover devices that hide interface details.
         listOf(
             "192.168.42.255",
@@ -480,6 +513,7 @@ object NetworkClient {
 
     /** Internal method to close socket */
     private fun closeConnection() {
+        usbDiscoveryAttempts.invalidate()
         UdpClient.invalidatePhoneCapability()
         finishPhoneRequests()
         socket?.close()

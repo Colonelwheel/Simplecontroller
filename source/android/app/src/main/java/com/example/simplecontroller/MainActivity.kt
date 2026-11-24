@@ -31,6 +31,7 @@ import androidx.core.view.doOnNextLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.Lifecycle
 import com.example.simplecontroller.io.LayoutManager
 import com.example.simplecontroller.io.ControllerProfileLoadResult
 import com.example.simplecontroller.io.ImportedControllerProfile
@@ -81,6 +82,8 @@ import com.example.simplecontroller.model.remapControlIds
 import com.example.simplecontroller.model.withGeometry
 import com.example.simplecontroller.model.withOnlyControlIds
 import com.example.simplecontroller.net.NetworkClient
+import com.example.simplecontroller.net.ConnectionRestorePolicy
+import com.example.simplecontroller.net.SavedConnectionMode
 import com.example.simplecontroller.ui.ControlView
 import com.example.simplecontroller.ui.GlobalSettings
 import com.example.simplecontroller.ui.SwipeManager
@@ -115,6 +118,21 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     private companion object {
         const val USB_TETHER_RETURN_PENDING = "usbTetherReturnPending"
         const val TETHER_SETTINGS_ACTION = "android.settings.TETHER_SETTINGS"
+    }
+
+    private var usbTetherDiscoveryInProgress = false
+    private var usbTetherDiscoveryAttempt = 0L
+
+    private fun selectedConnectionMode(): SavedConnectionMode = ConnectionRestorePolicy.mode(
+        networkPrefs.getString(ConnectionRestorePolicy.PREFERENCE_KEY, null),
+        NetworkClient.hasUsbTetherNetwork()
+    )
+
+    private fun invalidateUsbTetherDiscovery(): Boolean {
+        val wasDiscovering = usbTetherDiscoveryInProgress
+        usbTetherDiscoveryAttempt++
+        usbTetherDiscoveryInProgress = false
+        return wasDiscovering
     }
 
     private val createProfileDocumentLauncher = registerForActivityResult(
@@ -413,14 +431,23 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         // Do not briefly start the saved manual connection first.
         val usbTetherReturnPending =
             networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)
-        if (networkPrefs.getBoolean("autoReconnect", false) && !usbTetherReturnPending &&
-            NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) {
+        val mode = selectedConnectionMode()
+        val status = NetworkClient.connectionStatus.value
+        val connectedOrConnecting = status == NetworkClient.ConnectionStatus.CONNECTED ||
+            status == NetworkClient.ConnectionStatus.CONNECTING
+        if (ConnectionRestorePolicy.shouldStartManual(mode, usbTetherReturnPending,
+                networkPrefs.getBoolean("autoReconnect", false), connectedOrConnecting)) {
             NetworkClient.start()
         }
-        if (!usbTetherReturnPending) prepareFloatingControlsForPlay()
+        prepareFloatingControlsForPlay()
     }
 
     private fun prepareFloatingControlsForPlay() {
+        // This helper is also called when leaving Edit. Floating preparation can
+        // start NetworkClient, so wait until the selected USB route is established.
+        if (networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false) ||
+            (selectedConnectionMode() == SavedConnectionMode.USB_TETHER &&
+                NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED)) return
         if (!GlobalSettings.editMode && ::controllerProfile.isInitialized &&
             controllerProfile.pages.any { page->page.floatingZones.any { it.enabled } }) {
             UdpClient.prepareFloatingControls()
@@ -445,8 +472,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
     override fun onResume() {
         super.onResume()
-        if (networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)) {
+        val returnPending = networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false)
+        if (returnPending) {
             networkPrefs.edit().remove(USB_TETHER_RETURN_PENDING).apply()
+        }
+        val status = NetworkClient.connectionStatus.value
+        if (!usbTetherDiscoveryInProgress && ConnectionRestorePolicy.shouldDiscoverUsb(
+                selectedConnectionMode(), returnPending,
+                networkPrefs.getBoolean("autoReconnect", false),
+                status == NetworkClient.ConnectionStatus.CONNECTED ||
+                    status == NetworkClient.ConnectionStatus.CONNECTING)) {
             connectViaUsbTether()
         }
     }
@@ -454,8 +489,9 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     override fun onStop() {
         super.onStop()
 
-        // Only disconnect if auto-reconnect is disabled
-        if (!networkPrefs.getBoolean("autoReconnect", false)) {
+        // Discovery belongs to this foreground attempt, even when established
+        // connections are allowed to remain alive in the background.
+        if (invalidateUsbTetherDiscovery() || !networkPrefs.getBoolean("autoReconnect", false)) {
             NetworkClient.close()
         }
     }
@@ -750,6 +786,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                     releaseOutputs(showFeedback = false)
                     resetToHomeAfterCleanup()
                     cancelTouchAimCalibration("Calibration stopped before disconnecting.")
+                    invalidateUsbTetherDiscovery()
                     NetworkClient.close()
                 }
 
@@ -789,6 +826,11 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
     }
 
     private fun connectViaUsbTether() {
+        val attempt = ++usbTetherDiscoveryAttempt
+        usbTetherDiscoveryInProgress = true
+        networkPrefs.edit()
+            .putString(ConnectionRestorePolicy.PREFERENCE_KEY, SavedConnectionMode.USB_TETHER.name)
+            .apply()
         Toast.makeText(this, "Searching for the PC receiver over USB…", Toast.LENGTH_SHORT).show()
         releaseOutputs(showFeedback = false)
         resetToHomeAfterCleanup()
@@ -796,6 +838,12 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
         UdpClient.close()
 
         NetworkClient.discoverUsbTetherReceiver { endpoint ->
+            if (attempt != usbTetherDiscoveryAttempt ||
+                !lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED) ||
+                selectedConnectionMode() != SavedConnectionMode.USB_TETHER) {
+                return@discoverUsbTetherReceiver
+            }
+            usbTetherDiscoveryInProgress = false
             if (endpoint == null) return@discoverUsbTetherReceiver
 
             val autoReconnect = networkPrefs.getBoolean("autoReconnect", false)
@@ -805,6 +853,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
             NetworkClient.updateSettings(endpoint.host, endpoint.port, autoReconnect)
             UdpClient.initialize(endpoint.host, endpoint.port)
             NetworkClient.start()
+            prepareFloatingControlsForPlay()
 
             Toast.makeText(
                 this,
@@ -833,6 +882,16 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
         // Set player role and update connection settings
         NetworkClient.setPlayerRole(playerRole)
+        if (!ConnectionRestorePolicy.shouldLoadManual(selectedConnectionMode(),
+                networkPrefs.getBoolean(USB_TETHER_RETURN_PENDING, false))) {
+            // Preserve an existing USB route across activity recreation. A cold
+            // start will rediscover it in onResume instead of loading Wi-Fi first.
+            if (NetworkClient.connectionStatus.value != NetworkClient.ConnectionStatus.CONNECTED) {
+                NetworkClient.requireUsbTetherDiscovery()
+            }
+            UdpClient.setConsoleBridgeEnabled(false)
+            return
+        }
         NetworkClient.updateSettings(host, port, autoReconnect)
 
         // Also initialize UdpClient with the same settings
@@ -914,6 +973,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
 
                 // --- Save to preferences (adds useCbv0) ---
                 networkPrefs.edit()
+                    .putString(ConnectionRestorePolicy.PREFERENCE_KEY, SavedConnectionMode.MANUAL.name)
                     .putString("serverHost", host)
                     .putInt("serverPort", port)
                     .putBoolean("autoReconnect", autoReconnect)
@@ -926,6 +986,7 @@ class MainActivity : AppCompatActivity(), LayoutManager.LayoutCallback {
                 releaseOutputs(showFeedback = false)
                 resetToHomeAfterCleanup()
                 cancelTouchAimCalibration("Calibration stopped before changing connections.")
+                if (invalidateUsbTetherDiscovery()) NetworkClient.close()
                 NetworkClient.setPlayerRole(playerRole)
                 NetworkClient.updateSettings(host, port, autoReconnect)
 

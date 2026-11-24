@@ -6,7 +6,7 @@ Simple Controller turns an Android phone or tablet into a customizable, one-fing
 
 This guide covers prerequisites, installation, first-time setup, creating profiles, adding buttons, button syntax, controller syntax, usage, and troubleshooting.
 
-This is **`dev`, the development branch**. Both dev and the [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) include Button Macro Mode, `(U...)` timed releases and controller-profile format 17. Dev retains additional receiver/voice development tools and historical feature notes. Its APK remains the existing November 17 feature delivery; main release `06b1e64` rebuilt and verified the same APK bytes without replacing this dev download. See [branches and compatibility](BRANCHES.md) before moving profiles between app versions.
+This is **`dev`, the development branch**. Both dev and the [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) include Button Macro Mode, `(U...)` timed releases and controller-profile format 17. Dev retains additional receiver/voice development tools and historical feature notes. Dev additionally remembers the selected USB/Wi-Fi connection method and restores USB discovery on reopen when Auto Reconnect is enabled. Its APK is rebuilt for this update; main retains the previous Android implementation/download. See [branches and compatibility](BRANCHES.md) before moving profiles between app versions.
 
 - [Download the development Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleController.apk) (open this link in your phone browser)
 - [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/Simple%20Controller%20Receiver.exe)
@@ -46,7 +46,7 @@ Port:       42734
 The IP above is an example; use the address shown on **your** PC. The current receiver uses **UDP port 42734**.
 
 - **Wi-Fi:** connect both devices to the same home network; a PC on Ethernet is fine. Tap **Connect** in the Android app, enter the displayed IP address and `42734`, choose Player 1 or Player 2, and connect. Leave ConsoleBridge/CBv0 disabled for this receiver.
-- **USB:** connect the phone to the PC with a data cable. In the app's connection dialog, select **USB Tether Mode**, enable USB tethering in Android settings, and return to the app. This mode discovers the receiver on the tethered connection; allow about 12 seconds. It preserves the saved Wi-Fi address.
+- **USB:** connect the phone to the PC with a data cable. In the app's connection dialog, select **USB Tether Mode**, enable USB tethering in Android settings, and return to the app. This mode discovers the receiver on the tethered connection; allow about 12 seconds. With Auto Reconnect enabled, reopening restores the last selected connection method. USB discovery preserves the saved Wi-Fi address. Choose normal Connect to switch back to Wi-Fi; there is no automatic USB-to-Wi-Fi fallback.
 
 Wi-Fi connection uses the saved/manual address; automatic discovery is part of USB Tether Mode. You normally do not need to open Command Prompt or run `ipconfig`, because the receiver already shows its IP address.
 
@@ -85,15 +85,17 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 | Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
-The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. Dev's receiver now includes the hang diagnostics from the November 10 desktop build and is supplied as `Simple Controller Receiver.exe`. The diagnostic observer records bounded timing and stack-location data; core input logic is preserved. Per-packet mouse-movement and left-button console debug prints have been removed; startup connection information and hang diagnostics remain available. Main retains its previous receiver. See [diagnostic capture and retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
+The Android implementation builds on floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The November 24, 2026 dev APK adds selected USB/Wi-Fi reconnection and stale-discovery protection. The standalone Touch Sensor Test screen and extra launcher remain removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. Dev's receiver now includes the hang diagnostics from the November 10 desktop build and is supplied as `Simple Controller Receiver.exe`. The diagnostic observer records bounded timing and stack-location data; core input logic is preserved. Per-packet mouse-movement and left-button console debug prints have been removed; startup connection information and hang diagnostics remain available. Main retains its previous receiver. See [diagnostic capture and retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
 
 Historical verification for the November 17, 2026 feature delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. The November 23 dev receiver update passed 294 mocked tests and static verification of all eight packaged Python modules and both ViGEm DLLs; the rebuilt EXE was not launched during verification. Compilation and package checks do not establish compatibility with every game, webcam or network.
+
+November 24 USB reconnect verification passed **697 JVM tests per variant**, APK/AAB assembly and both lint variants, with zero errors/fatals and 202 warnings per variant. The APK signer matches the installed identity; application ID, manifest and resources match the previous package. These checks do not establish physical USB reconnect or game behavior.
 
 SHA-256 checksums:
 
 ```text
 SimpleController.apk
-e0869e5b346c03f282a74d291c234783dee3c60eb18fbb3d62c5341bf2316544
+8238fd9048d4491815acc3978dc481fef926afd2d0bf44d090bed9696e29fa7a
 
 Simple Controller Receiver.exe
 c69308f11d91c591f06a6b498ba602ed11946fe4e21d04d866e09962c9163768

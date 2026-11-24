@@ -2,7 +2,7 @@
 
 SimpleController turns an Android phone or tablet into a customizable controller for a Windows PC. The phone sends commands over your local network to the Windows receiver, which produces keyboard, mouse, or virtual Xbox-controller input. Buttons, sticks, aiming surfaces, and floating controls can be arranged around your comfortable reach and operated with one finger.
 
-This guide covers **`dev`, the development version**, including Macro Mode and the `(U...)` timed-release modifier. The [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) now includes the same Android implementation and format-17 support, promoted from dev `632447c`. Older format-16 APKs still reject profiles or backups requiring those newer settings. Keep a verified backup before moving between app versions; see [branches and compatibility](BRANCHES.md).
+This guide covers **`dev`, the development version**, including Macro Mode and the `(U...)` timed-release modifier. The [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) includes Macro Mode/U and format-17 support, promoted from dev `632447c`. Dev additionally restores the selected USB/Wi-Fi connection method on reopen. Older format-16 APKs still reject profiles or backups requiring those newer settings. Keep a verified backup before moving between app versions; see [branches and compatibility](BRANCHES.md).
 
 ## Install and connect
 
@@ -34,6 +34,8 @@ The **Connected** label means the app started its UDP connection; it does not pr
 ### USB tethering
 
 Connect the phone to the PC with USB and start the receiver. On the phone, choose **Connect → USB Tether Mode**, enable USB tethering in Android's settings, then return to SimpleController. Allow about 12 seconds for receiver discovery. This discovery path finds the tether-network address without replacing your saved Wi-Fi address.
+
+With **Auto Reconnect** enabled, reopening remembers the selected connection method: USB Tether Mode rediscovers the USB receiver, while normal Connect reconnects to your saved Wi-Fi address. Choosing normal Connect switches back to Wi-Fi. USB discovery does not automatically fall back to Wi-Fi. If no method has been saved yet, an observed active USB network selects USB for the first reconnect. Returning explicitly from tether settings still starts discovery when Auto Reconnect is off.
 
 USB tethering creates a network connection; USB debugging is not required. If Windows classifies that connection as Public, allow this receiver and port specifically rather than opening broad Public-network access.
 

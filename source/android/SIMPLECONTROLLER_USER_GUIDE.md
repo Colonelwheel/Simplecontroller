@@ -2,7 +2,7 @@
 
 > **Guide scope:** Development branch `dev`; historical additions are dated below
 >
-> **Applies to:** the supplied development APK and Android snapshot `1ea6ffa`, including Macro Mode/U
+> **Applies to:** the supplied development APK and Android snapshot `1ea6ffa`, including Macro Mode/U and selected USB/Wi-Fi reconnect
 >
 > **Platform:** Android 7.0 or newer and Windows 10/11
 
@@ -70,7 +70,7 @@ USB tethering can give you a direct phone-to-PC network when normal Wi-Fi is inc
 4. Enable Android's USB tethering when its settings screen opens.
 5. Return to SimpleController and allow up to about 12 seconds for discovery.
 
-USB discovery does not overwrite the Wi-Fi address you saved. This path is implemented and packaged, but it still needs broader real-device testing, so keep Wi-Fi available as a fallback.
+USB discovery does not overwrite the Wi-Fi address you saved. With Auto Reconnect enabled, reopening restores the last selected connection method. USB Tether Mode rediscovers the receiver; normal Connect switches back to the saved Wi-Fi address. A failed USB search does not silently switch to Wi-Fi. When no method has been saved, an observed active USB network selects USB on the first reconnect. This path is implemented and packaged, but it still needs broader real-device testing, so keep Wi-Fi available as a fallback.
 
 ### Network safety
 

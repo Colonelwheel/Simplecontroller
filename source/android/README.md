@@ -1,8 +1,8 @@
 # Android development source
 
-This is the Android source for **`dev`**, preserving floating-controls snapshot `1ea6ffa` in the common `source/android` layout. It includes Macro Mode and per-command `(U...)` timed release from `9bb9187`, plus the later standalone diagnostic removal. TouchAim and its calibration workflow remain available. Android runtime source, resources, build configuration, and tests retain their original contents; this directory reorganization does not install an app or change its data.
+This is the Android source for **`dev`**, based on floating-controls snapshot `1ea6ffa` in the common `source/android` layout. It includes Macro Mode and per-command `(U...)` timed release from `9bb9187`, plus the later standalone diagnostic removal. TouchAim and its calibration workflow remain available. The November 24, 2026 update adds selected USB/Wi-Fi reconnection and generation-guarded USB discovery. Connection preferences remain separate from controller profiles; profile formats and saved manual endpoint/ConsoleBridge settings are unchanged.
 
-Open this `source/android` directory in Android Studio. [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) uses the same layout for the public release. Both current branches support controller-profile formats through 17 for Macro Mode/U. Main promotes the same Android implementation and regression tests from dev `632447c`; this dev APK remains its preserved November 17 delivery. See [branch and profile compatibility](../../BRANCHES.md) and [the portable source map](../../ARCHITECTURE.md).
+Open this `source/android` directory in Android Studio. [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) uses the same layout for the public release. Both current branches support controller-profile formats through 17 for Macro Mode/U. Main promotes Macro Mode/U and its regression tests from dev `632447c`; dev's newer USB reconnect source/APK now differs. See [branch and profile compatibility](../../BRANCHES.md) and [the portable source map](../../ARCHITECTURE.md).
 
 Use JDK 21 and Android SDK 36. Configure your own local SDK path, then run from this directory:
 
@@ -12,7 +12,7 @@ Use JDK 21 and Android SDK 36. Configure your own local SDK path, then run from 
 .\gradlew.bat lintSideloadDebug lintPlayRelease
 ```
 
-The supplied root [SimpleController.apk](../../SimpleController.apk) is the existing November 17, 2026 feature APK. Historical verification for that delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Those historical checks were not rerun for the main/dev organization and do not establish physical touch feel or game compatibility. No app build or device install was performed by this setup.
+The supplied root [SimpleController.apk](../../SimpleController.apk) is rebuilt from this branch for the November 24, 2026 USB reconnect update. With Auto Reconnect enabled, it restores the last selected connection method, discovers active USB on an upgrade with no saved mode, and keeps explicit manual Wi-Fi selection available without automatic fallback. Historical verification for the November 17 delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Those historical checks were not rerun for the main/dev organization and do not establish physical touch feel or game compatibility. The initial main/dev setup did not build/install an app; verification for the later USB reconnect update is recorded in the root README.
 
 The APK uses the Sideload Debug identity `com.example.simplecontroller`, targeting API 34. The separate Play Release package is `io.github.colonelwheel.simplecontroller`, targeting API 36; Play signing/upload remains separate. A developer build uses its own signing setup. Source branch names and build variants are independent.
 
