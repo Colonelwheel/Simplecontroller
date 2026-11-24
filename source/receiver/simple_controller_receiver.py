@@ -736,8 +736,6 @@ def handle_touchpad(command):
             dx, dy = map(float, command[6:].split(",", 1))
             mx = int(dx * DELTA_GAIN)
             my = int(dy * DELTA_GAIN)
-            with timing_recorder.span("console_output"):
-                print("HDL", dx, dy, "⇒", mx, my)      # DEBUG
             # comment-out the line you're NOT using:
             # mouse.move(mx, my, absolute=False)   # needs admin
             with timing_recorder.span("native_mouse_output"):
@@ -1592,12 +1590,6 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
         handle_scroll(data)
         return                                         # ← nothing else to do    
         
-         # --- LOG LEFT-CLICK PACKETS ---------------------------------
-    if data.startswith("MOUSE_LEFT"):
-        with timing_recorder.span("console_output"):
-            print("BTN", data)            # << add this line
-    # ------------------------------------------------------------
-
     # The game-mouse backend is additive. Serialize its release-barrier check
     # with output so a concurrent global release cannot admit a stale movement.
     if data.startswith("GAME_DELTA:"):

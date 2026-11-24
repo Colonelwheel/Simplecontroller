@@ -85,7 +85,7 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 | Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
-The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. Dev's receiver now includes the hang diagnostics from the November 10 desktop build and is supplied as `Simple Controller Receiver.exe`. The diagnostic observer records bounded timing and stack-location data; core input logic is preserved. Main retains its previous receiver. See [diagnostic capture and retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
+The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. Dev's receiver now includes the hang diagnostics from the November 10 desktop build and is supplied as `Simple Controller Receiver.exe`. The diagnostic observer records bounded timing and stack-location data; core input logic is preserved. Per-packet mouse-movement and left-button console debug prints have been removed; startup connection information and hang diagnostics remain available. Main retains its previous receiver. See [diagnostic capture and retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
 
 Historical verification for the November 17, 2026 feature delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. The November 23 dev receiver update passed 294 mocked tests and static verification of all eight packaged Python modules and both ViGEm DLLs; the rebuilt EXE was not launched during verification. Compilation and package checks do not establish compatibility with every game, webcam or network.
 
@@ -96,7 +96,7 @@ SimpleController.apk
 e0869e5b346c03f282a74d291c234783dee3c60eb18fbb3d62c5341bf2316544
 
 Simple Controller Receiver.exe
-10da167a2a085fabd0f59ecac0e36165682df728969f05a2fc88fac73d44da21
+c69308f11d91c591f06a6b498ba602ed11946fe4e21d04d866e09962c9163768
 
 FacialInput.exe
 4dd1edf58afda99789ee619696fac718f916e80375f61fe93c80643907efbedf
