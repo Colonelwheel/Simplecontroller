@@ -13,6 +13,7 @@ import socket
 import threading
 import time
 import uuid
+from receiver_timing import recorder as timing_recorder
 
 FACE_INPUT_TAG = 0x46474933
 KEY_NAMES = frozenset(tuple("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -66,7 +67,7 @@ def synchronized(lock):
     def decorate(fn):
         @functools.wraps(fn)
         def wrapped(*args, **kwargs):
-            with lock:
+            with timing_recorder.observe_lock(lock):
                 return fn(*args, **kwargs)
         return wrapped
     return decorate
@@ -99,7 +100,7 @@ class MergedDesktopInput:
         self.emitted[target] = pressed
 
     def phone_set(self, target, pressed):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             write_target = target
             target = desktop_target(target)
             if target not in self.targets:
@@ -116,7 +117,7 @@ class MergedDesktopInput:
                 self._write(target, pressed, write_target=write_target)
 
     def face_set(self, player, target, pressed):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if target in KEY_INPUTS:
                 self.tagged.add(desktop_target(target))
             elif pressed and not self.face.get(target):
@@ -139,7 +140,7 @@ class MergedDesktopInput:
                 self._write(target, after, facial=True)
 
     def face_clear(self, player):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             failure = None
             for target in self.targets:
                 try:
@@ -151,7 +152,7 @@ class MergedDesktopInput:
                 raise failure
 
     def phone_tap(self, target):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             write_target = target
             target = desktop_target(target)
             if target not in self.targets:
@@ -181,7 +182,7 @@ class MergedDesktopInput:
                     self.phone_changed()
 
     def resync_phone(self, target):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             write_target = target
             target = desktop_target(target)
             if target not in self.targets:
@@ -191,7 +192,7 @@ class MergedDesktopInput:
             self._write(target, True, write_target=write_target)
 
     def clear_unowned(self, target):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             target = desktop_target(target)
             if target not in self.phone and not self.face[target] and self.emitted[target] is not False:
                 # Explicit cleanup retries an uncertain/known injected DOWN,
@@ -217,7 +218,7 @@ class MergedGamepad:
         # harness) while keeping ownership bookkeeping on this proxy.
         raw = self.__dict__.get("raw")
         if name not in self._OWNED_ATTRIBUTES and raw is not None and hasattr(raw, name):
-            with self.lock:
+            with timing_recorder.observe_lock(self.lock):
                 setattr(raw, name, value)
         else:
             object.__setattr__(self, name, value)
@@ -260,11 +261,11 @@ class MergedGamepad:
             method(button=button)
 
     def press_button(self, button):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self._button(button, True, "phone")
 
     def release_button(self, button):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self._button(button, False, "phone")
 
     def _trigger(self, button, value, source):
@@ -280,15 +281,15 @@ class MergedGamepad:
         method(value_float=merged)
 
     def left_trigger_float(self, value_float):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self._trigger("LT", value_float, "phone")
 
     def right_trigger_float(self, value_float):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self._trigger("RT", value_float, "phone")
 
     def left_joystick_float(self, x_value_float, y_value_float):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             previous = self.phone_left
             self.phone_left = (x_value_float, y_value_float)
             if self.phone_left_changed is not None and previous != self.phone_left:
@@ -302,21 +303,25 @@ class MergedGamepad:
             self.left_changed(x, y)
 
     def face_vector(self, vector):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self.face_left = tuple(vector)
             self._left_output()
-            self.raw.update()
+            self._native_update()
 
     def right_joystick_float(self, x_value_float, y_value_float):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self.raw.right_joystick_float(x_value_float=x_value_float, y_value_float=y_value_float)
 
     def update(self):
-        with self.lock:
-            self.raw.update()
+        with timing_recorder.observe_lock(self.lock):
+            self._native_update()
+
+    def _native_update(self):
+        with timing_recorder.span("native_gamepad_update"):
+            return self.raw.update()
 
     def reset(self):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self.phone_buttons.clear()
             self.face_buttons.clear()
             self.voice_buttons.clear()
@@ -327,7 +332,7 @@ class MergedGamepad:
             self.raw.reset()
 
     def face_set(self, button, pressed):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if button in DESKTOP_INPUTS or button in KEY_INPUTS:
                 if self.desktop is None:
                     raise ProtocolError("desktop input unavailable")
@@ -337,10 +342,10 @@ class MergedGamepad:
                 self._trigger(button, 1.0 if pressed else 0.0, "face")
             else:
                 self._button(self.button_map[button], pressed, "face")
-            self.raw.update()
+            self._native_update()
 
     def face_clear(self):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             failure = None
             if self.desktop is not None:
                 try:
@@ -366,26 +371,26 @@ class MergedGamepad:
                 except Exception as exc:
                     if failure is None:
                         failure = exc
-            self.raw.update()
+            self._native_update()
             if failure is not None:
                 raise failure
 
     def voice_set(self, button, value):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if button in ("LT", "RT"):
                 self._trigger(button, float(value), "voice")
             else:
                 self._button(self.button_map[button], bool(value), "voice")
-            self.raw.update()
+            self._native_update()
 
     def voice_clear(self):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             for button in tuple(self.voice_buttons):
                 self._button(button, False, "voice")
             for button in ("LT", "RT"):
                 if self.voice_triggers[button]:
                     self._trigger(button, 0.0, "voice")
-            self.raw.update()
+            self._native_update()
 
 
 class ProtocolError(ValueError):
@@ -491,7 +496,7 @@ class FaceInputState:
         self._reconcile_v3(previous)
 
     def _phone_left_changed(self, player, vector):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if self.version == 3 and self.session is not None and player == self.player:
                 if vector != (0.0, 0.0):
                     was_armed = any(self.movement_channels[name]["armed"] for name in MOVEMENT_CHANNELS)
@@ -690,8 +695,9 @@ class FaceInputState:
             channel["deadline"] = self.clock() + 0.1 if op == "tap" else None
         self._reconcile(previous)
 
+    @timing_recorder.measure("shutdown_outputs")
     def disconnect(self):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             self._disarm()
             try:
                 self._clear()
@@ -703,9 +709,10 @@ class FaceInputState:
                 self.watched_keys.clear()
                 self.watched_buttons.clear()
 
+    @timing_recorder.measure("shutdown_outputs")
     def reset(self, player_ids):
         """Called inside the receiver's atomic global release transition."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if self.player not in player_ids:
                 return
             self._disarm()
@@ -715,7 +722,7 @@ class FaceInputState:
             self._clear()
 
     def handle(self, message):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if not isinstance(message, dict) or type(message.get("v")) is not int or message["v"] not in (1, 2, 3):
                 raise ProtocolError("unsupported protocol")
             if self.session is not None and message["v"] != self.version:
@@ -800,7 +807,7 @@ class FaceInputState:
 
     def tick(self):
         """Return True when the socket must close for heartbeat timeout."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             now = self.clock()
             if self.session is None:
                 return False
@@ -840,7 +847,7 @@ class FaceInputState:
             return False
 
     def drain_notifications(self):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             result = list(self.notifications)
             self.notifications.clear()
             return result
@@ -874,6 +881,7 @@ class FaceInputServer:
         self.thread = threading.Thread(target=self._run, name="FacialInputTCP", daemon=True)
         self.thread.start()
 
+    @timing_recorder.measure("shutdown_face")
     def stop(self):
         self.stop_event.set()
         if self.thread is not None:
@@ -896,7 +904,8 @@ class FaceInputServer:
                 self.state.disconnect()
             except Exception as exc:
                 if self.logger:
-                    self.logger.warning("Facial input cleanup failed: %s", exc)
+                    with timing_recorder.span("log_output"):
+                        self.logger.warning("Facial input cleanup failed: %s", exc)
 
         def enqueue(message):
             outgoing.extend((json.dumps(message, separators=(",", ":")) + "\n").encode("utf-8"))
@@ -951,8 +960,10 @@ class FaceInputServer:
                         del outgoing[:count]
                 except (OSError, ValueError, UnicodeError, TypeError, KeyError) as exc:
                     if self.logger:
-                        self.logger.warning("Facial input disconnected: %s", exc)
+                        with timing_recorder.span("log_output"):
+                            self.logger.warning("Facial input disconnected: %s", exc)
                     close_client()
         finally:
-            close_client()
-            self.listener.close()
+            with timing_recorder.span("shutdown_face"):
+                close_client()
+                self.listener.close()

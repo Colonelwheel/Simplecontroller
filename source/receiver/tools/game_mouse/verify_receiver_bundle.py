@@ -9,9 +9,10 @@ import types
 from PyInstaller.archive.readers import CArchiveReader
 
 
+# Facial/voice baselines include the approved hang-diagnostic instrumentation.
 BASELINE_COMPANIONS = {
-    'face_input_server.py': 'BB3145F497C62EA4EF7721E223203AE08053B4B20AFBB373D69263D2A8914FD2',
-    'voice_input_server.py': '1E70358ECE24BA10F376BA2697B15747395AF520A76C1C6CDDF691B8E8F64E48',
+    'face_input_server.py': '3FE8864EDD5C14F5C3FC9BF43F0C3194093207150B8142E7178DE12E3D44C039',
+    'voice_input_server.py': '3C6928B57D23050B69806555EEA74F8A9D94A12CED8B006D39A4E6CCB22746D9',
     'camera_follow.py': '88E472DA732D8E5FC5649FB5ECB262C86CCEF950621B451D93DAD64C9E059207',
 }
 
@@ -57,15 +58,12 @@ def verify(delivery):
             assert actual == BASELINE_COMPANIONS[path.name], f'Baseline companion changed: {path}'
 
     archive = CArchiveReader(str(executable))
-    entry = marshal.loads(archive.extract('simple_controller_receiver'))
-    assert {'GAME_DELTA:', 'handle_game_mouse_delta', 'send_relative_mouse',
-            'handle_touchpad', 'release_state_lock', 'send_tagged_key',
-            'effective_left_changed', 'output_packet_is_current'} <= symbols(entry)
+    wrapper = marshal.loads(archive.extract('receiver_diagnostics'))
     pyz_name = next(name for name, record in archive.toc.items() if record[-1] == 'z')
     pyz = archive.open_embedded_archive(pyz_name)
-    modules = {'simple_controller_receiver': entry}
+    modules = {'receiver_diagnostics': wrapper}
     for name in ('face_input_server', 'voice_input_server', 'camera_follow', 'relative_mouse',
-                 'phone_output_protocol'):
+                 'phone_output_protocol', 'simple_controller_receiver', 'receiver_timing'):
         assert name in pyz.toc, name
         modules[name] = pyz.extract(name)
     for name, bundled in modules.items():
@@ -73,6 +71,13 @@ def verify(delivery):
         expected = [compile(source.read_bytes(), str(source), 'exec', optimize=level)
                     for level in (0, 1, 2)]
         assert any(semantic(bundled) == semantic(code) for code in expected), name
+    assert {'SC_RECEIVER_TIMING', 'SC_RECEIVER_TIMING_DIR', 'hang-diagnostics',
+            'run_module', 'simple_controller_receiver'} <= symbols(wrapper)
+    assert {'TimingRecorder', 'observe_lock', '_watchdog_main', '_writer_main',
+            '_rotate'} <= symbols(modules['receiver_timing'])
+    assert {'GAME_DELTA:', 'handle_game_mouse_delta', 'send_relative_mouse',
+            'handle_touchpad', 'release_state_lock', 'send_tagged_key',
+            'effective_left_changed', 'output_packet_is_current'} <= symbols(modules['simple_controller_receiver'])
     face_symbols = symbols(pyz.extract('face_input_server'))
     assert {'retained_nose_movement', 'retain_on_tracking_loss', '_handle_v3',
             'movement_input', 'stick_blocked', '_source_notice', 'captured_at'} <= face_symbols
@@ -88,8 +93,9 @@ def verify(delivery):
 
     value = {
         'executable_sha256': expected_hash,
-        'verified': ['all six bundled modules match build source semantically',
-                     'source and DLL input hashes', 'unchanged newest facial/voice/follow companions',
+        'verified': ['all eight bundled modules match build source semantically',
+                     'diagnostic startup wrapper and bounded timing recorder present',
+                     'source and DLL input hashes', 'approved instrumented facial/voice and preserved follow companions',
                      'GAME_DELTA routing and release barrier', 'relative SendInput module and complete INPUT union',
                      'retained nose movement capability', 'v3 movement and phone source priority',
                      'x64/x86 ViGEm DLL bytes'],

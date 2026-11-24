@@ -3,7 +3,7 @@
 [Download FacialInput.exe for Windows 10/11 x64](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe)
 
 Facial expressions and optional comfortable face movement send keyboard, mouse,
-and Xbox inputs through the existing [SimpleController receiver](../SimpleControllerReceiver.exe).
+and Xbox inputs through the existing [SimpleController receiver](<../Simple Controller Receiver.exe>).
 The facial app creates no additional virtual controller. It can be used alongside
 one-finger phone controls; see the main [setup page](../README.md) and
 [controller user guide](../USER_GUIDE.md).
@@ -20,7 +20,7 @@ and packaging instructions below are for developers or people who prefer Python.
    receiver; restart Windows if requested. The receiver creates its Xbox
    controllers at startup. Neither the receiver EXE nor the facial EXE installs
    this driver automatically.
-2. Run one copy of [SimpleControllerReceiver.exe](../SimpleControllerReceiver.exe).
+2. Run one copy of [Simple Controller Receiver.exe](<../Simple Controller Receiver.exe>).
    Close an older receiver before switching: multiple receivers use the same
    phone port and may create additional virtual controllers.
 3. Download `FacialInput.exe` using the link above and open it. Keep it **paused**

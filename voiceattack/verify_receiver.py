@@ -35,7 +35,9 @@ def main():
     artifact_root.mkdir(exist_ok=True)
     scratch = Path(tempfile.mkdtemp(prefix="receiver-", dir=artifact_root))
     environment = dict(os.environ, TMP=str(scratch), TEMP=str(scratch),
-                       LOCALAPPDATA=str(scratch), PYTHONDONTWRITEBYTECODE="1")
+                       LOCALAPPDATA=str(scratch), PYTHONDONTWRITEBYTECODE="1",
+                       SC_RECEIVER_TIMING="0", SC_RECEIVER_TIMING_DIR=str(scratch / "timings"),
+                       SC_RECEIVER_TIMING_TEST_ROOT=str(scratch))
     print("Mock-only tests; isolated logs/temp: " + str(scratch), flush=True)
     log = scratch / "tests.log"
     command = [sys.executable, "-B", str(Path(__file__).resolve()), "--worker",

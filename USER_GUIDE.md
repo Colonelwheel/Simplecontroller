@@ -11,7 +11,7 @@ This guide covers **`dev`, the development version**, including Macro Mode and t
 - An Android device running Android 7.0 or newer.
 - A Windows PC; Windows 10 or 11 is recommended.
 - A shared local network, or a USB connection with Android USB tethering.
-- The [Android APK](SimpleController.apk), [Windows receiver](SimpleControllerReceiver.exe), and [ViGEmBus driver installer](ViGEmBus_1.22.0_x64_x86_arm64.exe).
+- The [Android APK](SimpleController.apk), [Windows receiver](<Simple Controller Receiver.exe>), and [ViGEmBus driver installer](ViGEmBus_1.22.0_x64_x86_arm64.exe).
 
 Install **ViGEmBus once on the PC before starting the receiver**. Run its installer and restart Windows if requested. The receiver creates virtual Xbox controllers at startup, even if your first test uses keyboard input. The receiver EXE does **not** install this driver for you. You do not need to reinstall the driver for each app update.
 
@@ -212,6 +212,6 @@ The [facial-input guide](facial-input/README.md) covers source installation, dev
 - **Aim drifts or feels too fast:** reduce sensitivity, adjust deadzone/displacement, and check Auto-center or retained movement. Tune one setting at a time in the intended application.
 - **Installation/update problem:** preserve the old app and export verified profiles before any uninstall. Keep your previous APK and backup while resolving signing or compatibility issues.
 
-Receiver logs are under `%LOCALAPPDATA%\SimpleControllerReceiver\touchpad_logs`. When reporting an issue, include app/receiver versions, connection type, a minimal payload example, and what happened. Separate controller-tester results from game behavior.
+Receiver logs are under `%LOCALAPPDATA%\SimpleControllerReceiver\touchpad_logs`. Dev's `Simple Controller Receiver.exe` also records hang diagnostics in `hang-diagnostics` beside the EXE (or `SC_RECEIVER_TIMING_DIR` when set). Each launch retains up to 64 MiB of its own diagnostic files; prior launches are preserved. See [capture details](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). When reporting an issue, include app/receiver versions, connection type, a minimal payload example, and what happened. Separate controller-tester results from game behavior.
 
 Public Android and receiver source is under [source/android](source/android/) and [source/receiver](source/receiver/). The [detailed development guide](source/android/SIMPLECONTROLLER_USER_GUIDE.md) and [source map](ARCHITECTURE.md) cover additional settings and implementation locations. The [VoiceAttack guide](voiceattack/USER_GUIDE.md) covers optional voice commands through the receiver. Compilation and automated checks do not establish touch comfort, camera behavior, or compatibility with every game.

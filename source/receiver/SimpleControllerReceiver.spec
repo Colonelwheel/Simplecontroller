@@ -3,14 +3,15 @@ from pathlib import Path
 
 root = Path(SPECPATH)
 a = Analysis(
-    [str(root / 'simple_controller_receiver.py')],
+    [str(root / 'receiver_diagnostics.py')],
     pathex=[str(root)],
     binaries=[
         (str(root / 'ViGEmClient/x64/ViGEmClient.dll'), 'vgamepad/win/vigem/client/x64'),
         (str(root / 'ViGEmClient/x86/ViGEmClient.dll'), 'vgamepad/win/vigem/client/x86'),
     ],
     datas=[],
-    hiddenimports=['phone_output_protocol', 'relative_mouse', 'face_input_server', 'voice_input_server', 'camera_follow'],
+    hiddenimports=['simple_controller_receiver', 'receiver_timing', 'phone_output_protocol',
+                   'relative_mouse', 'face_input_server', 'voice_input_server', 'camera_follow'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
@@ -24,7 +25,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='SimpleControllerReceiver',
+    name='Simple Controller Receiver',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

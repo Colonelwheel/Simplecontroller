@@ -38,7 +38,7 @@ This detailed guide covers the development version. The [`main` branch](https://
 For this version, the matching files are:
 
 - Android app: [`SimpleController.apk`](../../SimpleController.apk)
-- Windows receiver: [`SimpleControllerReceiver.exe`](../../SimpleControllerReceiver.exe)
+- Windows receiver: [Simple Controller Receiver.exe](<../../Simple Controller Receiver.exe>)
 - Virtual-controller driver: [`ViGEmBus_1.22.0_x64_x86_arm64.exe`](../../ViGEmBus_1.22.0_x64_x86_arm64.exe)
 
 Use the matching APK and receiver pair linked from [the development README](../../README.md). Mixing an older receiver with a newer app can make commands appear broken even when the layout is correct.

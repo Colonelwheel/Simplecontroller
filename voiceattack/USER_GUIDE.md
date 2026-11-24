@@ -18,7 +18,7 @@ Install VoiceAttack and configure its microphone and speech recognition. Confirm
 
 Use distinct phrases such as **start aiming** and **stop aiming**. You do not have to keep a physical key or mouse button held while speaking. In the key editor, the small keyboard icon opens an on-screen key chooser, so selecting a key or modifier does not require a physical multi-key combination.
 
-For controller output, install the [ViGEmBus driver](../ViGEmBus_1.22.0_x64_x86_arm64.exe) once, restart Windows if requested, and run the matching [SimpleControllerReceiver.exe](../SimpleControllerReceiver.exe) on the **same PC as VoiceAttack**. The EXE includes Python but does not install ViGEmBus. Keep one receiver running; multiple copies use the same phone port and create additional virtual controllers. A phone and the facial-input app are optional for voice-only use.
+For controller output, install the [ViGEmBus driver](../ViGEmBus_1.22.0_x64_x86_arm64.exe) once, restart Windows if requested, and run the matching [Simple Controller Receiver.exe](<../Simple Controller Receiver.exe>) on the **same PC as VoiceAttack**. The EXE includes Python but does not install ViGEmBus. Keep one receiver running; multiple copies use the same phone port and create additional virtual controllers. A phone and the facial-input app are optional for voice-only use.
 
 The voice connection is local TCP `127.0.0.1:42736`. You do not enter the PC's Wi-Fi address in the helper or forward this port through a router. The receiver's phone connection is separate, on UDP `42734`.
 

@@ -15,7 +15,7 @@ if (Test-Path -LiteralPath $deliveryRoot) {
 $pythonCommand = Get-Command -Name $Python -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $Python = $pythonCommand.Source
 $dllRoot = Join-Path $sourceRoot 'ViGEmClient'
-$sourceNames = @('simple_controller_receiver.py','phone_output_protocol.py','relative_mouse.py','camera_follow.py','face_input_server.py','voice_input_server.py')
+$sourceNames = @('receiver_diagnostics.py','receiver_timing.py','simple_controller_receiver.py','phone_output_protocol.py','relative_mouse.py','camera_follow.py','face_input_server.py','voice_input_server.py')
 foreach ($name in $sourceNames) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot $name) -PathType Leaf)) {
         throw "Receiver companion missing: $name"
@@ -36,7 +36,7 @@ foreach ($name in $sourceNames) {
     Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination (Join-Path $copiedSource $name)
 }
 $savedEnvironment = @{}
-foreach ($key in @('PYINSTALLER_CONFIG_DIR','TMP','TEMP','PYTHONDONTWRITEBYTECODE')) {
+foreach ($key in @('PYINSTALLER_CONFIG_DIR','TMP','TEMP','PYTHONDONTWRITEBYTECODE','SC_RECEIVER_TIMING')) {
     $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
 try {
@@ -44,22 +44,28 @@ try {
     $env:TMP = Join-Path $deliveryRoot 'temp'
     $env:TEMP = $env:TMP
     $env:PYTHONDONTWRITEBYTECODE = '1'
+    $env:SC_RECEIVER_TIMING = '0'
     $arguments = @('-B','-m','PyInstaller','--onefile','--console','--noupx',
         '--name','Simple Controller Receiver (VoiceAttack and Facial Input)',
         '--distpath',(Join-Path $deliveryRoot 'dist'),
         '--workpath',(Join-Path $deliveryRoot 'build'),
         '--specpath',(Join-Path $deliveryRoot 'spec'),
         '--paths',$copiedSource,
+        '--hidden-import','simple_controller_receiver','--hidden-import','receiver_timing',
         '--hidden-import','voice_input_server','--hidden-import','face_input_server',
         '--hidden-import','camera_follow','--hidden-import','relative_mouse','--hidden-import','phone_output_protocol',
         '--add-binary',((Join-Path $dllRoot 'x64\ViGEmClient.dll') + ';vgamepad\win\vigem\client\x64'),
         '--add-binary',((Join-Path $dllRoot 'x86\ViGEmClient.dll') + ';vgamepad\win\vigem\client\x86'),
-        (Join-Path $copiedSource 'simple_controller_receiver.py'))
+        (Join-Path $copiedSource 'receiver_diagnostics.py'))
     & $Python @arguments
     if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed: $LASTEXITCODE. New outputs retained at $deliveryRoot" }
     $executablePath = Join-Path $deliveryRoot 'dist\Simple Controller Receiver (VoiceAttack and Facial Input).exe'
     $inputRecords = foreach ($name in $sourceNames) {
         $inputPath = Join-Path $copiedSource $name
+        @{ path=$inputPath; sha256=(Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash }
+    }
+    $inputRecords += foreach ($architecture in @('x64','x86')) {
+        $inputPath = Join-Path $dllRoot "$architecture\ViGEmClient.dll"
         @{ path=$inputPath; sha256=(Get-FileHash -LiteralPath $inputPath -Algorithm SHA256).Hash }
     }
     $record = @{

@@ -6,6 +6,7 @@ Acknowledgements confirm processing or supersession, never game recognition.
 import math
 import re
 from urllib.parse import unquote_plus, quote_plus
+from receiver_timing import recorder as timing_recorder
 
 CAPABILITY = "PHONE_OUTPUT_V1"
 _IDENTITY = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -91,7 +92,7 @@ class PhoneEventGuard:
 
     def release(self, command):
         key = state_key(command, self.player)
-        with self.protocol.lock:
+        with timing_recorder.observe_lock(self.protocol.lock):
             current = self.protocol.event_outputs.get((self.session, self.scope, self.generation), {}).get(key)
             if current is None or current[0] != self.sequence:
                 return False
@@ -118,11 +119,11 @@ class PhoneOutputProtocolState:
         self.completed_activations = set()
 
     def legacy_packet_is_current(self, session, sequence):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return sequence > self.activation_barriers.get(session, -1)
 
     def newest_sequence(self, session, keys):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             sequences = [self.revisions.get((session, key), -1) for key in keys]
             sequences += [value[0] for owner, values in self.event_outputs.items()
                           if owner[0] == session for key, value in values.items() if key in keys]
@@ -132,23 +133,23 @@ class PhoneOutputProtocolState:
         return session in self.negotiated and session not in self.retired and self.players.get(player) == session
 
     def event_is_current(self, session, player, scope, generation, sequence):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return (self._allowed(session, player)
                     and self.barrier_is_current(session, sequence)
                     and sequence > self.activation_barriers.get(session, -1)
                     and generation > self.ended.get((session, scope), -1))
 
     def current_command(self, session, key):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return self.commands.get((session, key))
 
     def effective_command(self, session, key, fallback):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             return self._effective(session, key, fallback)
 
     def clear_outputs(self, players):
         """Hard cleanup clears remembered desired values, preserving freshness/tombstones."""
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             def selected(key):
                 return key.split("|", 1)[0] in players or key.startswith("GLOBAL|")
             for identity in tuple(self.commands):
@@ -176,7 +177,7 @@ class PhoneOutputProtocolState:
         return max(candidates)[1]
 
     def apply_event_state(self, guard, command):
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if not guard():
                 return False
             key = state_key(command, guard.player)
@@ -201,7 +202,7 @@ class PhoneOutputProtocolState:
             if len(parts) != 3 or not all(_IDENTITY.fullmatch(p) for p in parts[1:]):
                 return True, None
             session, nonce = parts[1:]
-            with self.lock:
+            with timing_recorder.observe_lock(self.lock):
                 if session in self.retired:
                     return True, None
                 old = self.players.get(player)
@@ -225,7 +226,7 @@ class PhoneOutputProtocolState:
                 return ack
             status = "MASKED" if self.conflict_status(key, player) else "CLEAR"
             return ack + f":{status}:{quote_plus(key)}"
-        with self.lock:
+        with timing_recorder.observe_lock(self.lock):
             if not self._allowed(session, player):
                 return True, None
             if parts[0] == "PHONE_ACTIVATE_V1":

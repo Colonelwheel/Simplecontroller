@@ -6,6 +6,9 @@
 **/dist/
 **/__pycache__/
 **/.pytest_cache/
+**/hang-diagnostics/
+**/timing_logs/
+/.test-artifacts/
 **/.venv/
 **/venv/
 *.py[cod]
@@ -32,5 +35,5 @@ signing.properties
 *.aab
 *.exe
 !/SimpleController.apk
-!/SimpleControllerReceiver.exe
+!/Simple Controller Receiver.exe
 !/ViGEmBus_1.22.0_x64_x86_arm64.exe

@@ -9,7 +9,7 @@ This guide covers prerequisites, installation, first-time setup, creating profil
 This is **`dev`, the development branch**. Both dev and the [`main` public release](https://github.com/Colonelwheel/Simplecontroller/tree/main) include Button Macro Mode, `(U...)` timed releases and controller-profile format 17. Dev retains additional receiver/voice development tools and historical feature notes. Its APK remains the existing November 17 feature delivery; main release `06b1e64` rebuilt and verified the same APK bytes without replacing this dev download. See [branches and compatibility](BRANCHES.md) before moving profiles between app versions.
 
 - [Download the development Android app](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleController.apk) (open this link in your phone browser)
-- [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/SimpleControllerReceiver.exe)
+- [Download the Windows receiver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/Simple%20Controller%20Receiver.exe)
 - [Download the ViGEmBus driver](https://github.com/Colonelwheel/Simplecontroller/raw/refs/heads/dev/ViGEmBus_1.22.0_x64_x86_arm64.exe)
 - [Click here for the facial input](https://github.com/Colonelwheel/Simplecontroller/releases/download/facial-input-windows-2026-10-16/FacialInput.exe) — optional standalone Windows app; [setup and source](facial-input/README.md).
 - [Click here for the VoiceAttack user guide](voiceattack/USER_GUIDE.md)
@@ -75,7 +75,7 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Item | Location |
 | --- | --- |
 | Current Android app | [SimpleController.apk](SimpleController.apk) |
-| Matching Windows receiver | [SimpleControllerReceiver.exe](SimpleControllerReceiver.exe) |
+| Matching Windows receiver | [Simple Controller Receiver.exe](<Simple Controller Receiver.exe>) |
 | Virtual controller driver | [ViGEmBus installer](ViGEmBus_1.22.0_x64_x86_arm64.exe) |
 | Matching Android source and build files | [source/android](source/android/) |
 | Matching receiver source and packaging files | [source/receiver](source/receiver/) |
@@ -85,9 +85,9 @@ For complete syntax, Hold/Turbo behavior, aiming, profile backups, floating cont
 | Branch roles, source layout, and release workflow | [Branches and compatibility](BRANCHES.md) |
 | Implementation map, file responsibilities, and change/test entry points | [Architecture and source map](ARCHITECTURE.md) |
 
-The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. The receiver EXE is the same existing public receiver used by main. See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
+The Android implementation is preserved from floating-controls snapshot `1ea6ffa`, including Macro Mode and `(U...)` timed releases added in `9bb9187`. The supplied APK is the existing November 17, 2026 feature delivery, with the standalone Touch Sensor Test screen and extra launcher removed. TouchAim, calibration, floating controls, Delay, repeat timing, HRD, and stage tuning remain available. Dev's receiver now includes the hang diagnostics from the November 10 desktop build and is supplied as `Simple Controller Receiver.exe`. The diagnostic observer records bounded timing and stack-location data; core input logic is preserved. Main retains its previous receiver. See [diagnostic capture and retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). See [payload timing](source/android/PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode examples](source/android/MACRO_MODE_AND_PAYLOAD_PORTING.md), and [the source map](ARCHITECTURE.md).
 
-Historical verification for the November 17, 2026 feature delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. Compilation and package checks do not establish compatibility with every game, webcam or network.
+Historical verification for the November 17, 2026 feature delivery passed 678 JVM tests per Android variant, APK/AAB packaging, and lint with zero errors. Establishing `main` and `dev` did not rebuild or install an app or receiver. The November 23 dev receiver update passed 294 mocked tests and static verification of all eight packaged Python modules and both ViGEm DLLs; the rebuilt EXE was not launched during verification. Compilation and package checks do not establish compatibility with every game, webcam or network.
 
 SHA-256 checksums:
 
@@ -95,8 +95,8 @@ SHA-256 checksums:
 SimpleController.apk
 e0869e5b346c03f282a74d291c234783dee3c60eb18fbb3d62c5341bf2316544
 
-SimpleControllerReceiver.exe
-4cbf88f909e38eda70acea63517d720820ffa31530e2e02d9f6eb10835bfcf18
+Simple Controller Receiver.exe
+10da167a2a085fabd0f59ecac0e36165682df728969f05a2fc88fac73d44da21
 
 FacialInput.exe
 4dd1edf58afda99789ee619696fac718f916e80375f61fe93c80643907efbedf

@@ -7,18 +7,18 @@
 | [`main`](https://github.com/Colonelwheel/Simplecontroller/tree/main) | Default public release | Macro Mode/U and format-17 compatibility promoted from dev `632447c` onto the previous public-release basis `69eee7d` |
 | [`dev`](https://github.com/Colonelwheel/Simplecontroller/tree/dev) | Development work and additional verification/packaging tools | Android source at `632447c` supplies this main promotion; the existing November 17 dev APK and extra receiver/voice tools remain preserved |
 
-`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same layout:
+`main` is the default public branch. The historical `master` snapshot is preserved locally. Both current branches use the same source layout. Dev now supplies `Simple Controller Receiver.exe` with hang diagnostics; main keeps `SimpleControllerReceiver.exe` without those additions:
 
 ```text
 README.md, USER_GUIDE.md, BRANCHES.md
-SimpleController.apk, SimpleControllerReceiver.exe
+SimpleController.apk, Simple Controller Receiver.exe (dev receiver)
 source/android/       Android Studio and Gradle project
 source/receiver/      Windows receiver source and packaging
 facial-input/         Separate optional facial app
 voiceattack/          Optional voice helper and guide
 ```
 
-The initial main/dev setup and this dev documentation refresh preserve this branch's existing APK/EXE contents. The later main promotion builds its own public Android APK from the promoted source; it does not rebuild or replace the November 17 dev APK. Each branch's root README identifies its supplied artifact hashes and verification. Main release `06b1e64` rebuilt and verified its APK byte-for-byte identical to the existing dev download. This does not establish a new device/game test.
+The initial main/dev setup and November 22 dev documentation refresh preserved this branch's existing APK/EXE contents. On November 23, dev ports the desktop hang-diagnostic receiver, rebuilds and renames its download to `Simple Controller Receiver.exe`, and updates its packaging helpers. Main's receiver is unchanged. The six production modules preserve the existing control logic with added diagnostic instrumentation; dev also supplies `receiver_timing.py`, `receiver_diagnostics.py` and their tests. The 294 mocked receiver tests and static bundle verification are separate from real input/game testing. The later main promotion builds its own public Android APK from the promoted source; it does not rebuild or replace the November 17 dev APK. Each branch's root README identifies its supplied artifact hashes and verification. Main release `06b1e64` rebuilt and verified its APK byte-for-byte identical to the existing dev download. This does not establish a new device/game test.
 
 ## Profile compatibility
 
