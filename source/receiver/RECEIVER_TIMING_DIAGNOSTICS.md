@@ -1,6 +1,6 @@
 # Receiver hang diagnostics
 
-Dev's `Simple Controller Receiver.exe` includes the diagnostic implementation originally delivered November 10, 2026. Its November 24 desktop-output isolation additionally contains mouse/keyboard native stalls in a separate helper with bounded receiver waits. It does not fix an unidentified Windows/driver hang or release a port held by an older process.
+Dev's restored `Simple Controller Receiver.exe` includes the diagnostic implementation originally delivered November 10, 2026. The November 24 isolation executable was withdrawn after a modifier-release failure; the source and helper-specific notes below remain for investigation and do not describe the restored EXE. See [rollback status](README.md). Diagnostics do not fix an unidentified Windows/driver hang or release a port held by an older process.
 
 ## Starting the receiver
 

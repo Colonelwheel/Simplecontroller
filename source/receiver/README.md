@@ -1,6 +1,8 @@
 # Windows receiver source
 
-This directory is the canonical receiver source and packaging location. Dev's executable is [Simple Controller Receiver.exe](<../../Simple Controller Receiver.exe>), with hang diagnostics enabled. Main retains its existing receiver without these diagnostic additions. Editing Python does not rebuild or replace an EXE.
+**Rollback status:** the [root receiver EXE](<../../Simple Controller Receiver.exe>) has been restored to the previous eight-module build from `1483b33`. This directory retains the withdrawn nine-module isolation source from `4f6aa9c` for investigation. The withdrawn build could strand held modifiers because a desktop timeout rejected later key-up requests. Do not rebuild/deploy it as a corrected receiver. [Matching restored source](https://github.com/Colonelwheel/Simplecontroller/tree/1483b33cfec8c3808303fa3332d14e8365c6ab98/source/receiver) and the current checksum are identified in the [root guide](../../README.md).
+
+The following implementation and packaging notes describe the retained isolation candidate, not the restored EXE. Main retains its existing receiver without these diagnostic additions. Editing Python does not rebuild or replace an EXE.
 
 `simple_controller_receiver.py` contains the receiver logic. `receiver_diagnostics.py` is the packaged entrypoint: it enables the adjacent `receiver_timing.py` recorder before starting the receiver. Keep all nine modules together, including `desktop_output.py`, Camera Follow, phone-output, relative-mouse, facial-input and voice-input. `SimpleControllerReceiver.spec` packages them and both included `ViGEmClient` DLLs. `requirements.txt` records the versions used to package the supplied Windows receiver.
 

@@ -4,6 +4,8 @@ Implementation map for **dev**, with USB reconnect and native desktop isolation 
 
 ## Start here
 
+**Artifact rollback:** the root receiver download was restored to the previous build at `1483b33` after the isolation build `4f6aa9c` stranded modifiers during a macro. The source map below describes retained development source under investigation, including its nine-module helper design; it is not a claim that the restored eight-module EXE contains that design. The root README links matching restored source. No corrected helper build has been validated.
+
 Read this section, the relevant change route, and that subsystem's entries. There is no need to load this entire document for a small change. Read the linked compatibility contract before changing persisted or transmitted data.
 
 | Planned change or symptom | Read first | Follow through / verify |

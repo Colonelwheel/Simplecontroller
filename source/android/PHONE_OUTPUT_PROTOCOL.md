@@ -95,7 +95,10 @@ Legacy timed sequences retain their scoped guard while waiting outside that lock
 Known reversible outputs started inside a scoped raw sequence are also released
 by END while preserving aggregate and other-source holds.
 
-Dev's receiver bounds mouse/keyboard native requests through an isolated helper.
+The withdrawn dev isolation source bounds mouse/keyboard requests through a helper.
+The root receiver EXE was restored to the earlier implementation after a
+modifier-release failure; the following source behavior remains under review
+and is not implemented by that restored download.
 An unconfirmed native result is not a successful state or cleanup acknowledgement.
 Global Release All records freshness separately from cleanup confirmation; a
 duplicate failed identity cannot gain an ACK or reset newer input. END retains
