@@ -223,7 +223,8 @@ class VoiceReceiverTests(unittest.TestCase):
             self.phone("X360A")
             with patch.object(receiver.gamepads["player1"], "voice_clear",
                               side_effect=RuntimeError("synthetic native voice failure")):
-                self.assertEqual("ack", self.voice("release_all")["op"])
+                with self.assertRaises(receiver.DesktopOutputError):
+                    self.voice("release_all")
         self.assertTrue(Timer.timers[-1].cancelled)
         self.assertGreater(receiver.release_generations["player1"], generation)
         self.assertFalse(receiver.pending_button_release_timers["player1"])

@@ -64,7 +64,7 @@ def verify(delivery):
     pyz_name = next(name for name, record in archive.toc.items() if record[-1] == 'z')
     pyz = archive.open_embedded_archive(pyz_name)
     modules = {'receiver_diagnostics': wrapper}
-    for name in ('face_input_server', 'voice_input_server', 'relative_mouse', 'camera_follow',
+    for name in ('face_input_server', 'voice_input_server', 'relative_mouse', 'camera_follow', 'desktop_output',
                  'phone_output_protocol', 'simple_controller_receiver', 'receiver_timing'):
         assert name in pyz.toc, name
         modules[name] = pyz.extract(name)
@@ -73,8 +73,18 @@ def verify(delivery):
         expected = [compile(source.read_bytes(), str(source), 'exec', optimize=level)
                     for level in (0, 1, 2)]
         assert any(semantic(bundled) == semantic(code) for code in expected), name
+    source_names = [Path(record['path']).stem for record in inputs
+                    if Path(record['path']).suffix == '.py']
+    assert set(source_names) == set(modules), 'Incomplete receiver source manifest'
+    assert len(source_names) == len(modules), 'Duplicate receiver source manifest entries'
+    dll_architectures = [Path(record['path']).parent.name for record in inputs
+                         if Path(record['path']).suffix.lower() == '.dll']
+    assert sorted(dll_architectures) == ['x64', 'x86'], 'Incomplete or duplicate ViGEm DLL manifest'
     assert {'SC_RECEIVER_TIMING', 'SC_RECEIVER_TIMING_DIR', 'hang-diagnostics',
             'run_module', 'simple_controller_receiver'} <= symbols(wrapper)
+    assert {'--desktop-output-worker', 'worker_main'} <= symbols(wrapper)
+    assert {'DesktopOutputBridge', 'DesktopOutputError', 'NativeDesktopBackend',
+            'worker_main'} <= symbols(modules['desktop_output'])
     assert {'TimingRecorder', 'observe_lock', '_watchdog_main', '_writer_main',
             '_rotate'} <= symbols(modules['receiver_timing'])
     entry_symbols = symbols(modules['simple_controller_receiver'])
@@ -91,8 +101,9 @@ def verify(delivery):
                       and record['path'].endswith('.dll'))
         assert digest(archive.extract(name)) == source['sha256']
     value = {'executable_sha256': report['executable']['sha256'],
-             'verified': ['all eight bundled modules match build source semantically',
+             'verified': ['all nine bundled modules match build source semantically',
                           'diagnostic startup wrapper and bounded timing recorder present',
+                          'isolated desktop-output helper and early worker dispatch present',
                           'approved instrumented facial/voice and preserved Game Mouse companions',
                           'Camera Follow exclusion and live strength protocol present',
                           'Game Mouse routing and ordering barrier present',

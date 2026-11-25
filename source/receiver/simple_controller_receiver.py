@@ -8,32 +8,99 @@ Combines stability-focused mouse handling with full gamepad support.
 Usage: python merged_controller.py
 """
 
+import sys
+
+# A frozen child must never import this composition root or create virtual pads.
+if __name__ == '__main__':
+    if '--desktop-output-worker' in sys.argv:
+        from desktop_output import worker_main
+        raise SystemExit(worker_main())
+    if '--desktop-output-probe' in sys.argv:
+        from desktop_output import probe_main
+        raise SystemExit(probe_main())
+
 import socket
 import threading
 import time
 import re
-import keyboard
-import mouse
+import functools
 import vgamepad
 import math
 import logging
 import random
 import os
 import ipaddress
-import pyautogui
 from datetime import datetime
 from collections import deque
 from camera_follow import CameraFollowSettings, CameraFollowState
 from face_input_server import (FaceInputState, FaceInputServer, MergedGamepad, MergedDesktopInput,
                                synchronized, canonical_phone_key, keyboard_name, FACE_INPUT_TAG)
 from voice_input_server import VoiceInputState, VoiceInputServer
-from relative_mouse import send_relative_mouse
+from desktop_output import DesktopOutputBridge, DesktopOutputError
 from phone_output_protocol import PhoneOutputProtocolState, state_key as phone_state_key, inactive_command
 from receiver_timing import recorder as timing_recorder
 
-# Configure pyautogui for mouse handling
-pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
-pyautogui.PAUSE = 0          # remove PyAutoGUI's default 0.1 s pause
+# Construction performs no I/O; production warms the isolated helper before UDP.
+desktop_output_bridge = DesktopOutputBridge()
+
+
+class _KeyboardOutput:
+    def press(self, key):
+        return desktop_output_bridge.call('key', key, True)
+
+    def release(self, key):
+        return desktop_output_bridge.call('key', key, False)
+
+    def press_and_release(self, key):
+        return desktop_output_bridge.call('key_tap', key)
+
+    def is_pressed(self, key):
+        return desktop_output_bridge.call('key_state', key)
+
+
+class _MouseOutput:
+    def mouseDown(self, button):
+        return desktop_output_bridge.call('mouse_button', button, True)
+
+    def mouseUp(self, button):
+        return desktop_output_bridge.call('mouse_button', button, False)
+
+    def moveRel(self, x, y):
+        return desktop_output_bridge.call('move', x, y)
+
+    def scroll(self, amount):
+        return desktop_output_bridge.call('scroll', amount)
+
+
+keyboard = _KeyboardOutput()
+pyautogui = _MouseOutput()
+_last_desktop_fault = None
+
+
+def report_desktop_failure(error):
+    global _last_desktop_fault
+    fault = desktop_output_bridge.fault or str(error)
+    if fault != _last_desktop_fault:
+        _last_desktop_fault = fault
+        logger.error('Desktop output unavailable; controller transport remains active: %s', fault)
+
+
+def bounded_desktop_errors(function):
+    @functools.wraps(function)
+    def wrapped(*args, **kwargs):
+        propagate = kwargs.pop('_raise_desktop_errors', False)
+        try:
+            return function(*args, **kwargs)
+        except DesktopOutputError as error:
+            if propagate:
+                raise
+            report_desktop_failure(error)
+            return None
+    return wrapped
+
+
+def send_relative_mouse(x, y):
+    return desktop_output_bridge.call('game_move', x, y)
 
 DELTA_GAIN = 40.0         # 40 px per 1.0 delta feels close to Windows default
 
@@ -249,57 +316,10 @@ def write_desktop_input(target, pressed):
             (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
 
 
-_tagged_keyboard_api = None
-
-
 @timing_recorder.measure("desktop_output")
 def send_tagged_key(target, pressed):
-    """V3 facial keyboard output has provenance for the re-center key hook.
-
-    Construct the Win32 ABI lazily; imports/tests never inject native keys.
-    SendInput failure is explicit (including Windows integrity restrictions).
-    """
-    global _tagged_keyboard_api
-    import ctypes
-    from ctypes import wintypes
-    if _tagged_keyboard_api is None:
-        class KeyboardInput(ctypes.Structure):
-            _fields_ = [('wVk', wintypes.WORD), ('wScan', wintypes.WORD),
-                        ('dwFlags', wintypes.DWORD), ('time', wintypes.DWORD),
-                        ('dwExtraInfo', ctypes.c_size_t)]
-        class MouseInput(ctypes.Structure):
-            _fields_ = [('dx', wintypes.LONG), ('dy', wintypes.LONG),
-                        ('mouseData', wintypes.DWORD), ('dwFlags', wintypes.DWORD),
-                        ('time', wintypes.DWORD), ('dwExtraInfo', ctypes.c_size_t)]
-        class InputUnion(ctypes.Union):
-            _fields_ = [('ki', KeyboardInput), ('mi', MouseInput)]
-        class Input(ctypes.Structure):
-            _anonymous_ = ('data',)
-            _fields_ = [('type', wintypes.DWORD), ('data', InputUnion)]
-        send = ctypes.WinDLL('user32', use_last_error=True).SendInput
-        send.argtypes = (wintypes.UINT, ctypes.POINTER(Input), ctypes.c_int)
-        send.restype = wintypes.UINT
-        _tagged_keyboard_api = (KeyboardInput, Input, send)
-    name = target.removeprefix('KEY:')
-    vk_names = {'SPACE': 0x20, 'ENTER': 0x0D, 'TAB': 0x09, 'ESC': 0x1B,
-        'BACKSPACE': 0x08, 'UP': 0x26, 'DOWN': 0x28, 'LEFT': 0x25, 'RIGHT': 0x27,
-        'SHIFT': 0x10, 'CTRL': 0x11, 'ALT': 0x12, 'WIN': 0x5B,
-        'LSHIFT': 0xA0, 'RSHIFT': 0xA1, 'LCTRL': 0xA2, 'RCTRL': 0xA3,
-        'LALT': 0xA4, 'RALT': 0xA5, 'LWIN': 0x5B, 'RWIN': 0x5C,
-        'HOME': 0x24, 'END': 0x23, 'PAGEUP': 0x21, 'PAGEDOWN': 0x22,
-        'INSERT': 0x2D, 'DELETE': 0x2E, 'CAPSLOCK': 0x14}
-    vk = (ord(name) if len(name) == 1 else 0x6F + int(name[1:])
-          if name.startswith('F') and name[1:].isdigit() else vk_names[name])
-    flags = 0 if pressed else 2
-    if name in ('UP', 'DOWN', 'LEFT', 'RIGHT', 'HOME', 'END', 'PAGEUP', 'PAGEDOWN',
-                'INSERT', 'DELETE', 'RCTRL', 'RALT', 'WIN', 'LWIN', 'RWIN'):
-        flags |= 1
-    KeyboardInput, Input, send = _tagged_keyboard_api
-    item = Input(type=1, ki=KeyboardInput(vk, 0, flags, 0, FACE_INPUT_TAG))
     with timing_recorder.span("native_keyboard_output"):
-        if send(1, ctypes.byref(item), ctypes.sizeof(Input)) != 1:
-            error = ctypes.get_last_error()
-            raise OSError(error, 'Facial SendInput failed; check application elevation')
+        return desktop_output_bridge.call('tagged_key', target, pressed)
 
 
 def write_facial_desktop_input(target, pressed):
@@ -397,6 +417,8 @@ latest_stick_packets = {}
 # RELEASE_ALL uses the Android process session/sequence as a barrier. Any older
 # packet that arrives afterward is ignored instead of reactivating an output.
 release_barriers = {}
+release_confirmations = {}
+pending_legacy_key_releases = set()
 release_generations = {player_id: 0 for player_id in gamepads}
 pending_button_release_timers = {player_id: set() for player_id in gamepads}
 phone_button_tokens = {player_id: {} for player_id in gamepads}
@@ -583,11 +605,13 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     selected = tuple(player_id for player_id in player_ids if player_id in gamepads)
     if not selected:
         return
+    failures = []
     phone_output_protocol.clear_outputs(selected)
 
     try:
         face_input_state.reset(selected)
     except Exception as e:
+        failures.append(e)
         # Scheduling/epoch barriers are cleared before native cleanup; still
         # attempt phone/voice cleanup if a Windows mouse/key release fails.
         with timing_recorder.span("log_output"):
@@ -595,6 +619,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     try:
         voice_input_state.reset(selected)
     except Exception as e:
+        failures.append(e)
         # Voice scheduling is invalidated before native cleanup. An optional
         # voice pad failure must not skip phone timers or keyboard/mouse release.
         with timing_recorder.span("log_output"):
@@ -619,6 +644,8 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
     for timer in timers:
         timer.cancel()
 
+    if 'player1' in selected:
+        keys_to_release.update(pending_legacy_key_releases)
     for key in keys_to_release:
         try:
             if canonical_phone_key(key) is not None:
@@ -626,7 +653,11 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             else:
                 with timing_recorder.span("native_keyboard_output"):
                     keyboard.release(key.lower())
+                pending_legacy_key_releases.discard(key)
         except Exception as e:
+            failures.append(e)
+            if canonical_phone_key(key) is None:
+                pending_legacy_key_releases.add(key)
             with timing_recorder.span("log_output"):
                 logger.warning(f"Failed to release key {key}: {e}")
 
@@ -638,11 +669,13 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
             try:
                 desktop_input.phone_set(target, False)
             except Exception as e:
+                failures.append(e)
                 with timing_recorder.span("log_output"):
                     logger.warning(f"Failed to release {target}: {e}")
         try:
             desktop_input.clear_unowned(target)
         except Exception as e:
+            failures.append(e)
             with timing_recorder.span("log_output"):
                 logger.warning(f"Failed to retry pending {target} release: {e}")
 
@@ -655,6 +688,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 with timing_recorder.span("native_mouse_output"):
                     pyautogui.mouseUp(button=mouse_button)
         except Exception as e:
+            failures.append(e)
             with timing_recorder.span("log_output"):
                 logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
 
@@ -674,21 +708,25 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 gamepad.update()
                 camera_follow_last_right_output[player_id] = (0.0, 0.0, "neutral")
         except Exception as e:
+            failures.append(e)
             with timing_recorder.span("log_output"):
                 logger.error(f"Failed to reset virtual gamepad for {player_id}: {e}")
 
+    if failures:
+        raise DesktopOutputError(f"Output cleanup is unconfirmed ({len(failures)} failures)")
     with timing_recorder.span("log_output"):
         logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
 
 @synchronized(release_state_lock)
 def release_all_outputs(session_id, sequence):
-    """Apply each global release identity once; duplicates still receive an ACK."""
+    """Apply each global release once; acknowledge only confirmed cleanup."""
     with timing_recorder.observe_lock(release_state_lock):
         if sequence <= release_barriers.get(session_id, -1):
-            return False
+            return sequence <= release_confirmations.get(session_id, -1)
         release_barriers[session_id] = sequence
 
     release_outputs(tuple(gamepads), reason="RELEASE_ALL")
+    release_confirmations[session_id] = sequence
     return True
 
 # Helper functions
@@ -723,6 +761,8 @@ def handle_game_mouse_delta(command):
     except (ValueError, OverflowError) as error:
         with timing_recorder.span("log_output"):
             logger.warning(f"Bad GAME_DELTA packet: {command} ({error})")
+    except DesktopOutputError:
+        raise
     except OSError as error:
         with timing_recorder.span("log_output"):
             logger.error(f"Game mouse movement failed: {error}")
@@ -757,6 +797,8 @@ def handle_touchpad(command):
         if dx or dy:
             with timing_recorder.span("native_mouse_output"):
                 pyautogui.moveRel(dx, dy)
+    except DesktopOutputError:
+        raise
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Error handling touchpad input: {e}")
@@ -786,6 +828,8 @@ def handle_mouse_buttons(command):
         elif command == "MOUSE_RESET":
             with timing_recorder.span("log_output"):
                 logger.warning("MOUSE_RESET ignored to prevent jumps")
+    except DesktopOutputError:
+        raise
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Error handling button command: {e}")
@@ -797,6 +841,8 @@ def handle_scroll(command):
         amount = int(float(command.split(":",1)[1]) * 120)
         with timing_recorder.span("native_mouse_output"):
             pyautogui.scroll(amount)
+    except DesktopOutputError:
+        raise
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Bad SCROLL packet {command}: {e}")
@@ -951,8 +997,37 @@ def handle_trigger_input(value, trigger="LEFT", player_id='player1'):
         with timing_recorder.span("log_output"):
             logger.error(f"Error handling trigger input for {player_id}: {str(e)}")
 
+def retry_unowned_desktop_cleanup(player_id):
+    failures = []
+    for target in tuple(desktop_input.targets):
+        try:
+            desktop_input.clear_unowned(target)
+        except Exception as error:
+            failures.append(error)
+    if player_id == 'player1':
+        for key in tuple(pending_legacy_key_releases):
+            if key in key_states[player_id]:
+                pending_legacy_key_releases.discard(key)
+                continue
+            try:
+                keyboard.release(key.lower())
+                pending_legacy_key_releases.discard(key)
+            except Exception as error:
+                failures.append(error)
+    if failures:
+        raise DesktopOutputError(f"Desktop cleanup remains unconfirmed ({len(failures)} failures)")
+
+
 def neutralize_legacy_phone_outputs(player_id):
     """Quiescent protocol adoption affects phone ownership only, under the shared lock."""
+    session = phone_output_protocol.players.get(player_id)
+    identity = session, phone_output_protocol.activation_barriers.get(session)
+    if identity in phone_output_protocol.started_activations:
+        # First adoption already fenced/reset legacy outputs. A duplicate must
+        # not reset newer post-barrier controller or desktop ownership.
+        retry_unowned_desktop_cleanup(player_id)
+        return
+    phone_output_protocol.started_activations.add(identity)
     pad = gamepads[player_id]
     release_generations[player_id] += 1
     for timer in tuple(pending_button_release_timers[player_id]):
@@ -969,14 +1044,29 @@ def neutralize_legacy_phone_outputs(player_id):
     camera_follow_states[player_id].set_manual_right_stick(0,0)
     camera_follow_states[player_id].set_macro_right_stick(0,0)
     apply_camera_follow_output(player_id,force=True)
+    failures = []
     for key in tuple(key_states[player_id]):
-        handle_key_release(key,player_id)
+        try:
+            handle_key_release(key,player_id)
+        except Exception as error:
+            failures.append(error)
     for target in tuple(desktop_input.phone):
-        desktop_input.phone_set(target,False)
+        try:
+            desktop_input.phone_set(target,False)
+        except Exception as error:
+            failures.append(error)
+    # A failed previous adoption already removed desired phone ownership. Retry
+    # its uncertain native release without touching any newer face/phone hold.
+    try:
+        retry_unowned_desktop_cleanup(player_id)
+    except Exception as error:
+        failures.append(error)
     key_states[player_id].clear()
     mouse_states[player_id].update(left_down=False,is_touchpad_active=False)
     smoother.end_touch()
     pad.update()
+    if failures:
+        raise DesktopOutputError(f"Phone activation cleanup is unconfirmed ({len(failures)} failures)")
 
 
 def phone_output_is_masked(key, player_id):
@@ -1073,7 +1163,7 @@ def dispatch_phone_event(command, player_id, guard, session):
         command = command.removeprefix("PHONE_FORCE:")
         # Authored force commands intentionally retain their separate legacy
         # meaning; generated scoped releases never enter this branch.
-        process_command(command, ("127.0.0.1", 0), player_id)
+        process_command(command, ("127.0.0.1", 0), player_id, _raise_desktop_errors=True)
         return
     if command.startswith("WAIT_") or command.startswith("KEY_DOWN:WAIT_"):
         wait = command.split(":", 1)[-1]
@@ -1083,7 +1173,7 @@ def dispatch_phone_event(command, player_id, guard, session):
         return
     # Already under the protocol lock. A delayed sequence explicitly carries the
     # guard and releases the lock while waiting, preserving facial heartbeats.
-    process_command(command, ("127.0.0.1", 0), player_id, phone_guard=guard)
+    process_command(command, ("127.0.0.1", 0), player_id, phone_guard=guard, _raise_desktop_errors=True)
 
 
 def dispatch_scoped_legacy_state(command, player_id, guard):
@@ -1162,6 +1252,8 @@ def handle_key_press(key, player_id='player1'):
                 else:
                     with timing_recorder.span("native_keyboard_output"):
                         keyboard.press(key.lower())
+            except DesktopOutputError:
+                raise
             except Exception as e:
                 with timing_recorder.span("log_output"):
                     logger.error(f"Failed to press key {key}: {str(e)}")
@@ -1196,6 +1288,10 @@ def handle_key_release(key, player_id='player1'):
                 else:
                     with timing_recorder.span("native_keyboard_output"):
                         keyboard.release(key.lower())
+            except DesktopOutputError:
+                if canonical_phone_key(key) is None:
+                    pending_legacy_key_releases.add(key)
+                raise
             except Exception as e:
                 with timing_recorder.span("log_output"):
                     logger.error(f"Failed to release key {key}: {str(e)}")
@@ -1341,6 +1437,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                 button_states.setdefault(player_id, {})[btn] = False
             with timing_recorder.span("log_output"):
                 logger.info(f"{player_id} Xbox button explicitly released: {command}")
+        except DesktopOutputError:
+            raise
         except Exception as e:
             with timing_recorder.span("log_output"):
                 logger.error(f"Failed to release Xbox button for {player_id}: {str(e)}")
@@ -1380,6 +1478,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                                 gamepad.release_button(button=btn)
                                 gamepad.update()
                                 button_states[player_id][btn] = False
+                            except DesktopOutputError:
+                                raise
                             except Exception as e:
                                 with timing_recorder.span("log_output"):
                                     logger.error(f"Auto-release failed for {player_id}: {e}")
@@ -1395,6 +1495,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
                 else:
                     with timing_recorder.span("log_output"):
                         logger.info(f"Hold mode - no auto-release for {player_id} {command}")
+        except DesktopOutputError:
+            raise
         except Exception as e:
             with timing_recorder.span("log_output"):
                 logger.error(f"Failed to press Xbox button for {player_id}: {str(e)}")
@@ -1413,6 +1515,8 @@ def handle_button_press(command, player_id='player1', phone_guard=None):
             with timing_recorder.span("log_output"):
                 logger.info(f"{player_id} Keyboard key pressed: {command}")
         return True
+    except DesktopOutputError:
+        raise
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Failed to process command for {player_id}: {command} - {str(e)}")
@@ -1463,6 +1567,7 @@ def process_timed_sequence(commands, player_id='player1', release_generation=Non
             logger.error(f"Error in timed sequence for {player_id}: {str(e)}")
 
 @timing_recorder.measure("command")
+@bounded_desktop_errors
 def process_command(data, addr, player_id='player1', phone_guard=None):
     """Process incoming command from the Android app"""
     data = data.strip()
@@ -1516,8 +1621,9 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             with timing_recorder.span("log_output"):
                 logger.warning(f"Bad RELEASE_ALL sequence: {data}")
             return None
-        release_all_outputs(session_id, sequence)
-        return f"RELEASE_ALL_ACK:{session_id}:{sequence}"
+        if release_all_outputs(session_id, sequence):
+            return f"RELEASE_ALL_ACK:{session_id}:{sequence}"
+        return None
 
     # Generic ordered output. Ordering is used only as a RELEASE_ALL barrier;
     # ordinary commands retain their existing behavior even if UDP reorders them.
@@ -1544,7 +1650,7 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
         with timing_recorder.observe_lock(release_state_lock):
             if not guard():
                 return None
-            return process_command(output_command, addr, player_id, phone_guard=guard)
+            return process_command(output_command, addr, player_id, phone_guard=guard, _raise_desktop_errors=True)
 
     if player_id in camera_follow_last_input_at:
         camera_follow_last_input_at[player_id] = time.monotonic()
@@ -1876,6 +1982,8 @@ def clean_key_states():
                                 keyboard.press(key.lower())
                         with timing_recorder.span("log_output"):
                             logger.info(f"Re-pressed key: {key}")
+                except DesktopOutputError as e:
+                    report_desktop_failure(e)
                 except Exception as e:
                     with timing_recorder.span("log_output"):
                         logger.warning(f"Error checking key state: {key} - {str(e)}")
@@ -1976,6 +2084,10 @@ if __name__ == "__main__":
     show_connection_info()
     
     try:
+        try:
+            desktop_output_bridge.start(timeout=10)
+        except DesktopOutputError as error:
+            report_desktop_failure(error)
         # Start the connection cleanup scheduleraaaaa
         start_cleanup_scheduler()
 
@@ -2020,6 +2132,7 @@ if __name__ == "__main__":
             face_input_server.stop()
         with timing_recorder.span("shutdown_camera"):
             stop_camera_follow_worker()
+        desktop_output_bridge.close()
         timing_recorder.close()
         with timing_recorder.span("console_output"):
             print("Server stopped")

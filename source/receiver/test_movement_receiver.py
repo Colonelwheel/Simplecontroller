@@ -215,13 +215,17 @@ class MovementReceiverTests(unittest.TestCase):
             if target=='KEY:W' and not pressed:
                 raise OSError('synthetic release failure')
             original(target,pressed)
-        with patch.object(receiver,'send_tagged_key',side_effect=failing):
+        with patch.object(receiver,'send_tagged_key',side_effect=failing), \
+                self.assertRaises(receiver.DesktopOutputError):
             receiver.release_outputs(tuple(receiver.gamepads),'movement failure test')
         self.assertNotIn('d',fake_keyboard.down)
         self.assertFalse(fake_pyautogui.down)
         self.assertFalse(receiver.gamepads['player1'].buttons)
         receiver.release_outputs(tuple(receiver.gamepads),'movement retry test')
         self.assertFalse(fake_keyboard.down)
+
+
+import desktop_output
 
 
 class TaggedAbiTests(unittest.TestCase):
@@ -235,29 +239,29 @@ class TaggedAbiTests(unittest.TestCase):
                 return 1
         class Library:
             SendInput=Send()
-        old=receiver._tagged_keyboard_api
-        receiver._tagged_keyboard_api=None
+        old=desktop_output._tagged_keyboard_api
+        desktop_output._tagged_keyboard_api=None
         try:
             with patch.object(ctypes,'WinDLL',return_value=Library()):
-                receiver.send_tagged_key('KEY:W',True)
-                receiver.send_tagged_key('KEY:RCTRL',False)
+                desktop_output.send_tagged_key('KEY:W',True)
+                desktop_output.send_tagged_key('KEY:RCTRL',False)
             self.assertEqual((1,1,ord('W'),0,FACE_INPUT_TAG,40),calls[0])
             self.assertEqual((1,1,0xA3,3,FACE_INPUT_TAG,40),calls[1])
         finally:
-            receiver._tagged_keyboard_api=old
+            desktop_output._tagged_keyboard_api=old
 
     def test_sendinput_zero_is_visible_failure(self):
         class Send:
             def __call__(self,*args): return 0
         class Library:
             SendInput=Send()
-        old=receiver._tagged_keyboard_api
-        receiver._tagged_keyboard_api=None
+        old=desktop_output._tagged_keyboard_api
+        desktop_output._tagged_keyboard_api=None
         try:
             with patch.object(ctypes,'WinDLL',return_value=Library()),self.assertRaises(OSError):
-                receiver.send_tagged_key('KEY:W',True)
+                desktop_output.send_tagged_key('KEY:W',True)
         finally:
-            receiver._tagged_keyboard_api=old
+            desktop_output._tagged_keyboard_api=old
 
 
 if __name__=='__main__':

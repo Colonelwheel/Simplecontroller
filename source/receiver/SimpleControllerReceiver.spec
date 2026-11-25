@@ -10,7 +10,7 @@ a = Analysis(
         (str(root / 'ViGEmClient/x86/ViGEmClient.dll'), 'vgamepad/win/vigem/client/x86'),
     ],
     datas=[],
-    hiddenimports=['simple_controller_receiver', 'receiver_timing', 'phone_output_protocol',
+    hiddenimports=['simple_controller_receiver', 'receiver_timing', 'desktop_output', 'phone_output_protocol',
                    'relative_mouse', 'face_input_server', 'voice_input_server', 'camera_follow'],
     hookspath=[],
     runtime_hooks=[],

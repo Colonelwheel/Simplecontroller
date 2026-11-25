@@ -95,6 +95,14 @@ Legacy timed sequences retain their scoped guard while waiting outside that lock
 Known reversible outputs started inside a scoped raw sequence are also released
 by END while preserving aggregate and other-source holds.
 
+Dev's receiver bounds mouse/keyboard native requests through an isolated helper.
+An unconfirmed native result is not a successful state or cleanup acknowledgement.
+Global Release All records freshness separately from cleanup confirmation; a
+duplicate failed identity cannot gain an ACK or reset newer input. END retains
+failed per-key cleanup and recomputes the current aggregate on retry, preserving
+newer owners. Scoped output requires completed activation, and a failed adoption
+retry cannot repeat its earlier controller reset. Frame syntax is unchanged.
+
 Android captures player, destination, socket, transport, epoch and scope/output
 guards before queuing. The UdpClient queue and NetworkClient fallback queue both
 recheck those guards at send time. A closed parent cannot create an active child.

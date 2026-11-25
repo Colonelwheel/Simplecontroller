@@ -117,6 +117,8 @@ class PhoneOutputProtocolState:
         self.event_outputs = {}
         self.activation_barriers = {}
         self.completed_activations = set()
+        self.started_activations = set()
+        self.pending_ends = {}
 
     def legacy_packet_is_current(self, session, sequence):
         with timing_recorder.observe_lock(self.lock):
@@ -233,8 +235,10 @@ class PhoneOutputProtocolState:
                 if len(parts) != 3:
                     return True, None
                 identity = session, sequence
-                if identity in self.completed_activations or sequence < self.activation_barriers.get(session, -1):
+                if identity in self.completed_activations:
                     return True, ack
+                if sequence < self.activation_barriers.get(session, -1):
+                    return True, None
                 if not self.barrier_is_current(session, sequence) and sequence != self.activation_barriers.get(session):
                     return True, None
                 self.activation_barriers[session] = sequence
@@ -247,6 +251,8 @@ class PhoneOutputProtocolState:
             if sequence <= self.activation_barriers.get(session, -1):
                 return True, None
             if session not in self.activation_barriers:
+                return True, None
+            if (session, self.activation_barriers[session]) not in self.completed_activations:
                 return True, None
             if parts[0] == "PHONE_STATE_V1":
                 if len(parts) != 5:
@@ -283,11 +289,26 @@ class PhoneOutputProtocolState:
                     return True, None
                 identity = session, scope
                 self.ended[identity] = max(generation, self.ended.get(identity, -1))
+                pending = self.pending_ends.setdefault(identity, {})
                 for owner, values in tuple(self.event_outputs.items()):
                     if owner[0:2] == identity and owner[2] <= generation:
                         del self.event_outputs[owner]
                         for key, (_, command) in values.items():
-                            self.apply_state(self._effective(session, key, command), player)
+                            pending[key] = command
+                failure = None
+                for key, command in tuple(pending.items()):
+                    try:
+                        # Recompute on every retry: a newer aggregate/scope may
+                        # own this output after a prior native failure.
+                        self.apply_state(self._effective(session, key, command), player)
+                        pending.pop(key, None)
+                    except Exception as error:
+                        if failure is None:
+                            failure = error
+                if not pending:
+                    self.pending_ends.pop(identity, None)
+                if failure is not None:
+                    raise failure
                 return True, ack
             if parts[0] == "PHONE_EVENT_V1":
                 if len(parts) != 7:
@@ -305,12 +326,14 @@ class PhoneOutputProtocolState:
                 if event <= self.events.get(identity, -1):
                     return True, ack
                 feedback_key = None
+                revision_update = None
                 if command.startswith("PHONE_REPLAY:"):
                     key = command.removeprefix("PHONE_REPLAY:")
                     feedback_key = key
                     output = session, key
                     if output not in self.commands or sequence <= self.revisions.get(output, -1):
                         return True, ack
+                    revision_update = output, self.revisions.get(output)
                     self.revisions[output] = sequence
                 elif command.startswith("PHONE_FORCE:"):
                     raw = command.removeprefix("PHONE_FORCE:")
@@ -321,9 +344,19 @@ class PhoneOutputProtocolState:
                     output = session, key
                     if sequence <= self.revisions.get(output, -1):
                         return True, ack
+                    revision_update = output, self.revisions.get(output)
                     self.revisions[output] = sequence
                 guard = PhoneEventGuard(self, session, player, scope, generation, sequence)
-                self.dispatch_event(command, player, guard, session)
+                try:
+                    self.dispatch_event(command, player, guard, session)
+                except Exception:
+                    if revision_update is not None:
+                        output, old_revision = revision_update
+                        if old_revision is None:
+                            self.revisions.pop(output, None)
+                        else:
+                            self.revisions[output] = old_revision
+                    raise
                 self.events[identity] = event
                 return True, output_ack(feedback_key) if feedback_key else ack
         return True, None

@@ -5,6 +5,7 @@ import threading
 import time
 import types
 import unittest
+from unittest.mock import patch
 
 
 class FakeKeyboard(types.ModuleType):
@@ -115,7 +116,56 @@ sys.modules["pyautogui"] = fake_pyautogui
 sys.modules["vgamepad"] = fake_vgamepad
 os.environ["LOCALAPPDATA"] = tempfile.gettempdir()
 
-import simple_controller_receiver as receiver
+import desktop_output
+
+
+class InlineFakeBridge:
+    """Explicit in-process fake: receiver tests never start a real native child."""
+    fault = ''
+
+    def __init__(self):
+        self.calls = []
+
+    def start(self, timeout=10):
+        return None
+
+    def close(self, *args, **kwargs):
+        return None
+
+    def call(self, operation, *args):
+        self.calls.append((operation, args))
+        try:
+            if operation == 'key':
+                return (fake_keyboard.press if args[1] else fake_keyboard.release)(args[0])
+            if operation == 'tagged_key':
+                from face_input_server import keyboard_name
+                return (fake_keyboard.press if args[1] else fake_keyboard.release)(keyboard_name(args[0]))
+            if operation == 'key_tap':
+                return fake_keyboard.press_and_release(args[0])
+            if operation == 'key_state':
+                return fake_keyboard.is_pressed(args[0])
+            if operation == 'mouse_button':
+                return (fake_pyautogui.mouseDown if args[1] else fake_pyautogui.mouseUp)(button=args[0])
+            if operation == 'move':
+                return fake_pyautogui.moveRel(*args)
+            if operation == 'scroll':
+                return fake_pyautogui.scroll(*args)
+            if operation == 'game_move':
+                return None
+            raise AssertionError('Unexpected fake desktop operation: ' + operation)
+        except OSError as error:
+            raise desktop_output.DesktopOutputError(str(error)) from error
+
+
+with patch.object(desktop_output, 'DesktopOutputBridge', InlineFakeBridge):
+    import simple_controller_receiver as receiver
+
+# Preserve inspection conveniences used by existing tests; production proxies
+# never import keyboard/PyAutoGUI or access native state in the receiver process.
+receiver.keyboard.down = fake_keyboard.down
+receiver.keyboard.released = fake_keyboard.released
+for _name in ('down', 'moves', 'scrolls', 'ups'):
+    setattr(receiver.pyautogui, _name, getattr(fake_pyautogui, _name))
 
 
 class ReleaseAllReceiverTest(unittest.TestCase):
@@ -136,6 +186,8 @@ class ReleaseAllReceiverTest(unittest.TestCase):
             receiver.camera_follow_states[player_id].clear_inputs()
             receiver.camera_follow_last_right_output[player_id] = (0.0, 0.0, "neutral")
         receiver.release_barriers.clear()
+        receiver.release_confirmations.clear()
+        receiver.pending_legacy_key_releases.clear()
         receiver.latest_stick_packets.clear()
         receiver.active_connections.clear()
         receiver.smoother.end_touch()

@@ -6,6 +6,12 @@ import sys
 
 
 def main():
+    if '--desktop-output-probe' in sys.argv:
+        from desktop_output import probe_main
+        return probe_main()
+    if '--desktop-output-worker' in sys.argv:
+        from desktop_output import worker_main
+        return worker_main()
     os.environ["SC_RECEIVER_TIMING"] = "1"
     if "SC_RECEIVER_TIMING_DIR" not in os.environ:
         base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
@@ -21,4 +27,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -1,6 +1,6 @@
 # Receiver hang diagnostics
 
-Dev's `Simple Controller Receiver.exe` includes the diagnostic implementation originally delivered November 10, 2026. It helps investigate intermittent receiver freezes while retaining the existing input logic. It observes stalls; it does not fix an unidentified native/driver hang or release a port held by an older process.
+Dev's `Simple Controller Receiver.exe` includes the diagnostic implementation originally delivered November 10, 2026. Its November 24 desktop-output isolation additionally contains mouse/keyboard native stalls in a separate helper with bounded receiver waits. It does not fix an unidentified Windows/driver hang or release a port held by an older process.
 
 ## Starting the receiver
 
@@ -30,17 +30,19 @@ An idle `udp_receive_wait` is normal and does not trigger a stall alert by itsel
 
 Nested durations overlap and must not be added together as independent CPU time. Python stacks show the call site entering a native API, not the native/kernel stack below it. If the interpreter, Windows, or disk is itself blocked, this in-process capture may also be unable to progress. A native stack capture may still be required to distinguish Windows input, ViGEm, networking, or another driver. This build does not claim to eliminate that limitation.
 
+With desktop isolation, the receiver's native mouse/keyboard spans measure its bounded helper request. A 100 ms request timeout faults desktop output rather than waiting for the one-second watchdog threshold. The receiver reports the failure and continues independent controller processing; its Python stack is not the helper's native stack. Pending native input cannot be canceled merely by expiring the request. Cleanup remains unconfirmed on failure, including duplicate acknowledgement paths. See [desktop output isolation](README.md#desktop-output-isolation).
+
 Explicit shutdown stages are captured before the recorder closes. Later interpreter finalization or native ViGEm destructor work may occur after capture stops; this build cannot observe those stages or continue recording after Windows terminates its threads.
 
 For the reported incident, useful stages include releases sent when leaving the Android app, native mouse/keyboard output, lock waiting, and shutdown. First confirm the new receiver actually controls the PC and its diagnostic files update during use.
 
 ## Preservation and verification
 
-The patch does not change packet ordering, ownership, Hold/Turbo, release semantics, WAIT behavior, native output values, or the phone protocol. Existing shutdown/recovery weaknesses are observed rather than silently rewritten.
+The original diagnostic-only patch did not change packet ordering, ownership, Hold/Turbo, WAIT behavior, native output values, or the phone protocol. The later desktop-isolation change preserves healthy output ordering/backends and changes failure handling: waits are bounded, failed desktop output is quarantined, and unsuccessful cleanup is not acknowledged as success. It does not add automatic replay or helper recovery.
 
 Tests substitute fake keyboard/mouse/gamepad modules before importing receiver code. They use isolated test files and fake sockets for the instrumented paths. No connected Android tests, phone installs, driver changes, mod changes, or live input generation belong to this validation.
 
-Build with `SimpleControllerReceiver.spec` using fresh, isolated outputs as described in [the receiver source guide](README.md). The three retained development builders also package all eight modules through the diagnostic entrypoint, using fresh delivery directories. `tools/diagnostics/verify_receiver_bundle.py` compares a delivery's `build-report.json`, packaged Python code and both ViGEm DLLs to its reviewed build inputs without launching the executable. Test/build success does not establish real-game performance or prove capture of the original intermittent Windows hang.
+Build with `SimpleControllerReceiver.spec` using fresh, isolated outputs as described in [the receiver source guide](README.md). The three retained development builders also package all nine modules through the diagnostic entrypoint, using fresh delivery directories. `tools/diagnostics/verify_receiver_bundle.py` compares a delivery's `build-report.json`, packaged Python code and both ViGEm DLLs to its reviewed build inputs without launching the executable. Test/build success does not establish real-game performance or prove capture of the original intermittent Windows hang.
 
 The November 10, 2026 patch passed 294 receiver tests, including 27 recorder tests and two fake-native integration scenarios. Deliberately blocked keyboard/mouse/gamepad/log operations and output-lock waits were observed before they completed. Rotation, privacy, bounded I/O behavior, and transient watchdog failure recovery were checked. An independent AST comparison found no non-diagnostic input/protocol behavior changes. A synthetic 50,000-iteration benchmark averaged about 4.5 microseconds for an observed lock plus a fake native-output span on this PC; that is not a measurement of gameplay latency or the complete receiver workload.
 

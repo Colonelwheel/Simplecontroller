@@ -396,7 +396,8 @@ class DesktopReceiverTests(unittest.TestCase):
                 raise OSError("synthetic left mouse release failure")
             original(button)
 
-        with patch.object(self.mouse, "mouseUp", fail_left), self.assertLogs(level="WARNING") as logs:
+        with patch.object(self.mouse, "mouseUp", fail_left), self.assertLogs(level="WARNING") as logs, \
+                self.assertRaises(self.receiver.DesktopOutputError):
             self.receiver.release_all_outputs(str(uuid.uuid4()), 1)
         self.assertTrue(any("Facial input cleanup failed" in line for line in logs.output))
         self.assertFalse(self.keyboard.down)
@@ -432,7 +433,8 @@ class DesktopReceiverTests(unittest.TestCase):
                 raise OSError('synthetic Space release failure')
             original(key)
 
-        with patch.object(self.keyboard, 'release', fail_space), self.assertLogs(level='WARNING'):
+        with patch.object(self.keyboard, 'release', fail_space), self.assertLogs(level='WARNING'), \
+                self.assertRaises(self.receiver.DesktopOutputError):
             self.receiver.release_all_outputs(str(uuid.uuid4()), 1)
         self.assertFalse(self.mouse.down)
         self.assertFalse(self.receiver.gamepads['player1'].buttons)

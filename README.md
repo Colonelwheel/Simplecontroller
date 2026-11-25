@@ -91,6 +91,10 @@ Historical verification for the November 17, 2026 feature delivery passed 678 JV
 
 November 24 USB reconnect verification passed **697 JVM tests per variant**, APK/AAB assembly and both lint variants, with zero errors/fatals and 202 warnings per variant. The APK signer matches the installed identity; application ID, manifest and resources match the previous package. These checks do not establish physical USB reconnect or game behavior.
 
+The November 24 receiver update isolates native mouse/keyboard calls with bounded waits. A desktop-input stall disables desktop output for that receiver session instead of indefinitely holding the shared controller/output lock. Failed cleanup remains unconfirmed, including duplicate release/activation requests; old clicks are not automatically replayed. Healthy Hold, ownership, movement scaling and output backends are preserved. See [desktop output isolation](source/receiver/README.md#desktop-output-isolation) for recovery and limits.
+
+Receiver verification passed **324 mocked tests**, static inspection of nine packaged modules and both ViGEm DLLs, and the frozen EXE's no-input startup probe. A 2,000-request fake-backend IPC check measured a 0.057 ms median round trip; it does not measure native output or game latency. No phone update, real input or gameplay test was part of this receiver verification.
+
 SHA-256 checksums:
 
 ```text
@@ -98,7 +102,7 @@ SimpleController.apk
 8238fd9048d4491815acc3978dc481fef926afd2d0bf44d090bed9696e29fa7a
 
 Simple Controller Receiver.exe
-c69308f11d91c591f06a6b498ba602ed11946fe4e21d04d866e09962c9163768
+f519702c9098390e06512c323a2ed60d14ee1b2c0986381447463f87ce90b165
 
 FacialInput.exe
 4dd1edf58afda99789ee619696fac718f916e80375f61fe93c80643907efbedf
