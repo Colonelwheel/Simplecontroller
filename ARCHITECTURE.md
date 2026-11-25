@@ -1,5 +1,71 @@
 # Architecture and source map
 
+## Offline mouse-helper candidate
+
+This isolated candidate starts at `1483b33`; it is not the source of a newly
+deployed receiver. No executable or shortcut has been replaced for this candidate.
+The keyboard adapters, keyboard reconciliation and phone protocol module retain
+that baseline. The normal keyboard release delays measured around 370 ms are not
+subject to a helper deadline.
+
+`source/receiver/mouse_output.py` adds one mouse-only helper and one duplex Windows
+pipe. One receiver daemon thread, `mouse-output-io`, owns process startup and pipe
+I/O. The helper's main thread performs mouse operations; it imports neither the
+receiver nor keyboard/vgamepad. Its application handle allowlist contains the pipe;
+standard streams use NUL, with no receiver socket/pad handles inherited. Worker mode
+is dispatched by `receiver_diagnostics.main`
+before starting diagnostics or importing the receiver. Normal source-import tests
+retain their fake PyAutoGUI adapter; serving startup selects the helper before
+opening receiver endpoints. The spec, three builders and three archive inspectors
+explicitly include all nine receiver modules, including `mouse_output`.
+
+The first caller waits at most 100 ms. This bounds its wait, not native execution:
+the helper remains alive and its request remains outstanding. Every subsequent
+mouse call returns immediately while busy. Motion, scroll and new DOWN are
+dropped, with no backlog. A dropped press remains suppressed until UP followed
+by a fresh press. Releases are retained without expiry. Recovery drains only
+unwanted buttons before accepting fresh mouse input. An accepted DOWN whose
+merged phone/face ownership remains continuously active stays held, including
+when that DOWN finishes late. An intervening UP ends that continuity; a newer
+dropped DOWN cannot restore it. Protocol ACKs for dropped presses acknowledge
+processed intent, not native completion.
+
+A permanently stuck call leaves mouse output pending; keyboard, virtual pads and
+PHONE_ACTIVATE continue through the baseline paths. Logs report the pending mouse
+call and its late reply without per-packet output. A returned native release error
+retains cleanup for a later UP/RELEASE_ALL retry. Global release runs ownership and
+controller resets once; duplicate barriers retry only pending mouse cleanup and
+withhold ACK while mouse work is pending. They do not reset newer holds. Close
+requests owned releases without waiting for a stuck call or terminating it. The
+helper also releases its pressed-button ledger on close/EOF, once native execution
+can progress; isolation does not prove Windows itself can always release input.
+
+Confirmed helper exit permits replacement, with at least one second between
+attempts and at most three respawns per rolling 60 seconds. The existing I/O
+thread also checks for idle helper exit. A live/stuck helper is never bypassed.
+The ready reply includes worker PID; a packaged launcher PID alone cannot prove
+the worker exited. Unverified identity blocks respawn and is reported. On a crash,
+the parent retains all held/owed buttons, ends their old Hold continuity, and
+sends UP through the replacement before resuming. A release followed by a fresh
+press is required; no old DOWN is replayed. Ordinary late replies still preserve
+continuous Hold. After the rate limit, attempts pause until RELEASE_ALL requests
+another try; that request also obeys the rolling rate limit. Duplicate barriers
+do not repeat newer controller/key cleanup. A 10-second startup wait produces a
+warning while keeping the helper alive. Cleanup logs report pending mouse work
+instead of claiming all outputs were released.
+
+`source/receiver/test_mouse_output.py` uses real helper processes and fake native
+backends: 370 ms/1.5 s/never-returning calls, continuous Hold and ended/repressed
+ownership, no mouse backlog or repeated waits, startup releases, EOF/close cleanup,
+RELEASE_ALL retries, independent keyboard/Xbox/activation, and socket rebinding
+while a fake old helper remains stuck. Receiver integration imports only through
+the existing fake-native harness. These are offline checks, not device, game,
+native-input validation. The explicit `test_mouse_output.py --probe-worker`
+packaging check launches only worker mode, receives ready, sends only close and
+checks exit zero. It creates no receiver endpoints/pads and sends no mouse input.
+It records actual startup latency separately from the 100 ms call budget. No
+Android source changes are part of this candidate.
+
 Implementation map for **dev**, with USB reconnect refreshed November 24, 2026, receiver diagnostics from November 23, 2026 and the Android branch comparison from November 22, 2026 for main's promotion from dev `632447ce0606a21dd63886564fdcecf68de1fd8b`. The original runtime inspection and main-derived shared maps remain applicable: main retains the promoted Macro Mode/U implementation; dev additionally has selected USB/Wi-Fi reconnection, receiver diagnostic instrumentation, development tools and newer packaged artifacts. See [BRANCHES.md](BRANCHES.md). This is a navigation aid: verify current implementation before editing and update affected entries when behavior changes. Symbol names are search anchors; line numbers would become stale.
 
 ## Start here
@@ -325,9 +391,10 @@ Base **R**: [`source/receiver/`](source/receiver/). Read [its README](source/rec
 | `voice_input_server.py` | `decode_request`, `VoiceInputState`, `VoiceInputServer`. Strict JSON and typed action validation, receiver epoch/session/sequence, finite overlays/persistent holds, duplicate recognition, local request service and voice-only/global cleanup. |
 | `camera_follow.py` | Pure `CameraFollowSettings`, `CameraFollowState.step`, `_camera_target`: effective right-stick selection, movement-driven target/ramp, manual override and live strength. Native reporting stays in the composition root. |
 | `relative_mouse.py` | `win32_input_types`, `_native_api`, `send_relative_mouse`: complete 32/64-bit Windows INPUT ABI, lazy user32 binding, signed bounds and SendInput failure handling. Relative motion only. |
+| `mouse_output.py` | `MouseOutput`, `worker`: one mouse helper/pipe/I/O thread, soft caller wait, Hold-aware late recovery, confirmed-exit respawn and retained release cleanup. See the candidate notes above. |
 | `receiver_diagnostics.py` | Packaged entrypoint: enables the process-local recorder, chooses `hang-diagnostics` beside the EXE unless `SC_RECEIVER_TIMING_DIR` is set, then runs receiver logic and closes the recorder. |
 | `receiver_timing.py` | Opt-in `TimingRecorder`: nonblocking input-path statistics/operation markers, observed original locks, bounded background writer/watchdog, private Python stack locations and session-only rotation. See [capture/retention](source/receiver/RECEIVER_TIMING_DIAGNOSTICS.md). |
-| `SimpleControllerReceiver.spec` | Portable SPECPATH-based PyInstaller recipe: diagnostic wrapper plus seven hidden imports and both ViGEmClient DLLs, console `Simple Controller Receiver.exe`. Does not install ViGEmBus. |
+| `SimpleControllerReceiver.spec` | Portable SPECPATH-based PyInstaller recipe: diagnostic wrapper plus eight hidden imports and both ViGEmClient DLLs, console `Simple Controller Receiver.exe`. Does not install ViGEmBus. |
 | `requirements.txt` | Pinned receiver/packaging dependencies; includes vgamepad, keyboard, mouse, PyAutoGUI and PyInstaller. Keep compatible native packaging as well as Python imports. |
 | `ViGEmClient/x64/ViGEmClient.dll`, `ViGEmClient/x86/ViGEmClient.dll` | Bundled native client libraries mapped to vgamepad package paths. Separate from the installed bus driver and root public EXE. |
 
@@ -458,12 +525,12 @@ Feature helper paths below are relative to `source/receiver/tools/`:
 
 | File | Contract |
 | --- | --- |
-| `camera_follow/build_receiver.ps1` | Preserved feature-specific output name `Simple Controller Receiver (Camera Follow Controls and Game Mouse).exe`; resolves canonical source two parents above its own directory, includes all eight modules and both DLLs through the diagnostic wrapper. Requires fresh absolute `-DeliveryDirectory`, supports `-Python`, isolates output/cache/temp, installs nothing and never starts/replaces the receiver. `build-report.json` records input source/DLL and EXE hashes plus environment/package/baseline metadata. |
-| `camera_follow/verify_receiver_bundle.py` | `digest`, `semantic`, `symbols`, `verify(delivery)`: positional delivery directory, source/report/EXE hash checks, preserved-companion hashes, PyInstaller archive inspection, eight-module semantic source comparison including the wrapper/recorder, follow/Game Mouse/retained-nose capability anchors and both DLL contents. Exclusively creates `bundle-verification.json`; an existing report is not overwritten. |
-| `game_mouse/build_receiver.ps1` | Same source/path/output isolation contract; historical filename `Simple Controller Receiver (TouchAim Game Mouse and Facial Input).exe`, with all eight source modules and both DLLs through the diagnostic wrapper. Input source/DLL/EXE hashes are recorded. Canonical public specification remains `source/receiver/SimpleControllerReceiver.spec`. |
-| `game_mouse/verify_receiver_bundle.py` | `semantic`, `symbols`, `verify(delivery)`: checks report hashes and preserved companion baselines, all eight bundled code objects against source, relative SendInput/complete INPUT ABI symbols, retained-nose/v3 source-priority capabilities, both DLLs; exclusively creates its verification report. |
+| `camera_follow/build_receiver.ps1` | Preserved feature-specific output name `Simple Controller Receiver (Camera Follow Controls and Game Mouse).exe`; resolves canonical source two parents above its own directory, includes all nine modules and both DLLs through the diagnostic wrapper. Requires fresh absolute `-DeliveryDirectory`, supports `-Python`, isolates output/cache/temp, installs nothing and never starts/replaces the receiver. `build-report.json` records input source/DLL and EXE hashes plus environment/package/baseline metadata. |
+| `camera_follow/verify_receiver_bundle.py` | `digest`, `semantic`, `symbols`, `verify(delivery)`: positional delivery directory, source/report/EXE hash checks, preserved-companion hashes, PyInstaller archive inspection, nine-module semantic source comparison including the wrapper/recorder/helper, follow/Game Mouse/retained-nose capability anchors and both DLL contents. Exclusively creates `bundle-verification.json`; an existing report is not overwritten. |
+| `game_mouse/build_receiver.ps1` | Same source/path/output isolation contract; historical filename `Simple Controller Receiver (TouchAim Game Mouse and Facial Input).exe`, with all nine source modules and both DLLs through the diagnostic wrapper. Input source/DLL/EXE hashes are recorded. Canonical public specification remains `source/receiver/SimpleControllerReceiver.spec`. |
+| `game_mouse/verify_receiver_bundle.py` | `semantic`, `symbols`, `verify(delivery)`: checks report hashes and preserved companion baselines, all nine bundled code objects against source, relative SendInput/complete INPUT ABI symbols, retained-nose/v3 source-priority capabilities, both DLLs; exclusively creates its verification report. |
 
-`tools/diagnostics/verify_receiver_bundle.py` is the canonical optimize-0 static inspector: validates the delivery report, all eight source/code objects and both native DLLs, and exclusively creates `bundle-verification.json`; it does not launch the receiver.
+`tools/diagnostics/verify_receiver_bundle.py` is the canonical optimize-0 static inspector: requires the full nine-module manifest, validates all source/code objects and both native DLLs, and exclusively creates `bundle-verification.json`; it does not launch the receiver.
 
 All three builders require a fresh absolute delivery directory and resolve canonical source/DLLs through portable paths. They do not replace root downloads or launch/install the receiver. All three builders fingerprint sources, DLLs and EXE; diagnostics are disabled during packaging and the prior environment is restored afterward. Bundle inspectors compare archive/code/hash/ABI symbols without executing receiver code and require compatible Python/PyInstaller tooling with assertions enabled. Preserved-companion baselines must be deliberately updated after an approved companion change. Generated reports can contain local paths and stay private unless sanitized.
 

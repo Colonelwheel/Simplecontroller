@@ -15,7 +15,7 @@ if (Test-Path -LiteralPath $deliveryRoot) {
 $pythonCommand = Get-Command -Name $Python -CommandType Application -ErrorAction Stop | Select-Object -First 1
 $Python = $pythonCommand.Source
 $dllRoot = Join-Path $sourceRoot 'ViGEmClient'
-$sourceNames = @('receiver_diagnostics.py','receiver_timing.py','simple_controller_receiver.py','phone_output_protocol.py','relative_mouse.py','camera_follow.py','face_input_server.py','voice_input_server.py')
+$sourceNames = @('receiver_diagnostics.py','receiver_timing.py','simple_controller_receiver.py','phone_output_protocol.py','relative_mouse.py','camera_follow.py','face_input_server.py','voice_input_server.py','mouse_output.py')
 foreach ($name in $sourceNames) {
     if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot $name) -PathType Leaf)) {
         throw "Receiver companion missing: $name"
@@ -51,7 +51,7 @@ try {
         '--workpath',(Join-Path $deliveryRoot 'build'),
         '--specpath',(Join-Path $deliveryRoot 'spec'),
         '--paths',$copiedSource,
-        '--hidden-import','simple_controller_receiver','--hidden-import','receiver_timing',
+        '--hidden-import','simple_controller_receiver','--hidden-import','receiver_timing','--hidden-import','mouse_output',
         '--hidden-import','voice_input_server','--hidden-import','face_input_server',
         '--hidden-import','camera_follow','--hidden-import','relative_mouse','--hidden-import','phone_output_protocol',
         '--add-binary',((Join-Path $dllRoot 'x64\ViGEmClient.dll') + ';vgamepad\win\vigem\client\x64'),

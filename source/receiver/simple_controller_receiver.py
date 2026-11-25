@@ -30,10 +30,13 @@ from voice_input_server import VoiceInputState, VoiceInputServer
 from relative_mouse import send_relative_mouse
 from phone_output_protocol import PhoneOutputProtocolState, state_key as phone_state_key, inactive_command
 from receiver_timing import recorder as timing_recorder
+from mouse_output import MouseOutput
 
 # Configure pyautogui for mouse handling
 pyautogui.FAILSAFE = False   # disable the top-left "panic" feature
 pyautogui.PAUSE = 0          # remove PyAutoGUI's default 0.1 s pause
+mouse_output = pyautogui  # Source-import test harness; main selects isolation before serving.
+game_mouse_output = None
 
 DELTA_GAIN = 40.0         # 40 px per 1.0 delta feels close to Windows default
 
@@ -246,7 +249,7 @@ def write_desktop_input(target, pressed):
     else:
         button = 'left' if target == 'MOUSE_LEFT' else 'right'
         with timing_recorder.span("native_mouse_output"):
-            (pyautogui.mouseDown if pressed else pyautogui.mouseUp)(button=button)
+            (mouse_output.mouseDown if pressed else mouse_output.mouseUp)(button=button)
 
 
 _tagged_keyboard_api = None
@@ -653,7 +656,7 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 desktop_input.phone_set('MOUSE_' + mouse_button.upper(), False)
             else:
                 with timing_recorder.span("native_mouse_output"):
-                    pyautogui.mouseUp(button=mouse_button)
+                    mouse_output.mouseUp(button=mouse_button)
         except Exception as e:
             with timing_recorder.span("log_output"):
                 logger.warning(f"Failed to release mouse button {mouse_button}: {e}")
@@ -678,18 +681,21 @@ def release_outputs(player_ids, reason="explicit RELEASE_ALL"):
                 logger.error(f"Failed to reset virtual gamepad for {player_id}: {e}")
 
     with timing_recorder.span("log_output"):
-        logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
+        if isinstance(mouse_output, MouseOutput) and mouse_output.pending:
+            logger.warning(f"Output cleanup requested for {', '.join(selected)} ({reason}); mouse cleanup pending")
+        else:
+            logger.info(f"Released all outputs for {', '.join(selected)} ({reason})")
 
 @synchronized(release_state_lock)
 def release_all_outputs(session_id, sequence):
-    """Apply each global release identity once; duplicates still receive an ACK."""
+    """Apply a barrier once; duplicate retries touch only pending mouse releases."""
     with timing_recorder.observe_lock(release_state_lock):
         if sequence <= release_barriers.get(session_id, -1):
-            return False
+            return mouse_output.retry_releases() if isinstance(mouse_output, MouseOutput) else True
         release_barriers[session_id] = sequence
 
     release_outputs(tuple(gamepads), reason="RELEASE_ALL")
-    return True
+    return mouse_output.retry_releases() if isinstance(mouse_output, MouseOutput) else True
 
 # Helper functions
 def normalize_value(value):
@@ -719,7 +725,7 @@ def handle_game_mouse_delta(command):
             raise ValueError("movement must be finite")
         # Match legacy TouchAim scaling and truncation before the native backend.
         with timing_recorder.span("native_mouse_output"):
-            send_relative_mouse(int(dx * DELTA_GAIN), int(dy * DELTA_GAIN))
+            (game_mouse_output or send_relative_mouse)(int(dx * DELTA_GAIN), int(dy * DELTA_GAIN))
     except (ValueError, OverflowError) as error:
         with timing_recorder.span("log_output"):
             logger.warning(f"Bad GAME_DELTA packet: {command} ({error})")
@@ -739,7 +745,7 @@ def handle_touchpad(command):
             # comment-out the line you're NOT using:
             # mouse.move(mx, my, absolute=False)   # needs admin
             with timing_recorder.span("native_mouse_output"):
-                pyautogui.moveRel(mx, my)              # works without admin
+                mouse_output.moveRel(mx, my)
         except ValueError:
             with timing_recorder.span("log_output"):
                 logger.warning(f"Bad DELTA packet: {command}")
@@ -756,7 +762,7 @@ def handle_touchpad(command):
         dx, dy = smoother.process_movement(x_val, y_val)
         if dx or dy:
             with timing_recorder.span("native_mouse_output"):
-                pyautogui.moveRel(dx, dy)
+                mouse_output.moveRel(dx, dy)
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Error handling touchpad input: {e}")
@@ -776,10 +782,10 @@ def handle_mouse_buttons(command):
             
         elif command == "MOUSE_MIDDLE_DOWN":
             with timing_recorder.span("native_mouse_output"):
-                pyautogui.mouseDown(button="middle")
+                mouse_output.mouseDown(button="middle")
         elif command == "MOUSE_MIDDLE_UP":
             with timing_recorder.span("native_mouse_output"):
-                pyautogui.mouseUp(button="middle")
+                mouse_output.mouseUp(button="middle")
             
         elif command in ("TOUCHPAD_END", "TOUCH_END"):
             smoother.end_touch()
@@ -796,7 +802,7 @@ def handle_scroll(command):
     try:
         amount = int(float(command.split(":",1)[1]) * 120)
         with timing_recorder.span("native_mouse_output"):
-            pyautogui.scroll(amount)
+            mouse_output.scroll(amount)
     except Exception as e:
         with timing_recorder.span("log_output"):
             logger.error(f"Bad SCROLL packet {command}: {e}")
@@ -1516,7 +1522,8 @@ def process_command(data, addr, player_id='player1', phone_guard=None):
             with timing_recorder.span("log_output"):
                 logger.warning(f"Bad RELEASE_ALL sequence: {data}")
             return None
-        release_all_outputs(session_id, sequence)
+        if not release_all_outputs(session_id, sequence):
+            return None  # No successful ACK while mouse cleanup is still pending.
         return f"RELEASE_ALL_ACK:{session_id}:{sequence}"
 
     # Generic ordered output. Ordering is used only as a RELEASE_ALL barrier;
@@ -1961,6 +1968,8 @@ def udp_server():
             logger.info("UDP server stopped")
 
 if __name__ == "__main__":
+    mouse_output = MouseOutput()
+    game_mouse_output = mouse_output.game_move
     timing_recorder.start()
     with timing_recorder.span("log_output"):
         logger.info("=== Complete Controller Server ===")
@@ -2014,6 +2023,7 @@ if __name__ == "__main__":
         with timing_recorder.span("log_output"):
             logger.error(f"Unexpected error: {e}")
     finally:
+        mouse_output.close()
         with timing_recorder.span("shutdown_voice"):
             voice_input_server.stop()
         with timing_recorder.span("shutdown_face"):

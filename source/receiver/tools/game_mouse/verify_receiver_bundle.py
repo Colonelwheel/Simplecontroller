@@ -63,7 +63,7 @@ def verify(delivery):
     pyz = archive.open_embedded_archive(pyz_name)
     modules = {'receiver_diagnostics': wrapper}
     for name in ('face_input_server', 'voice_input_server', 'camera_follow', 'relative_mouse',
-                 'phone_output_protocol', 'simple_controller_receiver', 'receiver_timing'):
+                 'phone_output_protocol', 'simple_controller_receiver', 'receiver_timing', 'mouse_output'):
         assert name in pyz.toc, name
         modules[name] = pyz.extract(name)
     for name, bundled in modules.items():
@@ -73,6 +73,8 @@ def verify(delivery):
         assert any(semantic(bundled) == semantic(code) for code in expected), name
     assert {'SC_RECEIVER_TIMING', 'SC_RECEIVER_TIMING_DIR', 'hang-diagnostics',
             'run_module', 'simple_controller_receiver'} <= symbols(wrapper)
+    assert {'--mouse-output-worker', 'worker'} <= symbols(wrapper)
+    assert {'MouseOutput', 'worker'} <= symbols(modules['mouse_output'])
     assert {'TimingRecorder', 'observe_lock', '_watchdog_main', '_writer_main',
             '_rotate'} <= symbols(modules['receiver_timing'])
     assert {'GAME_DELTA:', 'handle_game_mouse_delta', 'send_relative_mouse',
@@ -93,7 +95,7 @@ def verify(delivery):
 
     value = {
         'executable_sha256': expected_hash,
-        'verified': ['all eight bundled modules match build source semantically',
+        'verified': ['all nine bundled modules match build source semantically',
                      'diagnostic startup wrapper and bounded timing recorder present',
                      'source and DLL input hashes', 'approved instrumented facial/voice and preserved follow companions',
                      'GAME_DELTA routing and release barrier', 'relative SendInput module and complete INPUT union',

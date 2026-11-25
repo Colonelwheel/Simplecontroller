@@ -11,7 +11,7 @@ a = Analysis(
     ],
     datas=[],
     hiddenimports=['simple_controller_receiver', 'receiver_timing', 'phone_output_protocol',
-                   'relative_mouse', 'face_input_server', 'voice_input_server', 'camera_follow'],
+                   'relative_mouse', 'face_input_server', 'voice_input_server', 'camera_follow', 'mouse_output'],
     hookspath=[],
     runtime_hooks=[],
     excludes=[],

@@ -10,6 +10,10 @@ from PyInstaller.archive.readers import CArchiveReader
 
 def verify(delivery):
     report = json.loads((delivery / "build-report.json").read_text(encoding="utf-8-sig"))
+    required = {"receiver_diagnostics", "receiver_timing", "simple_controller_receiver", "mouse_output",
+                "phone_output_protocol", "relative_mouse", "face_input_server", "voice_input_server", "camera_follow"}
+    assert {Path(item["path"]).stem for item in report["inputs"]
+            if Path(item["path"]).suffix == ".py"} == required, "Incomplete receiver source manifest"
     executable = Path(report["executable"]["path"])
     assert hashlib.sha256(executable.read_bytes()).hexdigest().upper() == report["executable"]["sha256"]
     archive = CArchiveReader(str(executable))

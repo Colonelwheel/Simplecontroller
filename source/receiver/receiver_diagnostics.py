@@ -6,6 +6,10 @@ import sys
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "--mouse-output-worker":
+        from mouse_output import worker
+        worker(int(sys.argv[2]))
+        return
     os.environ["SC_RECEIVER_TIMING"] = "1"
     if "SC_RECEIVER_TIMING_DIR" not in os.environ:
         base = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
