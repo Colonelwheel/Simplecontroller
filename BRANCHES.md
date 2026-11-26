@@ -45,7 +45,7 @@ Building or testing Play Release from dev uses dev source. It does not copy code
 
 1. Confirm the intended local branch with `git branch --show-current` and inspect existing changes.
 2. Make development changes on dev in the shared directory structure. Keep local SDK paths, caches, keys, backups, and private instructions untracked.
-3. Run the checks appropriate to the approved change, preserving existing data and using isolated outputs where practical. Device installs and live input checks need their own authorization.
+3. Run the checks appropriate to the approved change, preserving existing data and using the project's established reusable build-output folder. Device installs and live input checks need their own authorization.
 4. Promote selected changes to main deliberately through normal Git commits/integration. Keep unrelated experiments out of the public release.
 5. When an artifact changes, build from the selected source, verify the artifact/source correspondence, and update the intended APK/EXE and its recorded checksum together. Editing source alone does not update an existing binary.
 6. Update branch-specific download links, guides, compatibility notes, and verification evidence, then commit and push the intended branch. Report the branch, commit, source project, and artifact paths.
