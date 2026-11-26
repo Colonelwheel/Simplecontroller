@@ -16,6 +16,6 @@ The supplied root [SimpleController.apk](../../SimpleController.apk) is rebuilt 
 
 The APK uses the Sideload Debug identity `com.example.simplecontroller`, targeting API 34. The separate Play Release package is `io.github.colonelwheel.simplecontroller`, targeting API 36; Play signing/upload remains separate. A developer build uses its own signing setup. Source branch names and build variants are independent.
 
-Do not run Gradle install or connected-device tasks without explicit approval for the device and affected data. Keep local SDK paths, caches, signing keys, private instructions, and device backups out of version control.
+Device and emulator operations follow the [root project boundary](../../AGENTS.md#build-and-verification-boundaries). Keep local SDK paths, caches, signing keys, private instructions, and device backups out of version control.
 
 References: [modifiers and stage tuning](PAYLOAD_MODIFIERS_AND_STAGE_TUNING.md), [Macro Mode/U porting contract](MACRO_MODE_AND_PAYLOAD_PORTING.md), [profile compatibility](PROFILE_TRANSFER_FORMAT.md), [Android distributions](PLAY_RELEASE.md), and [detailed control guide](SIMPLECONTROLLER_USER_GUIDE.md). Module-relative paths in these documents start at `source/android`. Dated delivery notes retain their original historical meanings.
