@@ -34,8 +34,8 @@ The development APK is produced under `app/build/outputs/apk/sideload/debug/`. T
 produced under `app/build/outputs/bundle/playRelease/`.
 
 These commands build local artifacts. They do not publish source to another Git branch, upload
-to Google Play, or install on a device. Gradle install and connected-device tasks require explicit
-approval for the particular device and affected data.
+to Google Play, or install on a device. Device and emulator operations follow the
+[root project boundary](../../AGENTS.md#build-and-verification-boundaries).
 
 ## Signing boundary
 

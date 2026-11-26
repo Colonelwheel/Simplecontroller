@@ -479,7 +479,7 @@ Base **T**: [`source/android/app/src/test/java/com/example/simplecontroller/`](s
 | Wire helpers/scopes/safety | `net/PhoneOutputCoordinatorTest.kt`, `net/UdpHeartbeatTest.kt`, `net/MouseDeltaCommandTest.kt`, `OutputSafetyEpochTest.kt`, `CameraFollowCommandsTest.kt` |
 | Template only | `ExampleUnitTest.kt` is not controller regression coverage. |
 
-Golden [`debug-profile-transfer-v1.json`](source/android/app/src/test/resources/golden/debug-profile-transfer-v1.json) must remain readable by both variants. Instrumentation under `app/src/androidTest` consists of template `ExampleInstrumentedTest.kt` and `ui/ButtonDirectionalGestureInstrumentedTest.kt` (MotionEvent-to-handler/recording transport, not actual game output). **Do not run connected tests or Gradle install tasks without explicit approval for the device and data effects.** JVM tests do not prove physical touch behavior or Android event integration.
+Golden [`debug-profile-transfer-v1.json`](source/android/app/src/test/resources/golden/debug-profile-transfer-v1.json) must remain readable by both variants. Instrumentation under `app/src/androidTest` consists of template `ExampleInstrumentedTest.kt` and `ui/ButtonDirectionalGestureInstrumentedTest.kt` (MotionEvent-to-handler/recording transport, not actual game output). **Follow the [device/emulator boundary in AGENTS.md](AGENTS.md#build-and-verification-boundaries).** JVM tests do not prove physical touch behavior or Android event integration.
 
 ### Receiver and optional-app checks
 
