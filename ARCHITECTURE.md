@@ -1,6 +1,6 @@
 # Architecture and source map
 
-Implementation map for **main**, updated November 22, 2026 for the Macro Mode/U promotion from dev `632447ce0606a21dd63886564fdcecf68de1fd8b`. Android implementation and regression tests match that development snapshot; main retains its public release packaging and smaller receiver/voice tool inventory. See [BRANCHES.md](BRANCHES.md) for provenance and compatibility. This is a navigation aid: verify current implementation before editing and update affected entries when behavior changes. Symbol names are search anchors; line numbers would become stale.
+Implementation map for **main**; see [BRANCHES.md](BRANCHES.md) for branch provenance and compatibility.
 
 ## Start here
 
@@ -452,11 +452,11 @@ Android paths in this table are relative to [`source/android/`](source/android/)
 
 ## Verification map
 
-This map is maintained through source inspection and documentation checks. Fresh Android build/test evidence for this promotion is recorded in [the root README](README.md#5-downloads-and-source); dated earlier release counts remain historical. For actual source changes choose checks covering the changed behavior, preserve existing data, and record what ran. Start with a relevant deterministic JVM suite; broaden when integration or compatibility is affected.
+This map is maintained through source inspection and documentation checks. Android build/test evidence for this promotion is recorded in [the root README](README.md#5-downloads-and-source); dated earlier release counts remain historical. For actual source changes choose checks covering the changed behavior, preserve existing data, and record what ran. Start with a relevant deterministic JVM suite; broaden when integration or compatibility is affected.
 
 ### Android suites
 
-Base **T**: [`source/android/app/src/test/java/com/example/simplecontroller/`](source/android/app/src/test/java/com/example/simplecontroller/). These are **65 Kotlin JVM test files**, not a claim of 65 test cases. Paths below are relative to T.
+Base **T**: [`source/android/app/src/test/java/com/example/simplecontroller/`](source/android/app/src/test/java/com/example/simplecontroller/). These entries identify Kotlin JVM test files; they do not report test counts or results. Paths below are relative to T.
 
 | Area | Existing suites |
 | --- | --- |
