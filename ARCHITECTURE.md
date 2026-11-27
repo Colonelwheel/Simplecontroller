@@ -1,10 +1,10 @@
 # Architecture and source map
 
-Implementation map for **dev**, with USB reconnect and native desktop isolation refreshed November 24, 2026, receiver diagnostics from November 23, 2026 and the Android branch comparison from November 22, 2026 for main's promotion from dev `632447ce0606a21dd63886564fdcecf68de1fd8b`. The original runtime inspection and main-derived shared maps remain applicable: main retains the promoted Macro Mode/U implementation; dev additionally has selected USB/Wi-Fi reconnection, bounded desktop-native output, receiver diagnostic instrumentation, development tools and newer packaged artifacts. See [BRANCHES.md](BRANCHES.md). This is a navigation aid: verify current implementation before editing and update affected entries when behavior changes. Symbol names are search anchors; line numbers would become stale.
+Implementation map for **dev**; see [BRANCHES.md](BRANCHES.md) for branch provenance and compatibility.
 
 ## Start here
 
-**Artifact rollback:** the root receiver download was restored to the previous build at `1483b33` after the isolation build `4f6aa9c` stranded modifiers during a macro. The source map below describes retained development source under investigation, including its nine-module helper design; it is not a claim that the restored eight-module EXE contains that design. The root README links matching restored source. No corrected helper build has been validated.
+**Artifact warning:** the published receiver binary may differ from the source mapped here; see [README downloads and source](README.md#5-downloads-and-source) for matching source and verification limits.
 
 Read this section, the relevant change route, and that subsystem's entries. There is no need to load this entire document for a small change. Read the linked compatibility contract before changing persisted or transmitted data.
 
@@ -36,16 +36,13 @@ Read this section, the relevant change route, and that subsystem's entries. Ther
 
 ### Differences from main
 
-Main's Android promotion uses dev `632447c`. Runtime parity is separate from dev-only tooling and each branch's packaged downloads.
-
 | Difference or shared area | Current relationship / where to read |
 | --- | --- |
 | Android Macro Mode and U | Both branches now have the same implementation, including `ui/ButtonMacroController.kt`, parser/executor, ControlView/helper/editor and raw compatibility gates. Start at [Macro Mode and U](#macro-mode-and-u). |
 | Saved data | Both support conditional controller format 17 and U-aware reusable schemas; transfer/backup envelopes are unchanged. Macro defaults off and survives full-profile copies/transfers. |
-| Android source and tests | Dev contains **78 production Kotlin files / 66 JVM test files**; main retains 77/65. Dev adds `net/ConnectionRestorePolicy.kt` and its test suite, and changes MainActivity/NetworkClient for USB restore; the remaining Android implementation/tests still match the promoted main snapshot. This file inventory is not a test-case count or execution claim. |
-| Receiver/voice development support | Dev includes fifteen receiver suites, three packaging builders, three bundle inspectors, sender mock/interop harnesses and runner. See [development tools](#development-packaging-and-test-tools) and [verification](#verification-map). Main does not add these tools in the Android promotion. |
+| Android source and tests | Dev adds `net/ConnectionRestorePolicy.kt` and its test suite, and changes MainActivity/NetworkClient for USB restore; the remaining Android implementation/tests still match the promoted main snapshot. |
+| Receiver/voice development support | Dev includes receiver suites, packaging builders, bundle inspectors, sender mock/interop harnesses and runner. See [development tools](#development-packaging-and-test-tools) and [verification](#verification-map). Main does not add these tools in the Android promotion. |
 | Receiver implementation | Dev adds timing/lock instrumentation, `receiver_timing.py`, `receiver_diagnostics.py`, and bounded desktop-native isolation in `desktop_output.py`, with failure-aware cleanup acknowledgements. Per-packet DELTA/MOUSE_LEFT debug prints remain removed. Dev's spec packages nine modules as `Simple Controller Receiver.exe`; main retains its previous receiver/EXE/spec. Dependencies/DLLs, facial runtime/build files, production VoiceAttack sender and Android code outside the selected USB/Wi-Fi reconnect changes match main. |
-| Packaged APK | Dev publishes its rebuilt November 24 USB reconnect APK. Main retains its earlier Macro Mode/U APK; their current bytes differ. Each branch README records its own hash and verification. |
 
 For later refreshes, compare **verified** main/dev tips and local changes first, then inspect changed blocks and their callers. Reuse the unchanged component maps; do not infer every old plan or retained test/helper is a new runtime feature.
 
@@ -507,7 +504,7 @@ This map was prepared through source inspection and documentation checks, **not 
 
 ### Android suites
 
-Base **T**: [`source/android/app/src/test/java/com/example/simplecontroller/`](source/android/app/src/test/java/com/example/simplecontroller/). These are **66 Kotlin JVM test files**, not a claim of 65 test cases. Paths below are relative to T.
+Base **T**: [`source/android/app/src/test/java/com/example/simplecontroller/`](source/android/app/src/test/java/com/example/simplecontroller/). These entries identify Kotlin JVM test files; they do not report test counts or results. Paths below are relative to T.
 
 | Area | Existing suites |
 | --- | --- |
@@ -561,7 +558,7 @@ Composition-root tests install fake native modules before importing the otherwis
 
 The runner discovers tests inside the directory selected by `--source`; an explicitly empty/source-only target, including main's current receiver directory, can still report success with zero tests. Confirm actual discovery/count and relevant cases. To test another snapshot, pair its verified modules with compatible tests in an isolated fixture or implement a separate test-directory mechanism deliberately.
 
-The facial app is unchanged from main and its configured original pytest directories remain absent in dev. Optional external facial-client suites are not bundled; do not claim those tests ran. The November 23 receiver promotion passed 294 mocked tests and static bundle verification without launching the receiver; actual camera/device/game behavior remains unverified.
+The facial app is unchanged from main and its configured original pytest directories remain absent in dev. Optional external facial-client suites are not bundled; do not claim those tests ran.
 
 Facial explicit package check is a **synthetic native/model/Qt check**, not a webcam/receiver/game test. Source/frozen model resolution, append-only settings, worker lifecycle and no-output modes need their own focused checks when changed. Voice helper verification must cover matching sender/server schemas, receiver restarts, epoch cleanup, duplicate/uncertain delivery and overlapping owners; native VoiceAttack actions are a separate path.
 
